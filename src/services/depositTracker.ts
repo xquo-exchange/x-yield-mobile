@@ -232,3 +232,155 @@ export async function debugLogAllDeposits(): Promise<void> {
   const deposits = await getAllDeposits();
   console.log('[DepositTracker] DEBUG: All deposits:', JSON.stringify(deposits, null, 2));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST SCENARIOS - Fee Calculation Verification
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * TEST: Simulate fee calculation scenarios
+ * Call this from console to verify math is correct
+ */
+export function runFeeCalculationTests(): void {
+  console.log('');
+  console.log('╔════════════════════════════════════════════════════════════════════════════╗');
+  console.log('║                    FEE CALCULATION TEST SCENARIOS                          ║');
+  console.log('╚════════════════════════════════════════════════════════════════════════════╝');
+  console.log('');
+
+  const FEE_PERCENT = 15;
+
+  // Test 1: $10,000 deposit, 5% yield
+  testScenario({
+    name: 'Test 1: $10,000 deposit with 5% yield',
+    deposited: 10000,
+    currentValue: 10500,
+    feePercent: FEE_PERCENT,
+    expectedYield: 500,
+    expectedFee: 75,
+    expectedReceive: 10425,
+  });
+
+  // Test 2: $1,000 deposit, no yield (break-even)
+  testScenario({
+    name: 'Test 2: $1,000 deposit with no yield',
+    deposited: 1000,
+    currentValue: 1000,
+    feePercent: FEE_PERCENT,
+    expectedYield: 0,
+    expectedFee: 0,
+    expectedReceive: 1000,
+  });
+
+  // Test 3: $1,000 deposit, loss (value dropped)
+  testScenario({
+    name: 'Test 3: $1,000 deposit with loss',
+    deposited: 1000,
+    currentValue: 950,
+    feePercent: FEE_PERCENT,
+    expectedYield: -50,
+    expectedFee: 0, // No fee on loss
+    expectedReceive: 950,
+  });
+
+  // Test 4: Large amount - $1,000,000 with 10% yield
+  testScenario({
+    name: 'Test 4: $1,000,000 deposit with 10% yield',
+    deposited: 1000000,
+    currentValue: 1100000,
+    feePercent: FEE_PERCENT,
+    expectedYield: 100000,
+    expectedFee: 15000,
+    expectedReceive: 1085000,
+  });
+
+  // Test 5: Small amount - $10 with 5% yield
+  testScenario({
+    name: 'Test 5: $10 deposit with 5% yield',
+    deposited: 10,
+    currentValue: 10.50,
+    feePercent: FEE_PERCENT,
+    expectedYield: 0.50,
+    expectedFee: 0.075, // May be below minimum
+    expectedReceive: 10.425,
+  });
+
+  // Test 6: Multiple deposits - $100 + $200 + $300 = $600 deposited
+  testScenario({
+    name: 'Test 6: Multiple deposits ($100+$200+$300) with 5% yield',
+    deposited: 600,
+    currentValue: 630,
+    feePercent: FEE_PERCENT,
+    expectedYield: 30,
+    expectedFee: 4.50,
+    expectedReceive: 625.50,
+  });
+
+  // Test 7: Edge case - very small yield (precision test)
+  testScenario({
+    name: 'Test 7: Precision test - $1000 with $0.01 yield',
+    deposited: 1000,
+    currentValue: 1000.01,
+    feePercent: FEE_PERCENT,
+    expectedYield: 0.01,
+    expectedFee: 0.0015,
+    expectedReceive: 1000.0085,
+  });
+
+  // Test 8: USDC decimals test - raw values
+  console.log('');
+  console.log('╔════════════════════════════════════════════════════════════════════════════╗');
+  console.log('║                    USDC DECIMALS VERIFICATION                              ║');
+  console.log('╚════════════════════════════════════════════════════════════════════════════╝');
+  console.log('');
+
+  const usdcTests = [
+    { usd: 10000, raw: 10000000000n, desc: '$10,000' },
+    { usd: 0.01, raw: 10000n, desc: '$0.01 (1 cent)' },
+    { usd: 0.000001, raw: 1n, desc: '$0.000001 (smallest USDC unit)' },
+    { usd: 1000000, raw: 1000000000000n, desc: '$1,000,000' },
+  ];
+
+  for (const test of usdcTests) {
+    const calculated = BigInt(Math.floor(test.usd * 1_000_000));
+    const match = calculated === test.raw ? '✓' : '✗';
+    console.log(`${match} ${test.desc}: $${test.usd} → ${calculated} (expected: ${test.raw})`);
+  }
+
+  console.log('');
+  console.log('═══════════════════════════════════════════════════════════════════════════════');
+  console.log('');
+}
+
+interface TestScenarioParams {
+  name: string;
+  deposited: number;
+  currentValue: number;
+  feePercent: number;
+  expectedYield: number;
+  expectedFee: number;
+  expectedReceive: number;
+}
+
+function testScenario(params: TestScenarioParams): void {
+  const { name, deposited, currentValue, feePercent, expectedYield, expectedFee, expectedReceive } = params;
+
+  // Calculate actual values
+  const actualYield = calculateYield(currentValue, deposited);
+  const actualFee = calculatePerformanceFee(actualYield, feePercent);
+  const actualReceive = currentValue - actualFee;
+
+  // Check if values match (within floating point tolerance)
+  const yieldMatch = Math.abs(actualYield - expectedYield) < 0.0001;
+  const feeMatch = Math.abs(actualFee - expectedFee) < 0.0001;
+  const receiveMatch = Math.abs(actualReceive - expectedReceive) < 0.0001;
+  const allPass = yieldMatch && feeMatch && receiveMatch;
+
+  console.log(`${allPass ? '✓' : '✗'} ${name}`);
+  console.log(`   Deposited:     $${deposited.toFixed(2)}`);
+  console.log(`   Current Value: $${currentValue.toFixed(2)}`);
+  console.log(`   Yield:         $${actualYield.toFixed(4)} ${yieldMatch ? '✓' : `✗ (expected: $${expectedYield.toFixed(4)})`}`);
+  console.log(`   Fee (${feePercent}%):    $${actualFee.toFixed(4)} ${feeMatch ? '✓' : `✗ (expected: $${expectedFee.toFixed(4)})`}`);
+  console.log(`   User Receives: $${actualReceive.toFixed(4)} ${receiveMatch ? '✓' : `✗ (expected: $${expectedReceive.toFixed(4)})`}`);
+  console.log('');
+}

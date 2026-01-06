@@ -227,11 +227,11 @@ export async function getVaultPositions(userAddress: Address): Promise<Positions
   console.log(`[Positions] Fetching positions for ${userAddress}`);
 
   try {
-    // Get USDC vaults from strategy
+    // Get USDC vaults from strategy (matches strategies.ts allocations)
     const usdcVaults = [
-      MORPHO_VAULTS.GAUNTLET_USDC_CORE,
-      MORPHO_VAULTS.STEAKHOUSE_USDC,
+      MORPHO_VAULTS.STEAKHOUSE_HIGH_YIELD,
       MORPHO_VAULTS.RE7_USDC,
+      MORPHO_VAULTS.STEAKHOUSE_PRIME,
     ];
 
     const positions: VaultPosition[] = [];

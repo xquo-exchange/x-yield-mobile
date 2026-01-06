@@ -307,13 +307,55 @@ export function buildWithdrawBatch(
     }
   }
 
-  // Convert to USD values
+  // Convert to USD values (USDC has 6 decimals)
   const currentValue = Number(totalAssets) / 1_000_000;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FEE CALCULATION - DETAILED LOGGING
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log('');
+  console.log('╔════════════════════════════════════════════════════════════════╗');
+  console.log('║           PERFORMANCE FEE CALCULATION                          ║');
+  console.log('╠════════════════════════════════════════════════════════════════╣');
+  console.log(`║ Total Assets (raw):     ${totalAssets.toString().padStart(20)} (6 decimals)  ║`);
+  console.log(`║ Current Value:          $${currentValue.toFixed(6).padStart(19)}              ║`);
+  console.log(`║ Total Deposited:        $${totalDeposited.toFixed(6).padStart(19)}              ║`);
+  console.log('╠════════════════════════════════════════════════════════════════╣');
+
+  // SAFEGUARD: If totalDeposited is 0 but currentValue > 0, something is wrong
+  // This could happen if AsyncStorage was cleared - we should NOT charge fee on principal
+  if (totalDeposited === 0 && currentValue > 0) {
+    console.log('║ ⚠️  WARNING: No deposit history found!                         ║');
+    console.log('║     Assuming all funds are principal (no yield).              ║');
+    console.log('║     Fee will NOT be charged to protect user.                  ║');
+    console.log('╚════════════════════════════════════════════════════════════════╝');
+    console.log('');
+
+    // Treat entire balance as principal - no fee
+    return {
+      calls,
+      positions: positionsWithBalance,
+      totalDeposited: currentValue.toFixed(2), // Assume deposited = current value
+      currentValue: currentValue.toFixed(2),
+      yieldAmount: '0.00',
+      yieldPercent: '0.0',
+      feeAmount: '0.00',
+      feeAmountRaw: BigInt(0),
+      userReceives: currentValue.toFixed(2),
+      feePercent: XYIELD_FEE_PERCENT,
+      hasProfits: false,
+    };
+  }
 
   // Calculate yield (profit)
   const yieldAmount = currentValue - totalDeposited;
   const hasProfits = yieldAmount > 0;
   const yieldPercent = totalDeposited > 0 ? (yieldAmount / totalDeposited) * 100 : 0;
+
+  console.log(`║ Yield Amount:           $${yieldAmount.toFixed(6).padStart(19)}              ║`);
+  console.log(`║ Yield Percent:          ${yieldPercent.toFixed(4).padStart(20)}%             ║`);
+  console.log(`║ Has Profits:            ${(hasProfits ? 'YES' : 'NO').padStart(20)}              ║`);
+  console.log('╠════════════════════════════════════════════════════════════════╣');
 
   // Calculate performance fee (only on positive yield)
   let feeAmount = 0;
@@ -322,11 +364,22 @@ export function buildWithdrawBatch(
   if (hasProfits) {
     // Fee = yield * XYIELD_FEE_PERCENT / 100
     feeAmount = yieldAmount * (XYIELD_FEE_PERCENT / 100);
-    // Convert to raw USDC (6 decimals)
-    feeAmountRaw = BigInt(Math.round(feeAmount * 1_000_000));
+    // Convert to raw USDC (6 decimals) - use Math.floor to avoid overcharging
+    feeAmountRaw = BigInt(Math.floor(feeAmount * 1_000_000));
+
+    console.log(`║ Fee Rate:               ${XYIELD_FEE_PERCENT.toString().padStart(20)}%             ║`);
+    console.log(`║ Fee Amount:             $${feeAmount.toFixed(6).padStart(19)}              ║`);
+    console.log(`║ Fee Amount (raw):       ${feeAmountRaw.toString().padStart(20)} (6 decimals)  ║`);
+  } else {
+    console.log(`║ Fee Amount:             $${(0).toFixed(6).padStart(19)} (no profits) ║`);
   }
 
   const userReceives = currentValue - feeAmount;
+
+  console.log('╠════════════════════════════════════════════════════════════════╣');
+  console.log(`║ User Receives:          $${userReceives.toFixed(6).padStart(19)}              ║`);
+  console.log('╚════════════════════════════════════════════════════════════════╝');
+  console.log('');
 
   // Add fee transfer call if fee is above minimum threshold
   if (feeAmount >= XYIELD_MIN_FEE_USDC) {
@@ -337,12 +390,11 @@ export function buildWithdrawBatch(
         feeAmountRaw
       )
     );
-    console.log(`[Withdraw] Yield: $${yieldAmount.toFixed(2)} (${yieldPercent.toFixed(1)}% profit)`);
-    console.log(`[Withdraw] Performance fee: $${feeAmount.toFixed(2)} (${XYIELD_FEE_PERCENT}% of yield) to treasury`);
+    console.log(`[Withdraw] Fee transfer added: $${feeAmount.toFixed(2)} to ${XYIELD_TREASURY_ADDRESS}`);
   } else if (hasProfits) {
     console.log(`[Withdraw] Fee skipped: $${feeAmount.toFixed(4)} below minimum $${XYIELD_MIN_FEE_USDC}`);
   } else {
-    console.log(`[Withdraw] No fee: No profits (yield: $${yieldAmount.toFixed(2)})`);
+    console.log(`[Withdraw] No fee: No profits`);
   }
 
   return {

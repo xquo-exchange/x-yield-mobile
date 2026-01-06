@@ -9,19 +9,20 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSmartWallets } from '@privy-io/expo/smart-wallets';
 import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { STRATEGIES, getRiskLevelColor } from '../constants/strategies';
+import { STRATEGIES } from '../constants/strategies';
 import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
+import { useVaultApy } from '../hooks/useVaultApy';
 import {
   buildStrategyBatch,
   executeStrategyBatch,
-  calculateAllocations,
   buildWithdrawBatch,
   executeWithdrawBatch,
 } from '../services/strategyExecution';
@@ -29,8 +30,6 @@ import {
   recordDeposit,
   getTotalDeposited,
   recordWithdrawal,
-  debugSetDeposit,
-  debugLogAllDeposits,
 } from '../services/depositTracker';
 
 type StrategiesScreenProps = {
@@ -49,50 +48,21 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
   const { usdc, refetch: refetchBalances } = useWalletBalance(displayAddress);
   const { positions, totalUsdValue: positionsTotal, isLoading: positionsLoading, error: positionsError, refetch: refetchPositions } = usePositions(displayAddress);
+  const { apy: displayApy, refetch: refetchApy, getVaultApy } = useVaultApy();
   const [refreshing, setRefreshing] = useState(false);
   const [amount, setAmount] = useState('');
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
-  // DEBUG: Triple tap on "Your Positions" to simulate yield
-  const handleDebugSimulateYield = async () => {
-    if (!displayAddress) return;
-
-    // Log current state
-    await debugLogAllDeposits();
-
-    const currentValue = parseFloat(positionsTotal);
-    if (currentValue <= 0) {
-      Alert.alert('Debug', 'No positions to simulate yield on. Deposit first.');
-      return;
-    }
-
-    // Set deposit to 85% of current value (simulating 15% yield)
-    const simulatedDeposit = currentValue * 0.85;
-    const simulatedYield = currentValue - simulatedDeposit;
-    const simulatedFee = simulatedYield * 0.15;
-
-    Alert.alert(
-      'DEBUG: Simulate Yield',
-      `Current value: $${currentValue.toFixed(2)}\n\nSet deposit to: $${simulatedDeposit.toFixed(2)}\nSimulated yield: $${simulatedYield.toFixed(2)} (17.6%)\nExpected fee: $${simulatedFee.toFixed(2)}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Simulate',
-          onPress: async () => {
-            await debugSetDeposit(displayAddress, simulatedDeposit);
-            Alert.alert('Debug', `Deposit set to $${simulatedDeposit.toFixed(2)}.\n\nNow tap Withdraw All to see the fee!`);
-          },
-        },
-      ]
-    );
-  };
+  const hasPositions = positions.some(p => p.shares > BigInt(0));
+  const savingsAmount = parseFloat(positionsTotal) || 0;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refetchBalances(), refetchPositions()]);
+    await Promise.all([refetchBalances(), refetchPositions(), refetchApy()]);
     setRefreshing(false);
-  }, [refetchBalances, refetchPositions]);
+  }, [refetchBalances, refetchPositions, refetchApy]);
 
   const handleAmountChange = (value: string) => {
     const sanitized = value.replace(/[^0-9.]/g, '');
@@ -105,10 +75,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     }
   };
 
-  const allocations = amount && parseFloat(amount) > 0
-    ? calculateAllocations(STRATEGY, amount)
-    : [];
-
   const handleDeposit = async () => {
     if (!amount || parseFloat(amount) <= 0) {
       Alert.alert('Enter Amount', 'Please enter an amount to deposit');
@@ -116,12 +82,12 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     }
 
     if (!smartWalletClient || !displayAddress) {
-      Alert.alert('Wallet Error', 'Smart wallet not available. Please log in first.');
+      Alert.alert('Error', 'Please log in first.');
       return;
     }
 
     if (usdc && parseFloat(amount) > parseFloat(usdc.balance)) {
-      Alert.alert('Insufficient Balance', `You only have ${parseFloat(usdc.balance).toFixed(2)} USDC`);
+      Alert.alert('Insufficient Balance', `You only have $${parseFloat(usdc.balance).toFixed(2)} available`);
       return;
     }
 
@@ -141,32 +107,37 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       await recordDeposit(displayAddress, depositAmount);
 
       setAmount('');
-      // Refetch balances and positions after successful deposit
       refetchBalances();
       refetchPositions();
 
       Alert.alert(
-        'Deposit Confirmed!',
-        `Successfully deposited ${amount} USDC.\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`,
-        [{ text: 'OK' }]
+        'Success!',
+        `$${depositAmount.toFixed(2)} added to your savings.`,
+        [
+          { text: 'OK' },
+          {
+            text: 'View Transaction',
+            onPress: () => Linking.openURL(`https://basescan.org/tx/${txHash}`),
+          },
+        ]
       );
     } catch (error) {
-      Alert.alert('Deposit Failed', (error as Error)?.message || 'An error occurred');
+      Alert.alert('Failed', (error as Error)?.message || 'Please try again');
     } finally {
       setIsDepositing(false);
     }
   };
 
-  const handleWithdrawAll = async () => {
+  const handleWithdraw = async () => {
     const positionsWithBalance = positions.filter(p => p.shares > BigInt(0));
 
     if (positionsWithBalance.length === 0) {
-      Alert.alert('No Positions', 'You have no positions to withdraw.');
+      Alert.alert('No Savings', 'You have no savings to withdraw.');
       return;
     }
 
     if (!smartWalletClient || !displayAddress) {
-      Alert.alert('Wallet Error', 'Smart wallet not available. Please log in first.');
+      Alert.alert('Error', 'Please log in first.');
       return;
     }
 
@@ -180,38 +151,33 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       totalDeposited
     );
 
-    // Build confirmation message with yield breakdown
+    // Build user-friendly confirmation message
     let confirmMessage: string;
     if (batch.hasProfits && parseFloat(batch.feeAmount) >= 0.01) {
-      // Show full yield breakdown when there's profit
       confirmMessage = [
-        `Your deposits: $${batch.totalDeposited}`,
+        `You deposited: $${batch.totalDeposited}`,
         `Current value: $${batch.currentValue}`,
-        `Yield earned: $${batch.yieldAmount} (+${batch.yieldPercent}%)`,
+        `Earnings: +$${batch.yieldAmount} (+${batch.yieldPercent}%)`,
         ``,
-        `Performance fee (${batch.feePercent}% of yield): $${batch.feeAmount}`,
+        `Fee (${batch.feePercent}% of earnings): $${batch.feeAmount}`,
         ``,
-        `You receive: $${batch.userReceives}`,
+        `You'll receive: $${batch.userReceives}`,
       ].join('\n');
     } else if (!batch.hasProfits && parseFloat(batch.yieldAmount) < 0) {
-      // User is at a loss
       confirmMessage = [
-        `Your deposits: $${batch.totalDeposited}`,
+        `You deposited: $${batch.totalDeposited}`,
         `Current value: $${batch.currentValue}`,
-        `Loss: $${batch.yieldAmount}`,
         ``,
-        `No fee (no profits)`,
+        `No fee applies.`,
         ``,
-        `You receive: $${batch.userReceives}`,
+        `You'll receive: $${batch.userReceives}`,
       ].join('\n');
     } else {
-      // No profit, no loss, or first-time user
-      confirmMessage = `Withdraw $${batch.currentValue} from ${positionsWithBalance.length} vault(s)?\n\nNo performance fee applies.`;
+      confirmMessage = `Withdraw $${batch.currentValue}?\n\nNo fee applies.`;
     }
 
-    // Confirm withdrawal with yield breakdown
     Alert.alert(
-      'Withdraw All',
+      'Withdraw Savings',
       confirmMessage,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -224,32 +190,32 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             try {
               const txHash = await executeWithdrawBatch(smartWalletClient, batch);
 
-              // Record withdrawal to update deposit tracking
               const currentValue = parseFloat(batch.currentValue);
               await recordWithdrawal(displayAddress, currentValue, currentValue);
 
-              // Refresh balances and positions
               refetchBalances();
               refetchPositions();
 
-              // Show success with yield info
               let successMessage: string;
               if (batch.hasProfits && parseFloat(batch.feeAmount) >= 0.01) {
                 successMessage = [
-                  `Withdrew $${batch.currentValue} USDC`,
-                  `Yield: $${batch.yieldAmount} (+${batch.yieldPercent}%)`,
-                  `Fee: $${batch.feeAmount}`,
+                  `Withdrew $${batch.currentValue}`,
+                  `You earned: +$${batch.yieldAmount}`,
                   `You received: $${batch.userReceives}`,
-                  ``,
-                  `Tx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`,
                 ].join('\n');
               } else {
-                successMessage = `Successfully withdrew $${batch.currentValue} USDC.\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`;
+                successMessage = `Withdrew $${batch.currentValue}`;
               }
 
-              Alert.alert('Withdrawal Complete!', successMessage, [{ text: 'OK' }]);
+              Alert.alert('Success!', successMessage, [
+                { text: 'OK' },
+                {
+                  text: 'View Transaction',
+                  onPress: () => Linking.openURL(`https://basescan.org/tx/${txHash}`),
+                },
+              ]);
             } catch (error) {
-              Alert.alert('Withdrawal Failed', (error as Error)?.message || 'An error occurred');
+              Alert.alert('Failed', (error as Error)?.message || 'Please try again');
             } finally {
               setIsWithdrawing(false);
             }
@@ -258,8 +224,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       ]
     );
   };
-
-  const riskColor = getRiskLevelColor(STRATEGY.riskLevel);
 
   return (
     <View style={styles.container}>
@@ -277,111 +241,123 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Text style={styles.backButtonText}>{'<'}</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Earn Yield</Text>
+          <Text style={styles.headerTitle}>Savings</Text>
           <View style={styles.headerSpacer} />
         </View>
 
-        {/* Your Positions */}
-        <View style={styles.positionsSection}>
-          <View style={styles.positionsHeader}>
-            <TouchableOpacity onLongPress={handleDebugSimulateYield}>
-              <Text style={styles.sectionTitle}>Your Positions</Text>
-            </TouchableOpacity>
-            {parseFloat(positionsTotal) > 0 && (
-              <Text style={styles.positionsTotal}>${positionsTotal}</Text>
-            )}
-          </View>
-
+        {/* Your Savings - Simplified */}
+        <View style={styles.savingsSection}>
           {positionsLoading ? (
-            <View style={styles.positionsLoading}>
+            <View style={styles.savingsLoading}>
               <ActivityIndicator size="small" color="#22c55e" />
-              <Text style={styles.positionsLoadingText}>Loading positions...</Text>
+              <Text style={styles.savingsLoadingText}>Loading...</Text>
             </View>
           ) : positionsError ? (
-            <View style={styles.positionsError}>
-              <Text style={styles.positionsErrorText}>Failed to load positions</Text>
+            <View style={styles.savingsError}>
+              <Text style={styles.savingsErrorText}>Unable to load savings</Text>
               <TouchableOpacity onPress={refetchPositions} style={styles.retryButton}>
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
-          ) : positions.length === 0 ? (
-            <View style={styles.noPositions}>
-              <Text style={styles.noPositionsText}>No positions yet</Text>
-              <Text style={styles.noPositionsSubtext}>Deposit USDC below to start earning yield</Text>
+          ) : !hasPositions ? (
+            <View style={styles.noSavings}>
+              <Text style={styles.noSavingsTitle}>Start Earning</Text>
+              <Text style={styles.noSavingsSubtext}>
+                Add money below to earn ~{displayApy}% APY
+              </Text>
             </View>
           ) : (
-            <View style={styles.positionsList}>
-              {positions.map((position, index) => (
-                <View key={position.vaultId} style={[
-                  styles.positionRow,
-                  index < positions.length - 1 && styles.positionRowBorder
-                ]}>
-                  <View style={styles.positionInfo}>
-                    <Text style={styles.positionVaultName}>{position.vaultName}</Text>
-                    <Text style={styles.positionShares}>
-                      {parseFloat(position.sharesFormatted).toFixed(6)} shares
-                    </Text>
-                  </View>
-                  <View style={styles.positionValue}>
-                    <Text style={styles.positionAmount}>
-                      {parseFloat(position.assetsFormatted).toFixed(2)} USDC
-                    </Text>
-                    <Text style={styles.positionUsd}>${position.usdValue}</Text>
-                  </View>
-                </View>
-              ))}
+            <View style={styles.savingsContent}>
+              {/* Main Savings Display */}
+              <View style={styles.savingsMain}>
+                <Text style={styles.savingsLabel}>Your Savings</Text>
+                <Text style={styles.savingsAmount}>${savingsAmount.toFixed(2)}</Text>
+                <Text style={styles.savingsApy}>Earning ~{displayApy}% APY</Text>
+              </View>
 
-              {/* Withdraw All Button */}
-              {positions.some(p => p.shares > BigInt(0)) && (
-                <TouchableOpacity
-                  style={[styles.withdrawButton, isWithdrawing && styles.withdrawButtonDisabled]}
-                  onPress={handleWithdrawAll}
-                  disabled={isWithdrawing}
-                >
-                  {isWithdrawing ? (
-                    <ActivityIndicator color="#ef4444" size="small" />
-                  ) : (
-                    <Text style={styles.withdrawButtonText}>Withdraw All</Text>
-                  )}
-                </TouchableOpacity>
+              {/* Diversification Note */}
+              <TouchableOpacity
+                style={styles.detailsToggle}
+                onPress={() => setShowDetails(!showDetails)}
+              >
+                <Text style={styles.diversifiedText}>
+                  Diversified across 3 lending markets
+                </Text>
+                <Text style={styles.detailsArrow}>{showDetails ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+
+              {/* Expandable Details */}
+              {showDetails && (
+                <View style={styles.detailsSection}>
+                  {positions.map((position, index) => {
+                    const vaultApy = getVaultApy(position.vaultAddress);
+                    return (
+                      <View key={position.vaultId} style={[
+                        styles.detailRow,
+                        index < positions.length - 1 && styles.detailRowBorder
+                      ]}>
+                        <View style={styles.detailLeft}>
+                          <Text style={styles.detailName}>{position.vaultName}</Text>
+                          {vaultApy && (
+                            <Text style={styles.detailApy}>{vaultApy}% APY</Text>
+                          )}
+                        </View>
+                        <Text style={styles.detailValue}>
+                          ${parseFloat(position.usdValue).toFixed(2)}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
               )}
+
+              {/* Withdraw Button */}
+              <TouchableOpacity
+                style={[styles.withdrawButton, isWithdrawing && styles.withdrawButtonDisabled]}
+                onPress={handleWithdraw}
+                disabled={isWithdrawing}
+              >
+                {isWithdrawing ? (
+                  <ActivityIndicator color="#ef4444" size="small" />
+                ) : (
+                  <Text style={styles.withdrawButtonText}>Withdraw</Text>
+                )}
+              </TouchableOpacity>
             </View>
           )}
         </View>
 
-        {/* Balance Card */}
+        {/* Available Balance */}
         <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Available to Deposit</Text>
+          <Text style={styles.balanceLabel}>Available</Text>
           <Text style={styles.balanceValue}>
-            {usdc ? parseFloat(usdc.balance).toFixed(2) : '0.00'} USDC
+            ${usdc ? parseFloat(usdc.balance).toFixed(2) : '0.00'}
           </Text>
         </View>
 
-        {/* Strategy Info */}
-        <View style={styles.strategyCard}>
-          <View style={styles.strategyHeader}>
-            <View style={styles.strategyIcon}>
-              <Text style={styles.strategyIconText}>$</Text>
+        {/* Savings Info Card - Simplified */}
+        <View style={styles.infoCard}>
+          <View style={styles.infoHeader}>
+            <View style={styles.infoIcon}>
+              <Text style={styles.infoIconText}>$</Text>
             </View>
-            <View style={styles.strategyInfo}>
-              <Text style={styles.strategyName}>{STRATEGY.name}</Text>
-              <View style={[styles.riskBadge, { backgroundColor: `${riskColor}20` }]}>
-                <View style={[styles.riskDot, { backgroundColor: riskColor }]} />
-                <Text style={[styles.riskText, { color: riskColor }]}>Low Risk</Text>
-              </View>
-            </View>
-            <View style={styles.apyContainer}>
-              <Text style={styles.apyValue}>{STRATEGY.expectedApy.toFixed(1)}%</Text>
-              <Text style={styles.apyLabel}>APY</Text>
+            <View style={styles.infoContent}>
+              <Text style={styles.infoTitle}>High-Yield Savings</Text>
+              <Text style={styles.infoApy}>~{displayApy}% APY</Text>
             </View>
           </View>
-          <Text style={styles.strategyDescription}>{STRATEGY.description}</Text>
+          <Text style={styles.infoDescription}>
+            Your money earns yield automatically. Withdraw anytime, no fees on your deposits.
+          </Text>
         </View>
 
         {/* Amount Input */}
         <View style={styles.inputSection}>
-          <Text style={styles.inputLabel}>Deposit Amount</Text>
+          <Text style={styles.inputLabel}>Amount to add</Text>
           <View style={styles.inputRow}>
+            <View style={styles.currencyPrefix}>
+              <Text style={styles.currencyText}>$</Text>
+            </View>
             <TextInput
               style={styles.input}
               value={amount}
@@ -396,21 +372,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           </View>
         </View>
 
-        {/* Allocation Preview */}
-        {allocations.length > 0 && (
-          <View style={styles.previewCard}>
-            <Text style={styles.previewTitle}>Your deposit will be split into:</Text>
-            {allocations.map((alloc, index) => (
-              <View key={index} style={styles.previewRow}>
-                <Text style={styles.previewVaultName}>{alloc.vault.name}</Text>
-                <Text style={styles.previewAmount}>
-                  {parseFloat(alloc.amount).toFixed(2)} USDC ({alloc.percentage}%)
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
         {/* Deposit Button */}
         <TouchableOpacity
           style={[
@@ -424,20 +385,24 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             <ActivityIndicator color="#ffffff" />
           ) : (
             <Text style={styles.depositButtonText}>
-              Deposit {amount || '0'} USDC
+              {amount && parseFloat(amount) > 0 ? `Add $${parseFloat(amount).toFixed(2)}` : 'Add Money'}
             </Text>
           )}
         </TouchableOpacity>
 
         {/* Info Footer */}
-        <View style={styles.infoSection}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoIcon}>*</Text>
-            <Text style={styles.infoText}>Gas fees are sponsored - free for you</Text>
+        <View style={styles.footerSection}>
+          <View style={styles.footerRow}>
+            <Text style={styles.footerIcon}>✓</Text>
+            <Text style={styles.footerText}>No transaction fees</Text>
           </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoIcon}>*</Text>
-            <Text style={styles.infoText}>Withdraw anytime, no lock-up period</Text>
+          <View style={styles.footerRow}>
+            <Text style={styles.footerIcon}>✓</Text>
+            <Text style={styles.footerText}>Withdraw anytime</Text>
+          </View>
+          <View style={styles.footerRow}>
+            <Text style={styles.footerIcon}>✓</Text>
+            <Text style={styles.footerText}>15% fee on earnings only</Text>
           </View>
         </View>
       </ScrollView>
@@ -485,54 +450,38 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
   },
-  // Positions Section
-  positionsSection: {
+  // Savings Section
+  savingsSection: {
     backgroundColor: '#141419',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
+    borderRadius: 20,
+    padding: 24,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: '#27272a',
   },
-  positionsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  positionsTotal: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#22c55e',
-  },
-  positionsLoading: {
+  savingsLoading: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
+    paddingVertical: 20,
   },
-  positionsLoadingText: {
+  savingsLoadingText: {
     marginLeft: 8,
     color: '#71717a',
     fontSize: 14,
   },
-  positionsError: {
+  savingsError: {
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 20,
   },
-  positionsErrorText: {
+  savingsErrorText: {
     color: '#ef4444',
     fontSize: 14,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   retryButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     backgroundColor: '#27272a',
     borderRadius: 8,
   },
@@ -541,98 +490,131 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  noPositions: {
+  noSavings: {
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 24,
   },
-  noPositionsText: {
+  noSavingsTitle: {
     color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  noSavingsSubtext: {
+    color: '#71717a',
     fontSize: 14,
-    fontWeight: '500',
+  },
+  savingsContent: {},
+  savingsMain: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  savingsLabel: {
+    fontSize: 14,
+    color: '#71717a',
+    marginBottom: 8,
+  },
+  savingsAmount: {
+    fontSize: 42,
+    fontWeight: '700',
+    color: '#ffffff',
     marginBottom: 4,
   },
-  noPositionsSubtext: {
-    color: '#71717a',
+  savingsApy: {
+    fontSize: 16,
+    color: '#22c55e',
+    fontWeight: '500',
+  },
+  detailsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+  },
+  diversifiedText: {
     fontSize: 13,
+    color: '#71717a',
+    marginRight: 6,
   },
-  positionsList: {
-    marginTop: 4,
+  detailsArrow: {
+    fontSize: 10,
+    color: '#71717a',
   },
-  positionRow: {
+  detailsSection: {
+    backgroundColor: '#1a1a1f',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
-  positionRowBorder: {
+  detailRowBorder: {
     borderBottomWidth: 1,
     borderBottomColor: '#27272a',
   },
-  positionInfo: {
+  detailLeft: {
     flex: 1,
   },
-  positionVaultName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#ffffff',
-    marginBottom: 2,
+  detailName: {
+    fontSize: 13,
+    color: '#a1a1aa',
   },
-  positionShares: {
-    fontSize: 12,
-    color: '#71717a',
-  },
-  positionValue: {
-    alignItems: 'flex-end',
-  },
-  positionAmount: {
-    fontSize: 14,
-    fontWeight: '600',
+  detailApy: {
+    fontSize: 11,
     color: '#22c55e',
-    marginBottom: 2,
+    marginTop: 2,
   },
-  positionUsd: {
-    fontSize: 12,
-    color: '#71717a',
+  detailValue: {
+    fontSize: 13,
+    color: '#ffffff',
+    fontWeight: '500',
   },
   withdrawButton: {
     marginTop: 16,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#ef4444',
+    borderColor: '#52525b',
     borderRadius: 12,
     padding: 14,
     alignItems: 'center',
   },
   withdrawButtonDisabled: {
-    borderColor: '#52525b',
+    borderColor: '#3f3f46',
   },
   withdrawButtonText: {
-    color: '#ef4444',
-    fontSize: 14,
+    color: '#ffffff',
+    fontSize: 15,
     fontWeight: '600',
   },
   // Balance Card
   balanceCard: {
     backgroundColor: '#141419',
     borderRadius: 16,
-    padding: 24,
+    padding: 20,
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: '#27272a',
   },
   balanceLabel: {
     fontSize: 14,
     color: '#71717a',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   balanceValue: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
     color: '#ffffff',
   },
-  // Strategy Card
-  strategyCard: {
+  // Info Card
+  infoCard: {
     backgroundColor: '#1a2e1a',
     borderRadius: 16,
     padding: 20,
@@ -640,65 +622,40 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#22c55e30',
   },
-  strategyHeader: {
+  infoHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
   },
-  strategyIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  infoIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#22c55e20',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
-  strategyIconText: {
-    fontSize: 22,
+  infoIconText: {
+    fontSize: 20,
     fontWeight: '700',
     color: '#22c55e',
   },
-  strategyInfo: {
+  infoContent: {
     flex: 1,
   },
-  strategyName: {
-    fontSize: 18,
+  infoTitle: {
+    fontSize: 17,
     fontWeight: '600',
     color: '#ffffff',
-    marginBottom: 4,
+    marginBottom: 2,
   },
-  riskBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  riskDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 6,
-  },
-  riskText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  apyContainer: {
-    alignItems: 'flex-end',
-  },
-  apyValue: {
-    fontSize: 28,
-    fontWeight: '700',
+  infoApy: {
+    fontSize: 15,
     color: '#22c55e',
+    fontWeight: '600',
   },
-  apyLabel: {
-    fontSize: 12,
-    color: '#71717a',
-  },
-  strategyDescription: {
+  infoDescription: {
     fontSize: 14,
     color: '#a1a1aa',
     lineHeight: 20,
@@ -716,16 +673,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  currencyPrefix: {
+    backgroundColor: '#141419',
+    borderRadius: 12,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRightWidth: 0,
+  },
+  currencyText: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#71717a',
+  },
   input: {
     flex: 1,
     backgroundColor: '#141419',
     borderRadius: 12,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
     padding: 18,
+    paddingLeft: 4,
     fontSize: 24,
     fontWeight: '600',
     color: '#ffffff',
     borderWidth: 1,
     borderColor: '#27272a',
+    borderLeftWidth: 0,
   },
   maxButton: {
     backgroundColor: '#22c55e',
@@ -738,35 +714,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 14,
-  },
-  // Preview Card
-  previewCard: {
-    backgroundColor: '#141419',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  previewTitle: {
-    fontSize: 13,
-    color: '#71717a',
-    marginBottom: 12,
-  },
-  previewRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  previewVaultName: {
-    fontSize: 14,
-    color: '#ffffff',
-  },
-  previewAmount: {
-    fontSize: 14,
-    color: '#22c55e',
-    fontWeight: '500',
   },
   // Deposit Button
   depositButton: {
@@ -784,26 +731,25 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#ffffff',
   },
-  // Info Section
-  infoSection: {
+  // Footer Section
+  footerSection: {
     backgroundColor: '#141419',
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
     borderColor: '#27272a',
   },
-  infoRow: {
+  footerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 10,
   },
-  infoIcon: {
-    fontSize: 12,
+  footerIcon: {
+    fontSize: 14,
     color: '#22c55e',
     marginRight: 10,
-    marginTop: 2,
   },
-  infoText: {
+  footerText: {
     fontSize: 13,
     color: '#71717a',
     flex: 1,
