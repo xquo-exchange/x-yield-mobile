@@ -257,13 +257,13 @@ export async function getVaultPositions(userAddress: Address): Promise<Positions
         sharesFormatted,
         assets,
         assetsFormatted,
-        usdValue: usdValue.toFixed(2),
+        usdValue: usdValue.toFixed(6), // Full USDC precision for yield calculations
       });
 
       totalUsd += usdValue;
 
       if (shares > BigInt(0)) {
-        console.log(`[Positions] ${vault.name}: ${assetsFormatted} USDC`);
+        console.log(`[Positions] ${vault.name}: ${usdValue.toFixed(2)} USDC`);
       } else {
         console.log(`[Positions] ${vault.name}: 0 USDC (no position)`);
       }
@@ -273,7 +273,7 @@ export async function getVaultPositions(userAddress: Address): Promise<Positions
 
     return {
       positions,
-      totalUsdValue: totalUsd.toFixed(2),
+      totalUsdValue: totalUsd.toFixed(6), // Full precision for yield calculations
       isLoading: false,
       error: null,
     };

@@ -242,7 +242,7 @@ APY is fetched live from Morpho API (typically 4-7% depending on market conditio
 - [x] Withdraw all positions
 - [x] Performance fee on yield (15%)
 - [x] Deposit history tracking (AsyncStorage)
-- [x] Yield calculation and display
+- [x] Yield calculation with full USDC precision (6 decimals)
 - [x] Fee-free withdrawal when no profits
 - [x] ETH/USDC wallet balance display
 - [x] Pull-to-refresh for balances

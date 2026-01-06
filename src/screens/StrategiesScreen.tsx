@@ -153,7 +153,8 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
     // Build user-friendly confirmation message
     let confirmMessage: string;
-    if (batch.hasProfits && parseFloat(batch.feeAmount) >= 0.01) {
+    if (batch.hasProfits) {
+      // Show fee breakdown when there's profit (even tiny amounts)
       confirmMessage = [
         `You deposited: $${batch.totalDeposited}`,
         `Current value: $${batch.currentValue}`,
@@ -163,16 +164,18 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         ``,
         `You'll receive: $${batch.userReceives}`,
       ].join('\n');
-    } else if (!batch.hasProfits && parseFloat(batch.yieldAmount) < 0) {
+    } else if (parseFloat(batch.yieldAmount) < 0) {
+      // Loss scenario
       confirmMessage = [
         `You deposited: $${batch.totalDeposited}`,
         `Current value: $${batch.currentValue}`,
         ``,
-        `No fee applies.`,
+        `No fee applies (no profit).`,
         ``,
         `You'll receive: $${batch.userReceives}`,
       ].join('\n');
     } else {
+      // Break-even scenario
       confirmMessage = `Withdraw $${batch.currentValue}?\n\nNo fee applies.`;
     }
 
@@ -197,10 +200,11 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
               refetchPositions();
 
               let successMessage: string;
-              if (batch.hasProfits && parseFloat(batch.feeAmount) >= 0.01) {
+              if (batch.hasProfits) {
                 successMessage = [
                   `Withdrew $${batch.currentValue}`,
                   `You earned: +$${batch.yieldAmount}`,
+                  `Fee paid: $${batch.feeAmount}`,
                   `You received: $${batch.userReceives}`,
                 ].join('\n');
               } else {

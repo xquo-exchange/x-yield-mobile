@@ -359,18 +359,27 @@ export function buildWithdrawBatch(
     console.log(`[Withdraw] No fee: No profits`);
   }
 
+  // Format values with appropriate precision
+  // Use 4 decimals for small values, 2 for larger ones
+  const formatValue = (val: number): string => {
+    if (Math.abs(val) < 0.01 && val !== 0) {
+      return val.toFixed(4); // Show more precision for tiny values
+    }
+    return val.toFixed(2);
+  };
+
   return {
     calls,
     positions: positionsWithBalance,
     // Value breakdown
-    totalDeposited: totalDeposited.toFixed(2),
-    currentValue: currentValue.toFixed(2),
-    yieldAmount: yieldAmount.toFixed(2),
+    totalDeposited: formatValue(totalDeposited),
+    currentValue: formatValue(currentValue),
+    yieldAmount: formatValue(yieldAmount),
     yieldPercent: yieldPercent.toFixed(1),
     // Fee breakdown
-    feeAmount: feeAmount.toFixed(2),
+    feeAmount: formatValue(feeAmount),
     feeAmountRaw: feeAmount >= XYIELD_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
-    userReceives: userReceives.toFixed(2),
+    userReceives: formatValue(userReceives),
     feePercent: XYIELD_FEE_PERCENT,
     hasProfits,
   };
