@@ -29,6 +29,8 @@ import {
   recordDeposit,
   getTotalDeposited,
   recordWithdrawal,
+  debugSetDeposit,
+  debugLogAllDeposits,
 } from '../services/depositTracker';
 
 type StrategiesScreenProps = {
@@ -51,6 +53,40 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [amount, setAmount] = useState('');
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
+
+  // DEBUG: Triple tap on "Your Positions" to simulate yield
+  const handleDebugSimulateYield = async () => {
+    if (!displayAddress) return;
+
+    // Log current state
+    await debugLogAllDeposits();
+
+    const currentValue = parseFloat(positionsTotal);
+    if (currentValue <= 0) {
+      Alert.alert('Debug', 'No positions to simulate yield on. Deposit first.');
+      return;
+    }
+
+    // Set deposit to 85% of current value (simulating 15% yield)
+    const simulatedDeposit = currentValue * 0.85;
+    const simulatedYield = currentValue - simulatedDeposit;
+    const simulatedFee = simulatedYield * 0.15;
+
+    Alert.alert(
+      'DEBUG: Simulate Yield',
+      `Current value: $${currentValue.toFixed(2)}\n\nSet deposit to: $${simulatedDeposit.toFixed(2)}\nSimulated yield: $${simulatedYield.toFixed(2)} (17.6%)\nExpected fee: $${simulatedFee.toFixed(2)}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Simulate',
+          onPress: async () => {
+            await debugSetDeposit(displayAddress, simulatedDeposit);
+            Alert.alert('Debug', `Deposit set to $${simulatedDeposit.toFixed(2)}.\n\nNow tap Withdraw All to see the fee!`);
+          },
+        },
+      ]
+    );
+  };
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -248,7 +284,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         {/* Your Positions */}
         <View style={styles.positionsSection}>
           <View style={styles.positionsHeader}>
-            <Text style={styles.sectionTitle}>Your Positions</Text>
+            <TouchableOpacity onLongPress={handleDebugSimulateYield}>
+              <Text style={styles.sectionTitle}>Your Positions</Text>
+            </TouchableOpacity>
             {parseFloat(positionsTotal) > 0 && (
               <Text style={styles.positionsTotal}>${positionsTotal}</Text>
             )}

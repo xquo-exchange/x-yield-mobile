@@ -201,3 +201,34 @@ export async function clearAllDeposits(): Promise<void> {
   await AsyncStorage.removeItem(STORAGE_KEY);
   console.log('[DepositTracker] Cleared all deposit data');
 }
+
+/**
+ * DEBUG: Set deposit amount manually (for testing fee calculation)
+ * This allows simulating yield by setting a lower deposit than current value
+ *
+ * Example: If current value is $2.00 and you set deposit to $1.50,
+ * yield will be $0.50 and fee will be 15% of $0.50 = $0.075
+ */
+export async function debugSetDeposit(
+  walletAddress: string,
+  amount: number
+): Promise<void> {
+  const deposits = await getAllDeposits();
+  const address = walletAddress.toLowerCase();
+
+  deposits[address] = {
+    totalDeposited: amount,
+    lastUpdated: Date.now(),
+  };
+
+  await saveDeposits(deposits);
+  console.log(`[DepositTracker] DEBUG: Set deposit to $${amount.toFixed(2)} for ${address.slice(0, 10)}...`);
+}
+
+/**
+ * DEBUG: Log all deposit data
+ */
+export async function debugLogAllDeposits(): Promise<void> {
+  const deposits = await getAllDeposits();
+  console.log('[DepositTracker] DEBUG: All deposits:', JSON.stringify(deposits, null, 2));
+}
