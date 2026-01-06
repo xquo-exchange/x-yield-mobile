@@ -43,11 +43,17 @@ export interface StrategyBatch {
 export interface WithdrawBatch {
   calls: TransactionCall[];
   positions: VaultPosition[];
-  totalUsdValue: string;
+  // Value breakdown
+  totalDeposited: string;
+  currentValue: string;
+  yieldAmount: string;
+  yieldPercent: string;
+  // Fee breakdown (15% of yield only)
   feeAmount: string;
   feeAmountRaw: bigint;
   userReceives: string;
   feePercent: number;
+  hasProfits: boolean;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -268,11 +274,18 @@ function buildTransferCall(
 
 /**
  * Build a batch of withdraw transactions for all positions
- * Includes X-Yield fee transfer as final call in the batch
+ * Includes X-Yield performance fee transfer (15% of YIELD only, not principal)
+ *
+ * Performance fee model:
+ * - Fee is calculated on PROFIT only, not total withdrawal
+ * - If user deposited $100 and it grew to $105, yield = $5
+ * - Fee = 15% of $5 = $0.75 (not 15% of $105)
+ * - If no profit (loss or break-even), no fee is charged
  */
 export function buildWithdrawBatch(
   positions: VaultPosition[],
-  walletAddress: Address
+  walletAddress: Address,
+  totalDeposited: number // Original deposit amount from deposit tracker
 ): WithdrawBatch {
   const calls: TransactionCall[] = [];
   const positionsWithBalance: VaultPosition[] = [];
@@ -294,12 +307,26 @@ export function buildWithdrawBatch(
     }
   }
 
-  // Calculate fee (USDC has 6 decimals)
-  // Fee = totalAssets * XYIELD_FEE_PERCENT / 100
-  const feeAmountRaw = (totalAssets * BigInt(Math.round(XYIELD_FEE_PERCENT * 100))) / BigInt(10000);
-  const feeAmount = Number(feeAmountRaw) / 1_000_000; // Convert to USDC (6 decimals)
-  const totalUsd = Number(totalAssets) / 1_000_000;
-  const userReceives = totalUsd - feeAmount;
+  // Convert to USD values
+  const currentValue = Number(totalAssets) / 1_000_000;
+
+  // Calculate yield (profit)
+  const yieldAmount = currentValue - totalDeposited;
+  const hasProfits = yieldAmount > 0;
+  const yieldPercent = totalDeposited > 0 ? (yieldAmount / totalDeposited) * 100 : 0;
+
+  // Calculate performance fee (only on positive yield)
+  let feeAmount = 0;
+  let feeAmountRaw = BigInt(0);
+
+  if (hasProfits) {
+    // Fee = yield * XYIELD_FEE_PERCENT / 100
+    feeAmount = yieldAmount * (XYIELD_FEE_PERCENT / 100);
+    // Convert to raw USDC (6 decimals)
+    feeAmountRaw = BigInt(Math.round(feeAmount * 1_000_000));
+  }
+
+  const userReceives = currentValue - feeAmount;
 
   // Add fee transfer call if fee is above minimum threshold
   if (feeAmount >= XYIELD_MIN_FEE_USDC) {
@@ -310,19 +337,28 @@ export function buildWithdrawBatch(
         feeAmountRaw
       )
     );
-    console.log(`[Withdraw] Fee: ${feeAmount.toFixed(6)} USDC (${XYIELD_FEE_PERCENT}%) to treasury`);
+    console.log(`[Withdraw] Yield: $${yieldAmount.toFixed(2)} (${yieldPercent.toFixed(1)}% profit)`);
+    console.log(`[Withdraw] Performance fee: $${feeAmount.toFixed(2)} (${XYIELD_FEE_PERCENT}% of yield) to treasury`);
+  } else if (hasProfits) {
+    console.log(`[Withdraw] Fee skipped: $${feeAmount.toFixed(4)} below minimum $${XYIELD_MIN_FEE_USDC}`);
   } else {
-    console.log(`[Withdraw] Fee skipped: ${feeAmount.toFixed(6)} USDC below minimum ${XYIELD_MIN_FEE_USDC} USDC`);
+    console.log(`[Withdraw] No fee: No profits (yield: $${yieldAmount.toFixed(2)})`);
   }
 
   return {
     calls,
     positions: positionsWithBalance,
-    totalUsdValue: totalUsd.toFixed(2),
+    // Value breakdown
+    totalDeposited: totalDeposited.toFixed(2),
+    currentValue: currentValue.toFixed(2),
+    yieldAmount: yieldAmount.toFixed(2),
+    yieldPercent: yieldPercent.toFixed(1),
+    // Fee breakdown
     feeAmount: feeAmount.toFixed(2),
     feeAmountRaw: feeAmount >= XYIELD_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
     userReceives: userReceives.toFixed(2),
     feePercent: XYIELD_FEE_PERCENT,
+    hasProfits,
   };
 }
 
@@ -345,18 +381,24 @@ export async function executeWithdrawBatch(
   const walletAddress = client.account.address;
   console.log(`[Withdraw] Smart wallet: ${walletAddress}`);
   console.log(`[Withdraw] Positions to withdraw: ${batch.positions.length}`);
-  console.log(`[Withdraw] Total value: $${batch.totalUsdValue}`);
 
   // Log each position being withdrawn
   for (const pos of batch.positions) {
     console.log(`[Withdraw] - ${pos.vaultName}: ${pos.assetsFormatted} USDC`);
   }
 
+  // Log yield breakdown
+  console.log(`[Withdraw] Your deposits: $${batch.totalDeposited}`);
+  console.log(`[Withdraw] Current value: $${batch.currentValue}`);
+  console.log(`[Withdraw] Yield earned: $${batch.yieldAmount} (${batch.yieldPercent}%)`);
+
   // Log fee breakdown
-  if (parseFloat(batch.feeAmount) > 0) {
-    console.log(`[Withdraw] X-Yield fee (${batch.feePercent}%): $${batch.feeAmount}`);
-    console.log(`[Withdraw] User receives: $${batch.userReceives}`);
+  if (batch.hasProfits && parseFloat(batch.feeAmount) >= XYIELD_MIN_FEE_USDC) {
+    console.log(`[Withdraw] Performance fee (${batch.feePercent}% of yield): $${batch.feeAmount}`);
+  } else if (!batch.hasProfits) {
+    console.log(`[Withdraw] No fee (no profits)`);
   }
+  console.log(`[Withdraw] You receive: $${batch.userReceives}`);
 
   console.log(`[Withdraw] Sending ${batch.calls.length} calls (${batch.positions.length} redeems${parseFloat(batch.feeAmount) >= XYIELD_MIN_FEE_USDC ? ' + 1 fee transfer' : ''})...`);
 

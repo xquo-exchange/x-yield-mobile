@@ -25,6 +25,11 @@ import {
   buildWithdrawBatch,
   executeWithdrawBatch,
 } from '../services/strategyExecution';
+import {
+  recordDeposit,
+  getTotalDeposited,
+  recordWithdrawal,
+} from '../services/depositTracker';
 
 type StrategiesScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Strategies'>;
@@ -95,6 +100,10 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
       const txHash = await executeStrategyBatch(smartWalletClient, batch);
 
+      // Record deposit for yield tracking
+      const depositAmount = parseFloat(amount);
+      await recordDeposit(displayAddress, depositAmount);
+
       setAmount('');
       // Refetch balances and positions after successful deposit
       refetchBalances();
@@ -125,19 +134,46 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       return;
     }
 
-    // Pre-calculate batch to show fee breakdown
+    // Get total deposited for yield calculation
+    const totalDeposited = await getTotalDeposited(displayAddress);
+
+    // Pre-calculate batch with yield-based fee
     const batch = buildWithdrawBatch(
       positions,
-      displayAddress as `0x${string}`
+      displayAddress as `0x${string}`,
+      totalDeposited
     );
 
-    // Build confirmation message with fee breakdown
-    const hasFee = parseFloat(batch.feeAmount) >= 0.01;
-    const confirmMessage = hasFee
-      ? `Withdraw from vaults: $${batch.totalUsdValue}\nX-Yield fee (${batch.feePercent}%): $${batch.feeAmount}\n\nYou receive: $${batch.userReceives}`
-      : `Withdraw $${batch.totalUsdValue} from ${positionsWithBalance.length} vault(s)?`;
+    // Build confirmation message with yield breakdown
+    let confirmMessage: string;
+    if (batch.hasProfits && parseFloat(batch.feeAmount) >= 0.01) {
+      // Show full yield breakdown when there's profit
+      confirmMessage = [
+        `Your deposits: $${batch.totalDeposited}`,
+        `Current value: $${batch.currentValue}`,
+        `Yield earned: $${batch.yieldAmount} (+${batch.yieldPercent}%)`,
+        ``,
+        `Performance fee (${batch.feePercent}% of yield): $${batch.feeAmount}`,
+        ``,
+        `You receive: $${batch.userReceives}`,
+      ].join('\n');
+    } else if (!batch.hasProfits && parseFloat(batch.yieldAmount) < 0) {
+      // User is at a loss
+      confirmMessage = [
+        `Your deposits: $${batch.totalDeposited}`,
+        `Current value: $${batch.currentValue}`,
+        `Loss: $${batch.yieldAmount}`,
+        ``,
+        `No fee (no profits)`,
+        ``,
+        `You receive: $${batch.userReceives}`,
+      ].join('\n');
+    } else {
+      // No profit, no loss, or first-time user
+      confirmMessage = `Withdraw $${batch.currentValue} from ${positionsWithBalance.length} vault(s)?\n\nNo performance fee applies.`;
+    }
 
-    // Confirm withdrawal with fee breakdown
+    // Confirm withdrawal with yield breakdown
     Alert.alert(
       'Withdraw All',
       confirmMessage,
@@ -152,14 +188,28 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             try {
               const txHash = await executeWithdrawBatch(smartWalletClient, batch);
 
+              // Record withdrawal to update deposit tracking
+              const currentValue = parseFloat(batch.currentValue);
+              await recordWithdrawal(displayAddress, currentValue, currentValue);
+
               // Refresh balances and positions
               refetchBalances();
               refetchPositions();
 
-              // Show success with fee info
-              const successMessage = hasFee
-                ? `Withdrew $${batch.totalUsdValue} USDC\nFee: $${batch.feeAmount}\nYou received: $${batch.userReceives}\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`
-                : `Successfully withdrew $${batch.totalUsdValue} USDC.\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`;
+              // Show success with yield info
+              let successMessage: string;
+              if (batch.hasProfits && parseFloat(batch.feeAmount) >= 0.01) {
+                successMessage = [
+                  `Withdrew $${batch.currentValue} USDC`,
+                  `Yield: $${batch.yieldAmount} (+${batch.yieldPercent}%)`,
+                  `Fee: $${batch.feeAmount}`,
+                  `You received: $${batch.userReceives}`,
+                  ``,
+                  `Tx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`,
+                ].join('\n');
+              } else {
+                successMessage = `Successfully withdrew $${batch.currentValue} USDC.\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`;
+              }
 
               Alert.alert('Withdrawal Complete!', successMessage, [{ text: 'OK' }]);
             } catch (error) {
