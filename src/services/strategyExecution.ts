@@ -1,11 +1,12 @@
 /**
  * Strategy Execution Service
- * Builds and executes deposit transactions for DeFi strategies
+ * Builds and executes deposit and withdraw transactions for DeFi strategies
  */
 
 import { type Address, encodeFunctionData, parseUnits, maxUint256 } from 'viem';
 import { Strategy, MORPHO_VAULT_ABI } from '../constants/strategies';
 import { ERC20_ABI, BASE_RPC_URL, BASE_RPC_FALLBACK } from '../constants/contracts';
+import { type VaultPosition } from './blockchain';
 
 // TEST MODE: Set to true to only execute a single approve transaction
 // This helps isolate nonce issues from batch transaction complexity
@@ -33,6 +34,12 @@ export interface StrategyBatch {
   calls: TransactionCall[];
   allocations: AllocationBreakdown[];
   totalAmount: string;
+}
+
+export interface WithdrawBatch {
+  calls: TransactionCall[];
+  positions: VaultPosition[];
+  totalUsdValue: string;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -207,6 +214,157 @@ function buildVaultDepositCall(
     to: vaultAddress as `0x${string}`,
     data: data as `0x${string}`,
   };
+}
+
+/**
+ * Build a redeem call for withdrawing shares from a vault
+ * Uses ERC-4626 redeem(shares, receiver, owner)
+ */
+function buildVaultRedeemCall(
+  vaultAddress: Address,
+  shares: bigint,
+  receiver: Address,
+  owner: Address
+): TransactionCall {
+  const data = encodeFunctionData({
+    abi: MORPHO_VAULT_ABI,
+    functionName: 'redeem',
+    args: [shares, receiver, owner],
+  });
+
+  return {
+    to: vaultAddress as `0x${string}`,
+    data: data as `0x${string}`,
+  };
+}
+
+/**
+ * Build a batch of withdraw transactions for all positions
+ */
+export function buildWithdrawBatch(
+  positions: VaultPosition[],
+  walletAddress: Address
+): WithdrawBatch {
+  const calls: TransactionCall[] = [];
+  const positionsWithBalance: VaultPosition[] = [];
+  let totalUsd = 0;
+
+  for (const position of positions) {
+    // Only withdraw from vaults with positive balance
+    if (position.shares > BigInt(0)) {
+      calls.push(
+        buildVaultRedeemCall(
+          position.vaultAddress as Address,
+          position.shares,
+          walletAddress,
+          walletAddress
+        )
+      );
+      positionsWithBalance.push(position);
+      totalUsd += parseFloat(position.usdValue);
+    }
+  }
+
+  return {
+    calls,
+    positions: positionsWithBalance,
+    totalUsdValue: totalUsd.toFixed(2),
+  };
+}
+
+/**
+ * Execute a withdraw batch (redeem from all vaults)
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function executeWithdrawBatch(
+  client: any,
+  batch: WithdrawBatch
+): Promise<string> {
+  if (!client?.account?.address) {
+    throw new Error('Smart wallet not available. Please log in first.');
+  }
+
+  if (batch.calls.length === 0) {
+    throw new Error('No positions to withdraw');
+  }
+
+  const walletAddress = client.account.address;
+  console.log(`[Withdraw] Smart wallet: ${walletAddress}`);
+  console.log(`[Withdraw] Positions to withdraw: ${batch.calls.length}`);
+  console.log(`[Withdraw] Total value: $${batch.totalUsdValue}`);
+
+  // Log each position being withdrawn
+  for (const pos of batch.positions) {
+    console.log(`[Withdraw] - ${pos.vaultName}: ${pos.assetsFormatted} USDC`);
+  }
+
+  // Skip simulation for withdrawals (redeem calls are independent)
+  console.log('[Withdraw] Sending transaction...');
+
+  const MAX_RETRIES = 2;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        console.log(`[Withdraw] Retry attempt ${attempt + 1}/${MAX_RETRIES}...`);
+        await delay(2000);
+      }
+
+      let hash: string;
+
+      if (batch.calls.length === 1) {
+        const call = batch.calls[0];
+        hash = await client.sendTransaction({
+          to: call.to,
+          data: call.data,
+          value: call.value || BigInt(0),
+        });
+      } else {
+        hash = await client.sendTransaction({
+          calls: batch.calls.map(c => ({
+            to: c.to,
+            data: c.data,
+            value: c.value || BigInt(0),
+          })),
+        });
+      }
+
+      if (!hash || typeof hash !== 'string' || !hash.startsWith('0x')) {
+        throw new Error('Transaction failed: Invalid response from wallet');
+      }
+
+      console.log(`[Withdraw] Transaction submitted! Hash: ${hash}`);
+      console.log(`[Withdraw] View on BaseScan: https://basescan.org/tx/${hash}`);
+
+      // Wait for confirmation
+      console.log('[Withdraw] Waiting for on-chain confirmation...');
+      const confirmation = await waitForTransaction(hash);
+
+      if (!confirmation.found) {
+        throw new Error('Transaction not confirmed. Check your Privy Dashboard for paymaster config.');
+      }
+
+      if (confirmation.status === 'failed') {
+        throw new Error(`Transaction reverted. Check BaseScan: https://basescan.org/tx/${hash}`);
+      }
+
+      console.log(`[Withdraw] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
+      return hash;
+
+    } catch (error) {
+      lastError = error;
+      const msg = ((error as Error)?.message || '').toLowerCase();
+
+      if (msg.includes('nonce') && attempt < MAX_RETRIES - 1) {
+        console.log('[Withdraw] Nonce error, retrying...');
+        continue;
+      }
+      break;
+    }
+  }
+
+  throw new Error(parseErrorMessage(lastError));
 }
 
 export function calculateAllocations(

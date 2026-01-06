@@ -22,6 +22,8 @@ import {
   buildStrategyBatch,
   executeStrategyBatch,
   calculateAllocations,
+  buildWithdrawBatch,
+  executeWithdrawBatch,
 } from '../services/strategyExecution';
 
 type StrategiesScreenProps = {
@@ -43,6 +45,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [refreshing, setRefreshing] = useState(false);
   const [amount, setAmount] = useState('');
   const [isDepositing, setIsDepositing] = useState(false);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -107,6 +110,59 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     } finally {
       setIsDepositing(false);
     }
+  };
+
+  const handleWithdrawAll = async () => {
+    const positionsWithBalance = positions.filter(p => p.shares > BigInt(0));
+
+    if (positionsWithBalance.length === 0) {
+      Alert.alert('No Positions', 'You have no positions to withdraw.');
+      return;
+    }
+
+    if (!smartWalletClient || !displayAddress) {
+      Alert.alert('Wallet Error', 'Smart wallet not available. Please log in first.');
+      return;
+    }
+
+    // Confirm withdrawal
+    Alert.alert(
+      'Withdraw All',
+      `Withdraw $${positionsTotal} from ${positionsWithBalance.length} vault(s)?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Withdraw',
+          style: 'destructive',
+          onPress: async () => {
+            setIsWithdrawing(true);
+
+            try {
+              const batch = buildWithdrawBatch(
+                positions,
+                displayAddress as `0x${string}`
+              );
+
+              const txHash = await executeWithdrawBatch(smartWalletClient, batch);
+
+              // Refresh balances and positions
+              refetchBalances();
+              refetchPositions();
+
+              Alert.alert(
+                'Withdrawal Complete!',
+                `Successfully withdrew $${batch.totalUsdValue} USDC.\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`,
+                [{ text: 'OK' }]
+              );
+            } catch (error) {
+              Alert.alert('Withdrawal Failed', (error as Error)?.message || 'An error occurred');
+            } finally {
+              setIsWithdrawing(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const riskColor = getRiskLevelColor(STRATEGY.riskLevel);
@@ -178,6 +234,21 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                   </View>
                 </View>
               ))}
+
+              {/* Withdraw All Button */}
+              {positions.some(p => p.shares > BigInt(0)) && (
+                <TouchableOpacity
+                  style={[styles.withdrawButton, isWithdrawing && styles.withdrawButtonDisabled]}
+                  onPress={handleWithdrawAll}
+                  disabled={isWithdrawing}
+                >
+                  {isWithdrawing ? (
+                    <ActivityIndicator color="#ef4444" size="small" />
+                  ) : (
+                    <Text style={styles.withdrawButtonText}>Withdraw All</Text>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
@@ -426,6 +497,23 @@ const styles = StyleSheet.create({
   positionUsd: {
     fontSize: 12,
     color: '#71717a',
+  },
+  withdrawButton: {
+    marginTop: 16,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+  },
+  withdrawButtonDisabled: {
+    borderColor: '#52525b',
+  },
+  withdrawButtonText: {
+    color: '#ef4444',
+    fontSize: 14,
+    fontWeight: '600',
   },
   // Balance Card
   balanceCard: {
