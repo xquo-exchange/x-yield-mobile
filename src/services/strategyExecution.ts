@@ -7,6 +7,10 @@ import { type Address, encodeFunctionData, parseUnits, maxUint256 } from 'viem';
 import { Strategy, MORPHO_VAULT_ABI } from '../constants/strategies';
 import { ERC20_ABI, BASE_RPC_URL, BASE_RPC_FALLBACK } from '../constants/contracts';
 
+// TEST MODE: Set to true to only execute a single approve transaction
+// This helps isolate nonce issues from batch transaction complexity
+const TEST_MODE_SINGLE_TX = false;
+
 export interface TransactionCall {
   to: `0x${string}`;
   data: `0x${string}`;
@@ -80,6 +84,66 @@ interface TransactionReceipt {
   status: string;
   blockNumber: string;
   gasUsed: string;
+}
+
+/**
+ * Simulate a transaction using eth_call
+ * This validates the transaction would succeed before submitting to the bundler
+ * Saves gas credits and provides faster feedback on errors
+ */
+async function simulateTransaction(
+  call: TransactionCall,
+  fromAddress: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await rpcCall('eth_call', [
+      {
+        from: fromAddress,
+        to: call.to,
+        data: call.data,
+        value: call.value ? `0x${call.value.toString(16)}` : '0x0',
+      },
+      'latest',
+    ]);
+    return { success: true };
+  } catch (error) {
+    const msg = (error as Error)?.message || 'Unknown error';
+
+    // Parse common revert reasons
+    if (msg.includes('insufficient allowance')) {
+      return { success: false, error: 'Insufficient token allowance. Approve needed first.' };
+    }
+    if (msg.includes('insufficient balance') || msg.includes('transfer amount exceeds balance')) {
+      return { success: false, error: 'Insufficient token balance for this deposit.' };
+    }
+    if (msg.includes('execution reverted')) {
+      return { success: false, error: 'Transaction would revert. Check your balance and allowances.' };
+    }
+
+    // For other errors, return the raw message (truncated)
+    return { success: false, error: msg.length > 80 ? msg.substring(0, 80) + '...' : msg };
+  }
+}
+
+/**
+ * Simulate all transactions in a batch
+ * Returns on first failure for fast feedback
+ */
+async function simulateBatch(
+  calls: TransactionCall[],
+  fromAddress: string
+): Promise<{ success: boolean; error?: string; failedIndex?: number }> {
+  for (let i = 0; i < calls.length; i++) {
+    const result = await simulateTransaction(calls[i], fromAddress);
+    if (!result.success) {
+      return {
+        success: false,
+        error: `Call ${i + 1}/${calls.length} would fail: ${result.error}`,
+        failedIndex: i
+      };
+    }
+  }
+  return { success: true };
 }
 
 async function waitForTransaction(
@@ -200,6 +264,97 @@ export function buildStrategyBatch(
   return { calls, allocations, totalAmount: amount };
 }
 
+/**
+ * Check if an error is a nonce-related error
+ */
+function isNonceError(error: unknown): boolean {
+  const msg = ((error as Error)?.message || '').toLowerCase();
+  return (
+    msg.includes('nonce') ||
+    msg.includes('aa25') || // ERC-4337 nonce error code
+    msg.includes('invalid smart account nonce') ||
+    msg.includes('sender nonce')
+  );
+}
+
+/**
+ * Parse error message into user-friendly format
+ */
+function parseErrorMessage(error: unknown): string {
+  const msg = (error as Error)?.message || 'Unknown error';
+  const msgLower = msg.toLowerCase();
+
+  // Nonce errors
+  if (isNonceError(error)) {
+    return 'Transaction nonce error. Please wait a moment and try again.';
+  }
+
+  // Paymaster errors
+  if (msgLower.includes('paymaster') || msgLower.includes('sponsor')) {
+    return 'Gas sponsorship not configured. Please add a paymaster URL in Privy Dashboard > Smart Wallets > Base.';
+  }
+
+  // Balance errors
+  if (msgLower.includes('insufficient') || msgLower.includes('balance')) {
+    return 'Insufficient USDC balance for this deposit.';
+  }
+
+  // User rejection
+  if (msgLower.includes('rejected') || msgLower.includes('denied') || msgLower.includes('cancelled')) {
+    return 'Transaction was cancelled.';
+  }
+
+  // Network errors
+  if (msgLower.includes('network') || msgLower.includes('timeout') || msgLower.includes('fetch')) {
+    return 'Network error. Please check your connection and try again.';
+  }
+
+  // Return original message if no specific match (truncated if too long)
+  return msg.length > 100 ? msg.substring(0, 100) + '...' : msg;
+}
+
+/**
+ * Execute a single transaction call
+ */
+async function executeSingleCall(
+  client: any,
+  call: TransactionCall
+): Promise<string> {
+  const hash = await client.sendTransaction({
+    to: call.to,
+    data: call.data,
+    value: call.value || BigInt(0),
+  });
+
+  if (!hash || typeof hash !== 'string' || !hash.startsWith('0x')) {
+    throw new Error('Transaction failed: Invalid response from wallet');
+  }
+
+  return hash;
+}
+
+/**
+ * Execute a batch of transaction calls
+ */
+async function executeBatchCalls(
+  client: any,
+  calls: TransactionCall[]
+): Promise<string> {
+  const hash = await client.sendTransaction({
+    calls: calls.map(c => ({
+      to: c.to,
+      data: c.data,
+      value: c.value || BigInt(0),
+    })),
+  });
+
+  if (!hash || typeof hash !== 'string' || !hash.startsWith('0x')) {
+    throw new Error('Transaction failed: Invalid response from wallet');
+  }
+
+  return hash;
+}
+
 // Using 'any' for Privy's smart wallet client to avoid complex type conflicts
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function executeStrategyBatch(
@@ -214,57 +369,104 @@ export async function executeStrategyBatch(
     throw new Error('No transactions to execute');
   }
 
-  try {
-    let hash: string;
+  // Determine which calls to execute
+  let callsToExecute = batch.calls;
 
-    if (batch.calls.length === 1) {
-      const call = batch.calls[0];
-      hash = await client.sendTransaction({
-        to: call.to,
-        data: call.data,
-        value: call.value || BigInt(0),
-      });
-    } else {
-      hash = await client.sendTransaction({
-        calls: batch.calls.map(c => ({
-          to: c.to,
-          data: c.data,
-          value: c.value || BigInt(0),
-        })),
-      });
-    }
-
-    if (!hash || typeof hash !== 'string' || !hash.startsWith('0x')) {
-      throw new Error('Transaction failed: Invalid response from wallet');
-    }
-
-    // Wait for on-chain confirmation
-    const confirmation = await waitForTransaction(hash);
-
-    if (!confirmation.found) {
-      throw new Error(
-        'Transaction not confirmed on-chain. Please check Privy Dashboard for paymaster configuration.'
-      );
-    }
-
-    if (confirmation.status === 'failed') {
-      throw new Error(`Transaction reverted. Check BaseScan: https://basescan.org/tx/${hash}`);
-    }
-
-    return hash;
-  } catch (error) {
-    const msg = (error as Error)?.message?.toLowerCase() || '';
-
-    if (msg.includes('paymaster') || msg.includes('sponsor')) {
-      throw new Error(
-        'Gas sponsorship not configured. Please add a paymaster URL in Privy Dashboard > Smart Wallets > Base.'
-      );
-    }
-
-    if (msg.includes('insufficient') || msg.includes('balance')) {
-      throw new Error('Insufficient funds. Configure a paymaster for gas sponsorship.');
-    }
-
-    throw error;
+  // TEST MODE: Only execute the first approve call to isolate issues
+  if (TEST_MODE_SINGLE_TX) {
+    // Find the first approve call (it's always an approve call in our batch)
+    callsToExecute = [batch.calls[0]];
+    console.log('[TEST MODE] Only executing first call (approve)');
   }
+
+  const walletAddress = client.account.address;
+  console.log(`[Deposit] Smart wallet: ${walletAddress}`);
+  console.log(`[Deposit] Calls to execute: ${callsToExecute.length}`);
+
+  // SIMULATION: Validate transactions before submitting to bundler
+  // Note: For approve calls, simulation may fail if wallet doesn't exist yet on-chain
+  // We skip simulation for approve calls since they rarely fail
+  const isApproveOnly = callsToExecute.length === 1 &&
+    callsToExecute[0].data.startsWith('0x095ea7b3'); // approve(address,uint256) selector
+
+  if (!isApproveOnly) {
+    console.log('[Deposit] Simulating transactions...');
+    const simulation = await simulateBatch(callsToExecute, walletAddress);
+    if (!simulation.success) {
+      console.log(`[Deposit] Simulation failed: ${simulation.error}`);
+      throw new Error(`Simulation failed: ${simulation.error}`);
+    }
+    console.log('[Deposit] Simulation passed!');
+  } else {
+    console.log('[Deposit] Skipping simulation for approve-only transaction');
+  }
+
+  // Retry logic for nonce errors
+  const MAX_RETRIES = 2;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      // Wait before retry (only on subsequent attempts)
+      if (attempt > 0) {
+        console.log(`[Deposit] Retry attempt ${attempt + 1}/${MAX_RETRIES} after nonce error...`);
+        await delay(2000); // Wait 2 seconds before retry
+      }
+
+      console.log(`[Deposit] Sending transaction (attempt ${attempt + 1})...`);
+
+      let hash: string;
+
+      // Execute single or batch transaction
+      if (callsToExecute.length === 1) {
+        hash = await executeSingleCall(client, callsToExecute[0]);
+      } else {
+        hash = await executeBatchCalls(client, callsToExecute);
+      }
+
+      console.log(`[Deposit] Transaction submitted! Hash: ${hash}`);
+      console.log(`[Deposit] View on BaseScan: https://basescan.org/tx/${hash}`);
+
+      // Wait for on-chain confirmation
+      console.log('[Deposit] Waiting for on-chain confirmation...');
+      const confirmation = await waitForTransaction(hash);
+
+      if (!confirmation.found) {
+        console.log('[Deposit] Transaction not found on-chain after timeout');
+        throw new Error(
+          'Transaction not confirmed on-chain. Please check Privy Dashboard for paymaster configuration.'
+        );
+      }
+
+      if (confirmation.status === 'failed') {
+        console.log(`[Deposit] Transaction reverted on-chain`);
+        throw new Error(`Transaction reverted. Check BaseScan: https://basescan.org/tx/${hash}`);
+      }
+
+      console.log(`[Deposit] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
+
+      // Success!
+      if (TEST_MODE_SINGLE_TX) {
+        return hash + ' (TEST MODE: approve only)';
+      }
+      return hash;
+
+    } catch (error) {
+      const errorMsg = (error as Error)?.message || 'Unknown error';
+      console.log(`[Deposit] Error: ${errorMsg}`);
+      lastError = error;
+
+      // Only retry on nonce errors
+      if (isNonceError(error) && attempt < MAX_RETRIES - 1) {
+        console.log('[Deposit] Nonce error detected, will retry...');
+        continue; // Retry
+      }
+
+      // Don't retry other errors
+      break;
+    }
+  }
+
+  // All retries failed - throw user-friendly error
+  throw new Error(parseErrorMessage(lastError));
 }
