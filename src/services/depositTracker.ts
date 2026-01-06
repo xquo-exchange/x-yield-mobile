@@ -215,22 +215,16 @@ export async function debugSetDeposit(
 ): Promise<void> {
   const deposits = await getAllDeposits();
   const address = walletAddress.toLowerCase();
-
   deposits[address] = {
     totalDeposited: amount,
     lastUpdated: Date.now(),
   };
-
   await saveDeposits(deposits);
-  console.log(`[DepositTracker] DEBUG: Set deposit to $${amount.toFixed(2)} for ${address.slice(0, 10)}...`);
 }
 
-/**
- * DEBUG: Log all deposit data
- */
-export async function debugLogAllDeposits(): Promise<void> {
-  const deposits = await getAllDeposits();
-  console.log('[DepositTracker] DEBUG: All deposits:', JSON.stringify(deposits, null, 2));
+/** DEBUG: Get all deposit data */
+export async function debugGetAllDeposits(): Promise<DepositData> {
+  return getAllDeposits();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -238,15 +232,10 @@ export async function debugLogAllDeposits(): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * TEST: Simulate fee calculation scenarios
+ * DEV ONLY: Simulate fee calculation scenarios
  * Call this from console to verify math is correct
  */
 export function runFeeCalculationTests(): void {
-  console.log('');
-  console.log('╔════════════════════════════════════════════════════════════════════════════╗');
-  console.log('║                    FEE CALCULATION TEST SCENARIOS                          ║');
-  console.log('╚════════════════════════════════════════════════════════════════════════════╝');
-  console.log('');
 
   const FEE_PERCENT = 15;
 
@@ -327,29 +316,6 @@ export function runFeeCalculationTests(): void {
     expectedReceive: 1000.0085,
   });
 
-  // Test 8: USDC decimals test - raw values
-  console.log('');
-  console.log('╔════════════════════════════════════════════════════════════════════════════╗');
-  console.log('║                    USDC DECIMALS VERIFICATION                              ║');
-  console.log('╚════════════════════════════════════════════════════════════════════════════╝');
-  console.log('');
-
-  const usdcTests = [
-    { usd: 10000, raw: 10000000000n, desc: '$10,000' },
-    { usd: 0.01, raw: 10000n, desc: '$0.01 (1 cent)' },
-    { usd: 0.000001, raw: 1n, desc: '$0.000001 (smallest USDC unit)' },
-    { usd: 1000000, raw: 1000000000000n, desc: '$1,000,000' },
-  ];
-
-  for (const test of usdcTests) {
-    const calculated = BigInt(Math.floor(test.usd * 1_000_000));
-    const match = calculated === test.raw ? '✓' : '✗';
-    console.log(`${match} ${test.desc}: $${test.usd} → ${calculated} (expected: ${test.raw})`);
-  }
-
-  console.log('');
-  console.log('═══════════════════════════════════════════════════════════════════════════════');
-  console.log('');
 }
 
 interface TestScenarioParams {
@@ -362,25 +328,13 @@ interface TestScenarioParams {
   expectedReceive: number;
 }
 
-function testScenario(params: TestScenarioParams): void {
-  const { name, deposited, currentValue, feePercent, expectedYield, expectedFee, expectedReceive } = params;
-
-  // Calculate actual values
+function testScenario(params: TestScenarioParams): boolean {
+  const { deposited, currentValue, feePercent, expectedYield, expectedFee, expectedReceive } = params;
   const actualYield = calculateYield(currentValue, deposited);
   const actualFee = calculatePerformanceFee(actualYield, feePercent);
   const actualReceive = currentValue - actualFee;
-
-  // Check if values match (within floating point tolerance)
   const yieldMatch = Math.abs(actualYield - expectedYield) < 0.0001;
   const feeMatch = Math.abs(actualFee - expectedFee) < 0.0001;
   const receiveMatch = Math.abs(actualReceive - expectedReceive) < 0.0001;
-  const allPass = yieldMatch && feeMatch && receiveMatch;
-
-  console.log(`${allPass ? '✓' : '✗'} ${name}`);
-  console.log(`   Deposited:     $${deposited.toFixed(2)}`);
-  console.log(`   Current Value: $${currentValue.toFixed(2)}`);
-  console.log(`   Yield:         $${actualYield.toFixed(4)} ${yieldMatch ? '✓' : `✗ (expected: $${expectedYield.toFixed(4)})`}`);
-  console.log(`   Fee (${feePercent}%):    $${actualFee.toFixed(4)} ${feeMatch ? '✓' : `✗ (expected: $${expectedFee.toFixed(4)})`}`);
-  console.log(`   User Receives: $${actualReceive.toFixed(4)} ${receiveMatch ? '✓' : `✗ (expected: $${expectedReceive.toFixed(4)})`}`);
-  console.log('');
+  return yieldMatch && feeMatch && receiveMatch;
 }
