@@ -383,13 +383,27 @@ export async function executeStrategyBatch(
   console.log(`[Deposit] Smart wallet: ${walletAddress}`);
   console.log(`[Deposit] Calls to execute: ${callsToExecute.length}`);
 
-  // SIMULATION: Validate transactions before submitting to bundler
-  // Note: For approve calls, simulation may fail if wallet doesn't exist yet on-chain
-  // We skip simulation for approve calls since they rarely fail
-  const isApproveOnly = callsToExecute.length === 1 &&
-    callsToExecute[0].data.startsWith('0x095ea7b3'); // approve(address,uint256) selector
+  // SIMULATION: We skip simulation for batched approve+deposit transactions
+  // because eth_call simulates each call independently - deposits would fail
+  // since the approve hasn't actually been executed yet.
+  //
+  // Simulation is only useful for:
+  // - Single approve calls (rarely fail)
+  // - Single deposit calls when allowance already exists
+  //
+  // For batched transactions, we rely on the transaction itself to fail
+  // and report errors (which it will do atomically).
 
-  if (!isApproveOnly) {
+  const hasDeposits = callsToExecute.some(c => c.data.startsWith('0x6e553f65')); // deposit(uint256,address)
+  const hasApprovals = callsToExecute.some(c => c.data.startsWith('0x095ea7b3')); // approve(address,uint256)
+
+  if (hasDeposits && hasApprovals) {
+    // Skip simulation for batched approve+deposit - they have interdependencies
+    console.log('[Deposit] Skipping simulation for batched approve+deposit (interdependent calls)');
+  } else if (callsToExecute.length === 1 && hasApprovals) {
+    console.log('[Deposit] Skipping simulation for approve-only transaction');
+  } else {
+    // Single deposit or other calls - try to simulate
     console.log('[Deposit] Simulating transactions...');
     const simulation = await simulateBatch(callsToExecute, walletAddress);
     if (!simulation.success) {
@@ -397,8 +411,6 @@ export async function executeStrategyBatch(
       throw new Error(`Simulation failed: ${simulation.error}`);
     }
     console.log('[Deposit] Simulation passed!');
-  } else {
-    console.log('[Deposit] Skipping simulation for approve-only transaction');
   }
 
   // Retry logic for nonce errors
