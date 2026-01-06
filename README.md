@@ -11,7 +11,46 @@ A DeFi yield optimization mobile app built with React Native, Expo, and Privy au
 - **Multi-Vault Allocation** - Single transaction splits deposits across multiple vaults
 - **Position Tracking** - Real-time view of vault positions and USD values
 - **Withdraw All** - One-tap withdrawal from all vault positions
+- **Performance Fee** - 15% fee on yield only (not principal)
+- **Deposit History** - Tracks deposits to calculate accurate yield
+- **Yield Calculation** - Shows profit/loss before withdrawal
 - **Real-time Balances** - View ETH and USDC balances on Base chain
+
+## Fee Structure
+
+X-Yield uses a **performance fee model** - we only take a cut of your profits, never your principal.
+
+### How It Works
+
+| Component | Fee |
+|-----------|-----|
+| Deposits | **Free** |
+| Withdrawals (principal) | **Free** |
+| Withdrawals (yield/profit) | **15%** |
+| Gas fees | **Sponsored** (free) |
+
+### Example
+
+```
+You deposit:     $100 USDC
+After 1 month:   $110 USDC (grew 10%)
+Yield earned:    $10 USDC
+
+Performance fee: 15% × $10 = $1.50
+You receive:     $108.50
+```
+
+### Key Points
+
+- **No fee on your principal** - Only profits are subject to fees
+- **No fee if you're at a loss** - If your position decreased in value, no fee is charged
+- **Transparent** - Fee breakdown shown before every withdrawal
+- **Atomic** - Fee transfer happens in the same transaction as withdrawal
+
+### Treasury
+
+Performance fees are sent to the X-Yield treasury:
+`0xC33F9253E59eaC5713bb6e8C2Cb8Ecb9567FF31d`
 
 ## Verified On-Chain Transactions
 
@@ -21,7 +60,8 @@ The app has been tested end-to-end on Base mainnet:
 |--------|-------------|-------|
 | Deposit to 3 vaults | [0x43efeb9d...](https://basescan.org/tx/0x43efeb9da9099190f36c7ca79bc38bcbe921353771690db0eecda0ce827f1ae7) | 40458963 |
 | Deposit (second) | [0xa73d50d4...](https://basescan.org/tx/0xa73d50d43b1a1326a55ee48f2a4c98d81171b7bf13aaa041b16730f717c163bb) | 40459581 |
-| Withdraw all | [0x197c9449...](https://basescan.org/tx/0x197c94496f1ecae304f12c75a59cffa7075b09049fd9a824c68c1141f0a8d81a) | 40459760 |
+| Withdraw (no fee) | [0x197c9449...](https://basescan.org/tx/0x197c94496f1ecae304f12c75a59cffa7075b09049fd9a824c68c1141f0a8d81a) | 40459760 |
+| Withdraw with fee | [0x06156001...](https://basescan.org/tx/0x061560016861c2da4498d9fcc0398278629b4537bb2db00bdd9aae5516306e82) | 40461010 |
 
 ## Tech Stack
 
@@ -32,6 +72,7 @@ The app has been tested end-to-end on Base mainnet:
 - **Pimlico** - Bundler & paymaster for gas sponsorship
 - **Base** - L2 blockchain (Coinbase)
 - **Morpho** - DeFi lending protocol (ERC-4626 vaults)
+- **AsyncStorage** - Local deposit history persistence
 - **viem** - Ethereum library
 
 ## Project Structure
@@ -41,7 +82,7 @@ x-yield-mobile/
 ├── App.tsx                 # App entry point with Privy providers
 ├── src/
 │   ├── constants/
-│   │   ├── contracts.ts    # Contract addresses and ABIs
+│   │   ├── contracts.ts    # Contract addresses, ABIs, fee config
 │   │   └── strategies.ts   # Morpho vault configurations
 │   ├── hooks/
 │   │   ├── useWalletBalance.ts  # Balance fetching hook
@@ -54,6 +95,7 @@ x-yield-mobile/
 │   │   └── StrategiesScreen.tsx # Deposit/Withdraw UI
 │   └── services/
 │       ├── blockchain.ts        # RPC calls for balances & positions
+│       ├── depositTracker.ts    # Deposit history & yield calculation
 │       └── strategyExecution.ts # Transaction building & execution
 ├── app.json                # Expo config
 └── package.json
@@ -148,14 +190,22 @@ PIMLICO_API_KEY=your_pimlico_api_key
 3. Builds batch transaction: 3 approvals + 3 deposits
 4. Sends via Privy smart wallet (gasless via Pimlico paymaster)
 5. Waits for on-chain confirmation
-6. Updates positions display
+6. Records deposit amount for yield tracking
+7. Updates positions display
 
 ### Withdraw Flow
 1. User taps "Withdraw All" button in positions section
-2. Confirmation dialog shows total value and vault count
-3. Builds batch redeem calls using ERC-4626 `redeem(shares, receiver, owner)`
-4. Sends via smart wallet (gasless)
-5. USDC returns to wallet balance
+2. App calculates yield: `current_value - total_deposited`
+3. If yield > 0: calculates 15% performance fee
+4. Shows confirmation with full breakdown:
+   - Your deposits
+   - Current value
+   - Yield earned (%)
+   - Performance fee
+   - You receive
+5. Builds batch: redeem calls + fee transfer (if applicable)
+6. Sends via smart wallet (gasless)
+7. USDC returns to wallet balance
 
 ### Morpho Vaults (Conservative USDC Strategy)
 
@@ -174,6 +224,10 @@ PIMLICO_API_KEY=your_pimlico_api_key
 - [x] Multi-vault allocation in single transaction
 - [x] Position tracking with real-time balances
 - [x] Withdraw all positions
+- [x] Performance fee on yield (15%)
+- [x] Deposit history tracking (AsyncStorage)
+- [x] Yield calculation and display
+- [x] Fee-free withdrawal when no profits
 - [x] ETH/USDC wallet balance display
 - [x] Pull-to-refresh for balances
 - [x] Transaction retry logic for nonce errors
