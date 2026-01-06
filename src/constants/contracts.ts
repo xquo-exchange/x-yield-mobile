@@ -2,7 +2,7 @@
 export const BASE_CHAIN_ID = 8453;
 
 // X-Yield Fee Configuration
-export const XYIELD_FEE_PERCENT = 0.5; // 0.5% fee on withdrawals
+export const XYIELD_FEE_PERCENT = 15; // 15% fee on withdrawals
 export const XYIELD_TREASURY_ADDRESS = '0xC33F9253E59eaC5713bb6e8C2Cb8Ecb9567FF31d' as const;
 export const XYIELD_MIN_FEE_USDC = 0.01; // Minimum fee threshold (skip if below this)
 
