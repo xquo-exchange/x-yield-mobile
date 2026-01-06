@@ -1,6 +1,11 @@
 // Base Chain Configuration
 export const BASE_CHAIN_ID = 8453;
 
+// X-Yield Fee Configuration
+export const XYIELD_FEE_PERCENT = 0.5; // 0.5% fee on withdrawals
+export const XYIELD_TREASURY_ADDRESS = '0xC33F9253E59eaC5713bb6e8C2Cb8Ecb9567FF31d' as const;
+export const XYIELD_MIN_FEE_USDC = 0.01; // Minimum fee threshold (skip if below this)
+
 // Public RPCs for reading blockchain data (balances, positions, etc.)
 // Privy handles transaction submission via Pimlico paymaster separately
 export const BASE_RPC_URL = 'https://mainnet.base.org';
@@ -40,7 +45,7 @@ export const MORPHO = {
   BUNDLER: '0x4095F064B8d3c3548A3bebfd0Bbfd04750E30077',
 } as const;
 
-// ERC20 ABI (minimal for balance and approve)
+// ERC20 ABI (minimal for balance, approve, and transfer)
 export const ERC20_ABI = [
   {
     name: 'balanceOf',
@@ -55,6 +60,16 @@ export const ERC20_ABI = [
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'transfer',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
       { name: 'amount', type: 'uint256' },
     ],
     outputs: [{ name: '', type: 'bool' }],

@@ -5,7 +5,15 @@
 
 import { type Address, encodeFunctionData, parseUnits, maxUint256 } from 'viem';
 import { Strategy, MORPHO_VAULT_ABI } from '../constants/strategies';
-import { ERC20_ABI, BASE_RPC_URL, BASE_RPC_FALLBACK } from '../constants/contracts';
+import {
+  ERC20_ABI,
+  BASE_RPC_URL,
+  BASE_RPC_FALLBACK,
+  TOKENS,
+  XYIELD_FEE_PERCENT,
+  XYIELD_TREASURY_ADDRESS,
+  XYIELD_MIN_FEE_USDC,
+} from '../constants/contracts';
 import { type VaultPosition } from './blockchain';
 
 export interface TransactionCall {
@@ -36,6 +44,10 @@ export interface WithdrawBatch {
   calls: TransactionCall[];
   positions: VaultPosition[];
   totalUsdValue: string;
+  feeAmount: string;
+  feeAmountRaw: bigint;
+  userReceives: string;
+  feePercent: number;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -235,7 +247,28 @@ function buildVaultRedeemCall(
 }
 
 /**
+ * Build a USDC transfer call for fee payment
+ */
+function buildTransferCall(
+  tokenAddress: Address,
+  recipient: Address,
+  amount: bigint
+): TransactionCall {
+  const data = encodeFunctionData({
+    abi: ERC20_ABI,
+    functionName: 'transfer',
+    args: [recipient, amount],
+  });
+
+  return {
+    to: tokenAddress as `0x${string}`,
+    data: data as `0x${string}`,
+  };
+}
+
+/**
  * Build a batch of withdraw transactions for all positions
+ * Includes X-Yield fee transfer as final call in the batch
  */
 export function buildWithdrawBatch(
   positions: VaultPosition[],
@@ -243,7 +276,7 @@ export function buildWithdrawBatch(
 ): WithdrawBatch {
   const calls: TransactionCall[] = [];
   const positionsWithBalance: VaultPosition[] = [];
-  let totalUsd = 0;
+  let totalAssets = BigInt(0); // Track total USDC (6 decimals)
 
   for (const position of positions) {
     // Only withdraw from vaults with positive balance
@@ -257,14 +290,39 @@ export function buildWithdrawBatch(
         )
       );
       positionsWithBalance.push(position);
-      totalUsd += parseFloat(position.usdValue);
+      totalAssets += position.assets; // assets is in USDC (6 decimals)
     }
+  }
+
+  // Calculate fee (USDC has 6 decimals)
+  // Fee = totalAssets * XYIELD_FEE_PERCENT / 100
+  const feeAmountRaw = (totalAssets * BigInt(Math.round(XYIELD_FEE_PERCENT * 100))) / BigInt(10000);
+  const feeAmount = Number(feeAmountRaw) / 1_000_000; // Convert to USDC (6 decimals)
+  const totalUsd = Number(totalAssets) / 1_000_000;
+  const userReceives = totalUsd - feeAmount;
+
+  // Add fee transfer call if fee is above minimum threshold
+  if (feeAmount >= XYIELD_MIN_FEE_USDC) {
+    calls.push(
+      buildTransferCall(
+        TOKENS.USDC as Address,
+        XYIELD_TREASURY_ADDRESS as Address,
+        feeAmountRaw
+      )
+    );
+    console.log(`[Withdraw] Fee: ${feeAmount.toFixed(6)} USDC (${XYIELD_FEE_PERCENT}%) to treasury`);
+  } else {
+    console.log(`[Withdraw] Fee skipped: ${feeAmount.toFixed(6)} USDC below minimum ${XYIELD_MIN_FEE_USDC} USDC`);
   }
 
   return {
     calls,
     positions: positionsWithBalance,
     totalUsdValue: totalUsd.toFixed(2),
+    feeAmount: feeAmount.toFixed(2),
+    feeAmountRaw: feeAmount >= XYIELD_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
+    userReceives: userReceives.toFixed(2),
+    feePercent: XYIELD_FEE_PERCENT,
   };
 }
 
@@ -286,7 +344,7 @@ export async function executeWithdrawBatch(
 
   const walletAddress = client.account.address;
   console.log(`[Withdraw] Smart wallet: ${walletAddress}`);
-  console.log(`[Withdraw] Positions to withdraw: ${batch.calls.length}`);
+  console.log(`[Withdraw] Positions to withdraw: ${batch.positions.length}`);
   console.log(`[Withdraw] Total value: $${batch.totalUsdValue}`);
 
   // Log each position being withdrawn
@@ -294,8 +352,13 @@ export async function executeWithdrawBatch(
     console.log(`[Withdraw] - ${pos.vaultName}: ${pos.assetsFormatted} USDC`);
   }
 
-  // Skip simulation for withdrawals (redeem calls are independent)
-  console.log('[Withdraw] Sending transaction...');
+  // Log fee breakdown
+  if (parseFloat(batch.feeAmount) > 0) {
+    console.log(`[Withdraw] X-Yield fee (${batch.feePercent}%): $${batch.feeAmount}`);
+    console.log(`[Withdraw] User receives: $${batch.userReceives}`);
+  }
+
+  console.log(`[Withdraw] Sending ${batch.calls.length} calls (${batch.positions.length} redeems${parseFloat(batch.feeAmount) >= XYIELD_MIN_FEE_USDC ? ' + 1 fee transfer' : ''})...`);
 
   const MAX_RETRIES = 2;
   let lastError: unknown = null;

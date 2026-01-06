@@ -125,10 +125,22 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       return;
     }
 
-    // Confirm withdrawal
+    // Pre-calculate batch to show fee breakdown
+    const batch = buildWithdrawBatch(
+      positions,
+      displayAddress as `0x${string}`
+    );
+
+    // Build confirmation message with fee breakdown
+    const hasFee = parseFloat(batch.feeAmount) >= 0.01;
+    const confirmMessage = hasFee
+      ? `Withdraw from vaults: $${batch.totalUsdValue}\nX-Yield fee (${batch.feePercent}%): $${batch.feeAmount}\n\nYou receive: $${batch.userReceives}`
+      : `Withdraw $${batch.totalUsdValue} from ${positionsWithBalance.length} vault(s)?`;
+
+    // Confirm withdrawal with fee breakdown
     Alert.alert(
       'Withdraw All',
-      `Withdraw $${positionsTotal} from ${positionsWithBalance.length} vault(s)?`,
+      confirmMessage,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -138,22 +150,18 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             setIsWithdrawing(true);
 
             try {
-              const batch = buildWithdrawBatch(
-                positions,
-                displayAddress as `0x${string}`
-              );
-
               const txHash = await executeWithdrawBatch(smartWalletClient, batch);
 
               // Refresh balances and positions
               refetchBalances();
               refetchPositions();
 
-              Alert.alert(
-                'Withdrawal Complete!',
-                `Successfully withdrew $${batch.totalUsdValue} USDC.\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`,
-                [{ text: 'OK' }]
-              );
+              // Show success with fee info
+              const successMessage = hasFee
+                ? `Withdrew $${batch.totalUsdValue} USDC\nFee: $${batch.feeAmount}\nYou received: $${batch.userReceives}\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`
+                : `Successfully withdrew $${batch.totalUsdValue} USDC.\n\nTx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}`;
+
+              Alert.alert('Withdrawal Complete!', successMessage, [{ text: 'OK' }]);
             } catch (error) {
               Alert.alert('Withdrawal Failed', (error as Error)?.message || 'An error occurred');
             } finally {
