@@ -7,6 +7,8 @@ A DeFi yield optimization mobile app built with React Native, Expo, and Privy au
 - **Email Login** - Simple passwordless authentication via Privy
 - **Smart Wallets** - ERC-4337 Account Abstraction wallets
 - **Gas Sponsorship** - All transactions are gas-free for users (via Pimlico paymaster)
+- **Add Funds** - Receive USDC via QR code or buy on Coinbase
+- **Real APY** - Live APY fetched from Morpho API (not hardcoded)
 - **Morpho Vaults** - Deposit into curated USDC lending strategies
 - **Multi-Vault Allocation** - Single transaction splits deposits across multiple vaults
 - **Position Tracking** - Real-time view of vault positions and USD values
@@ -86,7 +88,8 @@ x-yield-mobile/
 │   │   └── strategies.ts   # Morpho vault configurations
 │   ├── hooks/
 │   │   ├── useWalletBalance.ts  # Balance fetching hook
-│   │   └── usePositions.ts      # Vault positions hook
+│   │   ├── usePositions.ts      # Vault positions hook
+│   │   └── useVaultApy.ts       # Real APY from Morpho API
 │   ├── navigation/
 │   │   └── AppNavigator.tsx     # React Navigation setup
 │   ├── screens/
@@ -96,6 +99,7 @@ x-yield-mobile/
 │   └── services/
 │       ├── blockchain.ts        # RPC calls for balances & positions
 │       ├── depositTracker.ts    # Deposit history & yield calculation
+│       ├── morphoApi.ts         # Morpho API for real APY data
 │       └── strategyExecution.ts # Transaction building & execution
 ├── app.json                # Expo config
 └── package.json
@@ -184,6 +188,13 @@ PIMLICO_API_KEY=your_pimlico_api_key
 3. On login, Privy creates an embedded wallet
 4. Smart wallet (AA) is derived from embedded wallet
 
+### Add Funds Flow
+1. User taps "Add Funds" on Dashboard
+2. Two options: "Buy USDC" or "Receive from Wallet"
+3. Buy USDC → Opens Coinbase to purchase USDC
+4. Receive → Shows QR code and wallet address
+5. User sends USDC on Base network to the address
+
 ### Deposit Flow
 1. User enters USDC amount on Strategies screen
 2. App calculates allocation across 3 Morpho vaults
@@ -209,17 +220,22 @@ PIMLICO_API_KEY=your_pimlico_api_key
 
 ### Morpho Vaults (Conservative USDC Strategy)
 
-| Vault | Address | Allocation | APY |
-|-------|---------|------------|-----|
-| Gauntlet USDC Core | `0x6abD...6C40` | 40% | 5.2% |
-| Steakhouse Prime USDC | `0xBEEF...83b2` | 35% | 5.8% |
-| Re7 USDC | `0x12AF...FbD9` | 25% | 4.9% |
+| Vault | Address | Allocation |
+|-------|---------|------------|
+| Steakhouse High Yield USD | `0xbEef...b83B` | 40% |
+| Re7 USDC | `0x12AF...FbD9` | 35% |
+| Steakhouse Prime USDC | `0xbEEf...1Ab0` | 25% |
+
+APY is fetched live from Morpho API (typically 4-7% depending on market conditions).
 
 ## What's Working
 
 - [x] Email authentication via Privy
 - [x] Smart wallet creation (ERC-4337)
 - [x] Gas sponsorship via Pimlico paymaster
+- [x] Add Funds modal with QR code
+- [x] Buy USDC via Coinbase link
+- [x] Real APY from Morpho API
 - [x] USDC deposits to Morpho vaults
 - [x] Multi-vault allocation in single transaction
 - [x] Position tracking with real-time balances

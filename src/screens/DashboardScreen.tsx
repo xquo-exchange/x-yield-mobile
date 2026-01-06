@@ -10,17 +10,19 @@ import {
   ActivityIndicator,
   Modal,
   Platform,
+  Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Clipboard from 'expo-clipboard';
+import QRCode from 'react-native-qrcode-svg';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePrivy, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { useSmartWallets } from '@privy-io/expo/smart-wallets';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
-import * as Clipboard from 'expo-clipboard';
-import QRCode from 'react-native-qrcode-svg';
 
 type DashboardScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Dashboard'>;
@@ -31,10 +33,10 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const embeddedWallet = useEmbeddedEthereumWallet();
   const { client: smartWalletClient } = useSmartWallets();
   const [refreshing, setRefreshing] = React.useState(false);
-  const [showReceiveModal, setShowReceiveModal] = React.useState(false);
+  const [showFundingModal, setShowFundingModal] = React.useState(false);
+  const [fundingView, setFundingView] = React.useState<'options' | 'receive'>('options');
   const [copied, setCopied] = React.useState(false);
 
-  // Fetch real APY from Morpho API
   const { apy: displayApy, refetch: refetchApy } = useVaultApy();
 
   const wallets = embeddedWallet?.wallets || [];
@@ -89,6 +91,44 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
+  };
+
+  const handleBuyUsdc = () => {
+    Alert.alert(
+      'Buy USDC',
+      'Get USDC to start earning yield:\n\n' +
+        '1. Buy USDC on Coinbase or any exchange\n' +
+        '2. Send it to your X-Yield wallet address\n\n' +
+        'Direct card purchases coming soon!',
+      [
+        {
+          text: 'Buy on Coinbase',
+          onPress: () => {
+            Linking.openURL('https://www.coinbase.com/price/usd-coin').catch(() => {
+              Alert.alert('Error', 'Could not open Coinbase');
+            });
+          },
+        },
+        {
+          text: 'Copy My Address',
+          onPress: () => {
+            handleCopyAddress();
+            setFundingView('receive');
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const openFundingModal = () => {
+    setFundingView('options');
+    setShowFundingModal(true);
+  };
+
+  const closeFundingModal = () => {
+    setShowFundingModal(false);
+    setFundingView('options');
   };
 
   const userEmail = (user?.linked_accounts?.find((a) => a.type === 'email') as { address?: string } | undefined)?.address || 'User';
@@ -150,7 +190,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
               {/* Add Funds Button */}
               <TouchableOpacity
                 style={styles.addFundsButton}
-                onPress={() => setShowReceiveModal(true)}
+                onPress={openFundingModal}
               >
                 <Text style={styles.addFundsButtonText}>+ Add Funds</Text>
               </TouchableOpacity>
@@ -232,78 +272,135 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         </View>
       </ScrollView>
 
-      {/* Receive USDC Modal */}
+      {/* Add Funds Modal */}
       <Modal
-        visible={showReceiveModal}
+        visible={showFundingModal}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setShowReceiveModal(false)}
+        onRequestClose={closeFundingModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             {/* Modal Header */}
             <View style={styles.modalHeader}>
+              {fundingView === 'receive' ? (
+                <TouchableOpacity
+                  style={styles.modalBackButton}
+                  onPress={() => setFundingView('options')}
+                >
+                  <Text style={styles.modalBackText}>{'<'}</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.modalBackButton} />
+              )}
               <Text style={styles.modalTitle}>Add Funds</Text>
               <TouchableOpacity
                 style={styles.modalCloseButton}
-                onPress={() => setShowReceiveModal(false)}
+                onPress={closeFundingModal}
               >
                 <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
 
-            {/* QR Code */}
-            <View style={styles.qrContainer}>
-              {displayAddress ? (
-                <QRCode
-                  value={displayAddress}
-                  size={180}
-                  backgroundColor="#ffffff"
-                  color="#000000"
-                />
-              ) : (
-                <View style={styles.qrPlaceholder}>
-                  <Text style={styles.qrPlaceholderText}>No wallet</Text>
+            {fundingView === 'options' ? (
+              /* Options View */
+              <View style={styles.optionsContainer}>
+                {/* Buy USDC Option */}
+                <TouchableOpacity
+                  style={styles.fundingOption}
+                  onPress={handleBuyUsdc}
+                >
+                  <View style={styles.fundingOptionIcon}>
+                    <Text style={styles.fundingOptionIconText}>💳</Text>
+                  </View>
+                  <View style={styles.fundingOptionContent}>
+                    <Text style={styles.fundingOptionTitle}>Buy USDC</Text>
+                    <Text style={styles.fundingOptionSubtitle}>
+                      Via Coinbase or other exchanges
+                    </Text>
+                  </View>
+                  <Text style={styles.fundingOptionArrow}>{'>'}</Text>
+                </TouchableOpacity>
+
+                {/* Receive from Wallet Option */}
+                <TouchableOpacity
+                  style={styles.fundingOption}
+                  onPress={() => setFundingView('receive')}
+                >
+                  <View style={styles.fundingOptionIcon}>
+                    <Text style={styles.fundingOptionIconText}>📥</Text>
+                  </View>
+                  <View style={styles.fundingOptionContent}>
+                    <Text style={styles.fundingOptionTitle}>Receive from Wallet</Text>
+                    <Text style={styles.fundingOptionSubtitle}>
+                      Send USDC from another wallet
+                    </Text>
+                  </View>
+                  <Text style={styles.fundingOptionArrow}>{'>'}</Text>
+                </TouchableOpacity>
+
+                {/* Info Text */}
+                <Text style={styles.fundingInfo}>
+                  Funds will be added as USDC on Base network
+                </Text>
+              </View>
+            ) : (
+              /* Receive View (QR Code) */
+              <>
+                {/* QR Code */}
+                <View style={styles.qrContainer}>
+                  {displayAddress ? (
+                    <QRCode
+                      value={displayAddress}
+                      size={180}
+                      backgroundColor="#ffffff"
+                      color="#000000"
+                    />
+                  ) : (
+                    <View style={styles.qrPlaceholder}>
+                      <Text style={styles.qrPlaceholderText}>No wallet</Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
 
-            {/* Instructions */}
-            <Text style={styles.modalInstructions}>
-              Send USDC on Base network to this address
-            </Text>
+                {/* Instructions */}
+                <Text style={styles.modalInstructions}>
+                  Send USDC on Base network to this address
+                </Text>
 
-            {/* Address Box */}
-            <View style={styles.addressBox}>
-              <Text style={styles.addressText} numberOfLines={1} ellipsizeMode="middle">
-                {displayAddress || 'No wallet address'}
-              </Text>
-            </View>
+                {/* Address Box */}
+                <View style={styles.addressBox}>
+                  <Text style={styles.addressText} numberOfLines={1} ellipsizeMode="middle">
+                    {displayAddress || 'No wallet address'}
+                  </Text>
+                </View>
 
-            {/* Copy Button */}
-            <TouchableOpacity
-              style={[styles.copyButton, copied && styles.copyButtonCopied]}
-              onPress={handleCopyAddress}
-              disabled={!displayAddress}
-            >
-              <Text style={[styles.copyButtonText, copied && styles.copyButtonTextCopied]}>
-                {copied ? '✓ Copied!' : 'Copy Address'}
-              </Text>
-            </TouchableOpacity>
+                {/* Copy Button */}
+                <TouchableOpacity
+                  style={[styles.copyButton, copied && styles.copyButtonCopied]}
+                  onPress={handleCopyAddress}
+                  disabled={!displayAddress}
+                >
+                  <Text style={[styles.copyButtonText, copied && styles.copyButtonTextCopied]}>
+                    {copied ? '✓ Copied!' : 'Copy Address'}
+                  </Text>
+                </TouchableOpacity>
 
-            {/* Warning */}
-            <View style={styles.warningBox}>
-              <Text style={styles.warningIcon}>⚠️</Text>
-              <Text style={styles.warningText}>
-                Only send USDC on Base network. Other tokens or networks may result in permanent loss.
-              </Text>
-            </View>
+                {/* Warning */}
+                <View style={styles.warningBox}>
+                  <Text style={styles.warningIcon}>⚠️</Text>
+                  <Text style={styles.warningText}>
+                    Only send USDC on Base network. Other tokens or networks may result in permanent loss.
+                  </Text>
+                </View>
 
-            {/* Network Badge */}
-            <View style={styles.networkBadge}>
-              <View style={styles.networkDot} />
-              <Text style={styles.networkText}>Base Network</Text>
-            </View>
+                {/* Network Badge */}
+                <View style={styles.networkBadge}>
+                  <View style={styles.networkDot} />
+                  <Text style={styles.networkText}>Base Network</Text>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -548,11 +645,23 @@ const styles = StyleSheet.create({
   },
   modalHeader: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
     marginBottom: 24,
-    position: 'relative',
+  },
+  modalBackButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#27272a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBackText: {
+    fontSize: 18,
+    color: '#ffffff',
+    fontWeight: '600',
   },
   modalTitle: {
     fontSize: 20,
@@ -560,9 +669,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   modalCloseButton: {
-    position: 'absolute',
-    right: 0,
-    top: -4,
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -573,6 +679,56 @@ const styles = StyleSheet.create({
   modalCloseText: {
     fontSize: 16,
     color: '#a1a1aa',
+  },
+  // Funding Options View
+  optionsContainer: {
+    width: '100%',
+    gap: 12,
+  },
+  fundingOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1f',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  fundingOptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#27272a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  fundingOptionIconText: {
+    fontSize: 22,
+  },
+  fundingOptionContent: {
+    flex: 1,
+  },
+  fundingOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 2,
+  },
+  fundingOptionSubtitle: {
+    fontSize: 13,
+    color: '#71717a',
+  },
+  fundingOptionArrow: {
+    fontSize: 18,
+    color: '#71717a',
+    marginLeft: 8,
+  },
+  fundingInfo: {
+    fontSize: 13,
+    color: '#71717a',
+    textAlign: 'center',
+    marginTop: 8,
   },
   qrContainer: {
     backgroundColor: '#ffffff',

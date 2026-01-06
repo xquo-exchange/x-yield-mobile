@@ -1,8 +1,27 @@
 import React from 'react';
 import { Platform, View, Text, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PrivyProvider } from '@privy-io/expo';
 import { SmartWalletsProvider } from '@privy-io/expo/smart-wallets';
+import { PrivyElements } from '@privy-io/expo/ui';
 import AppNavigator from './src/navigation/AppNavigator';
+
+// Define Base chain for Privy (matches viem Chain type)
+const base = {
+  id: 8453,
+  name: 'Base',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'Ether',
+    symbol: 'ETH',
+  },
+  rpcUrls: {
+    default: { http: ['https://mainnet.base.org'] },
+  },
+  blockExplorers: {
+    default: { name: 'Basescan', url: 'https://basescan.org' },
+  },
+} as const;
 
 function WebNotSupported() {
   return (
@@ -24,21 +43,25 @@ export default function App() {
   }
 
   return (
-    <PrivyProvider
-      appId="cmk1awjuj002ri60dlbm7ot7y"
-      clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
-      config={{
-        embedded: {
-          ethereum: {
-            createOnLogin: 'users-without-wallets',
+    <SafeAreaProvider>
+      <PrivyProvider
+        appId="cmk1awjuj002ri60dlbm7ot7y"
+        clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
+        supportedChains={[base]}
+        config={{
+          embedded: {
+            ethereum: {
+              createOnLogin: 'users-without-wallets',
+            },
           },
-        },
-      }}
-    >
-      <SmartWalletsProvider>
-        <AppNavigator />
-      </SmartWalletsProvider>
-    </PrivyProvider>
+        }}
+      >
+        <SmartWalletsProvider>
+          <AppNavigator />
+          <PrivyElements />
+        </SmartWalletsProvider>
+      </PrivyProvider>
+    </SafeAreaProvider>
   );
 }
 
