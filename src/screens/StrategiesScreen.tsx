@@ -17,6 +17,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { STRATEGIES, getRiskLevelColor } from '../constants/strategies';
 import { useWalletBalance } from '../hooks/useWalletBalance';
+import { usePositions } from '../hooks/usePositions';
 import {
   buildStrategyBatch,
   executeStrategyBatch,
@@ -38,15 +39,16 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const displayAddress = smartWalletAddress || embeddedWalletAddress;
 
   const { usdc, refetch: refetchBalances } = useWalletBalance(displayAddress);
+  const { positions, totalUsdValue: positionsTotal, isLoading: positionsLoading, error: positionsError, refetch: refetchPositions } = usePositions(displayAddress);
   const [refreshing, setRefreshing] = useState(false);
   const [amount, setAmount] = useState('');
   const [isDepositing, setIsDepositing] = useState(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetchBalances();
+    await Promise.all([refetchBalances(), refetchPositions()]);
     setRefreshing(false);
-  }, [refetchBalances]);
+  }, [refetchBalances, refetchPositions]);
 
   const handleAmountChange = (value: string) => {
     const sanitized = value.replace(/[^0-9.]/g, '');
@@ -91,7 +93,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       const txHash = await executeStrategyBatch(smartWalletClient, batch);
 
       setAmount('');
+      // Refetch balances and positions after successful deposit
       refetchBalances();
+      refetchPositions();
 
       Alert.alert(
         'Deposit Confirmed!',
@@ -127,10 +131,55 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           <View style={styles.headerSpacer} />
         </View>
 
-        {/* Your Positions - Coming Soon */}
-        <View style={styles.comingSoonSection}>
-          <Text style={styles.sectionTitle}>Your Positions</Text>
-          <Text style={styles.comingSoonText}>Coming Soon</Text>
+        {/* Your Positions */}
+        <View style={styles.positionsSection}>
+          <View style={styles.positionsHeader}>
+            <Text style={styles.sectionTitle}>Your Positions</Text>
+            {parseFloat(positionsTotal) > 0 && (
+              <Text style={styles.positionsTotal}>${positionsTotal}</Text>
+            )}
+          </View>
+
+          {positionsLoading ? (
+            <View style={styles.positionsLoading}>
+              <ActivityIndicator size="small" color="#22c55e" />
+              <Text style={styles.positionsLoadingText}>Loading positions...</Text>
+            </View>
+          ) : positionsError ? (
+            <View style={styles.positionsError}>
+              <Text style={styles.positionsErrorText}>Failed to load positions</Text>
+              <TouchableOpacity onPress={refetchPositions} style={styles.retryButton}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : positions.length === 0 ? (
+            <View style={styles.noPositions}>
+              <Text style={styles.noPositionsText}>No positions yet</Text>
+              <Text style={styles.noPositionsSubtext}>Deposit USDC below to start earning yield</Text>
+            </View>
+          ) : (
+            <View style={styles.positionsList}>
+              {positions.map((position, index) => (
+                <View key={position.vaultId} style={[
+                  styles.positionRow,
+                  index < positions.length - 1 && styles.positionRowBorder
+                ]}>
+                  <View style={styles.positionInfo}>
+                    <Text style={styles.positionVaultName}>{position.vaultName}</Text>
+                    <Text style={styles.positionShares}>
+                      {parseFloat(position.sharesFormatted).toFixed(6)} shares
+                    </Text>
+                  </View>
+                  <View style={styles.positionValue}>
+                    <Text style={styles.positionAmount}>
+                      {parseFloat(position.assetsFormatted).toFixed(2)} USDC
+                    </Text>
+                    <Text style={styles.positionUsd}>${position.usdValue}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* Balance Card */}
@@ -269,24 +318,113 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
   },
-  // Coming Soon Section
-  comingSoonSection: {
+  // Positions Section
+  positionsSection: {
     backgroundColor: '#141419',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 24,
     borderWidth: 1,
     borderColor: '#27272a',
+  },
+  positionsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#ffffff',
+  },
+  positionsTotal: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#22c55e',
+  },
+  positionsLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  positionsLoadingText: {
+    marginLeft: 8,
+    color: '#71717a',
+    fontSize: 14,
+  },
+  positionsError: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  positionsErrorText: {
+    color: '#ef4444',
+    fontSize: 14,
     marginBottom: 8,
   },
-  comingSoonText: {
+  retryButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#ffffff',
     fontSize: 14,
+    fontWeight: '500',
+  },
+  noPositions: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  noPositionsText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  noPositionsSubtext: {
+    color: '#71717a',
+    fontSize: 13,
+  },
+  positionsList: {
+    marginTop: 4,
+  },
+  positionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  positionRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272a',
+  },
+  positionInfo: {
+    flex: 1,
+  },
+  positionVaultName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#ffffff',
+    marginBottom: 2,
+  },
+  positionShares: {
+    fontSize: 12,
+    color: '#71717a',
+  },
+  positionValue: {
+    alignItems: 'flex-end',
+  },
+  positionAmount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#22c55e',
+    marginBottom: 2,
+  },
+  positionUsd: {
+    fontSize: 12,
     color: '#71717a',
   },
   // Balance Card
