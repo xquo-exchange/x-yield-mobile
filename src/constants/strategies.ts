@@ -67,11 +67,11 @@ export const MORPHO_VAULTS: Record<string, MorphoVault> = {
     curator: 'Gauntlet',
   },
 
-  // Steakhouse USDC vault
+  // Steakhouse Prime USDC vault (correct Base address)
   STEAKHOUSE_USDC: {
     id: 'steakhouse-usdc',
-    name: 'Steakhouse USDC',
-    address: '0xbEef047a543E45807105E51A8BBEFCc5950fcfBa',
+    name: 'Steakhouse Prime USDC',
+    address: '0xBEEFE94c8aD530842bfE7d8B397938fFc1cb83b2',
     asset: TOKENS.USDC as `0x${string}`,
     assetSymbol: 'USDC',
     assetDecimals: 6,

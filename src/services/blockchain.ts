@@ -237,31 +237,35 @@ export async function getVaultPositions(userAddress: Address): Promise<Positions
     const positions: VaultPosition[] = [];
     let totalUsd = 0;
 
-    // Fetch positions for each vault
+    // Fetch positions for each vault (show all, even with 0 balance)
     for (const vault of usdcVaults) {
       const shares = await getVaultShares(vault.address, userAddress);
+      const assets = shares > BigInt(0)
+        ? await convertSharesToAssets(vault.address, shares)
+        : BigInt(0);
+
+      // Shares are 18 decimals, assets (USDC) are 6 decimals
+      const sharesFormatted = formatUnits(shares, 18);
+      const assetsFormatted = formatUnits(assets, 6);
+      const usdValue = parseFloat(assetsFormatted);
+
+      positions.push({
+        vaultId: vault.id,
+        vaultName: vault.name,
+        vaultAddress: vault.address,
+        shares,
+        sharesFormatted,
+        assets,
+        assetsFormatted,
+        usdValue: usdValue.toFixed(2),
+      });
+
+      totalUsd += usdValue;
 
       if (shares > BigInt(0)) {
-        const assets = await convertSharesToAssets(vault.address, shares);
-
-        // Shares are 18 decimals, assets (USDC) are 6 decimals
-        const sharesFormatted = formatUnits(shares, 18);
-        const assetsFormatted = formatUnits(assets, 6);
-        const usdValue = parseFloat(assetsFormatted);
-
-        positions.push({
-          vaultId: vault.id,
-          vaultName: vault.name,
-          vaultAddress: vault.address,
-          shares,
-          sharesFormatted,
-          assets,
-          assetsFormatted,
-          usdValue: usdValue.toFixed(2),
-        });
-
-        totalUsd += usdValue;
         console.log(`[Positions] ${vault.name}: ${assetsFormatted} USDC`);
+      } else {
+        console.log(`[Positions] ${vault.name}: 0 USDC (no position)`);
       }
     }
 
