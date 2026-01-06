@@ -9,7 +9,19 @@ A DeFi yield optimization mobile app built with React Native, Expo, and Privy au
 - **Gas Sponsorship** - All transactions are gas-free for users (via Pimlico paymaster)
 - **Morpho Vaults** - Deposit into curated USDC lending strategies
 - **Multi-Vault Allocation** - Single transaction splits deposits across multiple vaults
+- **Position Tracking** - Real-time view of vault positions and USD values
+- **Withdraw All** - One-tap withdrawal from all vault positions
 - **Real-time Balances** - View ETH and USDC balances on Base chain
+
+## Verified On-Chain Transactions
+
+The app has been tested end-to-end on Base mainnet:
+
+| Action | Transaction | Block |
+|--------|-------------|-------|
+| Deposit to 3 vaults | [0x43efeb9d...](https://basescan.org/tx/0x43efeb9da9099190f36c7ca79bc38bcbe921353771690db0eecda0ce827f1ae7) | 40458963 |
+| Deposit (second) | [0xa73d50d4...](https://basescan.org/tx/0xa73d50d43b1a1326a55ee48f2a4c98d81171b7bf13aaa041b16730f717c163bb) | 40459581 |
+| Withdraw all | [0x197c9449...](https://basescan.org/tx/0x197c94496f1ecae304f12c75a59cffa7075b09049fd9a824c68c1141f0a8d81a) | 40459760 |
 
 ## Tech Stack
 
@@ -19,7 +31,7 @@ A DeFi yield optimization mobile app built with React Native, Expo, and Privy au
 - **Account Abstraction** - ERC-4337 smart wallets
 - **Pimlico** - Bundler & paymaster for gas sponsorship
 - **Base** - L2 blockchain (Coinbase)
-- **Morpho** - DeFi lending protocol
+- **Morpho** - DeFi lending protocol (ERC-4626 vaults)
 - **viem** - Ethereum library
 
 ## Project Structure
@@ -32,16 +44,17 @@ x-yield-mobile/
 │   │   ├── contracts.ts    # Contract addresses and ABIs
 │   │   └── strategies.ts   # Morpho vault configurations
 │   ├── hooks/
-│   │   └── useWalletBalance.ts  # Balance fetching hook
+│   │   ├── useWalletBalance.ts  # Balance fetching hook
+│   │   └── usePositions.ts      # Vault positions hook
 │   ├── navigation/
 │   │   └── AppNavigator.tsx     # React Navigation setup
 │   ├── screens/
 │   │   ├── WelcomeScreen.tsx    # Login screen
 │   │   ├── DashboardScreen.tsx  # Main dashboard
-│   │   └── StrategiesScreen.tsx # Deposit UI
+│   │   └── StrategiesScreen.tsx # Deposit/Withdraw UI
 │   └── services/
-│       ├── blockchain.ts        # RPC calls for balances
-│       └── strategyExecution.ts # Transaction building
+│       ├── blockchain.ts        # RPC calls for balances & positions
+│       └── strategyExecution.ts # Transaction building & execution
 ├── app.json                # Expo config
 └── package.json
 ```
@@ -135,25 +148,46 @@ PIMLICO_API_KEY=your_pimlico_api_key
 3. Builds batch transaction: 3 approvals + 3 deposits
 4. Sends via Privy smart wallet (gasless via Pimlico paymaster)
 5. Waits for on-chain confirmation
-6. Shows success with transaction hash
+6. Updates positions display
+
+### Withdraw Flow
+1. User taps "Withdraw All" button in positions section
+2. Confirmation dialog shows total value and vault count
+3. Builds batch redeem calls using ERC-4626 `redeem(shares, receiver, owner)`
+4. Sends via smart wallet (gasless)
+5. USDC returns to wallet balance
 
 ### Morpho Vaults (Conservative USDC Strategy)
 
-| Vault | Allocation | APY |
-|-------|------------|-----|
-| Gauntlet USDC Prime | 40% | 5.2% |
-| Steakhouse USDC | 35% | 5.8% |
-| Re7 USDC | 25% | 4.9% |
+| Vault | Address | Allocation | APY |
+|-------|---------|------------|-----|
+| Gauntlet USDC Core | `0x6abD...6C40` | 40% | 5.2% |
+| Steakhouse Prime USDC | `0xBEEF...83b2` | 35% | 5.8% |
+| Re7 USDC | `0x12AF...FbD9` | 25% | 4.9% |
 
-## Known Issues / TODO
+## What's Working
 
-- [ ] Position tracking (show deposited amounts)
-- [ ] Withdraw functionality
-- [ ] Multiple strategy options
-- [ ] Price oracle integration
-- [ ] Push notifications
+- [x] Email authentication via Privy
+- [x] Smart wallet creation (ERC-4337)
+- [x] Gas sponsorship via Pimlico paymaster
+- [x] USDC deposits to Morpho vaults
+- [x] Multi-vault allocation in single transaction
+- [x] Position tracking with real-time balances
+- [x] Withdraw all positions
+- [x] ETH/USDC wallet balance display
+- [x] Pull-to-refresh for balances
+- [x] Transaction retry logic for nonce errors
+- [x] RPC fallback and rate limit handling
+
+## Future Development
+
+- [ ] Multiple strategy options (moderate, aggressive)
+- [ ] Individual vault withdrawal
+- [ ] Price oracle integration for accurate APY
+- [ ] Push notifications for yield updates
 - [ ] Transaction history
 - [ ] Biometric authentication
+- [ ] Testnet mode toggle
 
 ## License
 

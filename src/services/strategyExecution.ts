@@ -8,10 +8,6 @@ import { Strategy, MORPHO_VAULT_ABI } from '../constants/strategies';
 import { ERC20_ABI, BASE_RPC_URL, BASE_RPC_FALLBACK } from '../constants/contracts';
 import { type VaultPosition } from './blockchain';
 
-// TEST MODE: Set to true to only execute a single approve transaction
-// This helps isolate nonce issues from batch transaction complexity
-const TEST_MODE_SINGLE_TX = false;
-
 export interface TransactionCall {
   to: `0x${string}`;
   data: `0x${string}`;
@@ -527,16 +523,7 @@ export async function executeStrategyBatch(
     throw new Error('No transactions to execute');
   }
 
-  // Determine which calls to execute
-  let callsToExecute = batch.calls;
-
-  // TEST MODE: Only execute the first approve call to isolate issues
-  if (TEST_MODE_SINGLE_TX) {
-    // Find the first approve call (it's always an approve call in our batch)
-    callsToExecute = [batch.calls[0]];
-    console.log('[TEST MODE] Only executing first call (approve)');
-  }
-
+  const callsToExecute = batch.calls;
   const walletAddress = client.account.address;
   console.log(`[Deposit] Smart wallet: ${walletAddress}`);
   console.log(`[Deposit] Calls to execute: ${callsToExecute.length}`);
@@ -614,11 +601,6 @@ export async function executeStrategyBatch(
       }
 
       console.log(`[Deposit] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
-
-      // Success!
-      if (TEST_MODE_SINGLE_TX) {
-        return hash + ' (TEST MODE: approve only)';
-      }
       return hash;
 
     } catch (error) {
