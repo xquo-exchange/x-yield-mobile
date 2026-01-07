@@ -246,6 +246,9 @@ APY is fetched live from Morpho API (typically 4-7% depending on market conditio
 - [x] Fee-free withdrawal when no profits
 - [x] ETH/USDC wallet balance display
 - [x] Pull-to-refresh for balances
+- [x] Wallet address display with copy button
+- [x] View on BaseScan link
+- [x] Wallet security info
 - [x] Transaction retry logic for nonce errors
 - [x] RPC fallback and rate limit handling
 
