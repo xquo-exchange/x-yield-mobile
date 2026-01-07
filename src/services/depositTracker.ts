@@ -50,7 +50,9 @@ async function saveDeposits(data: DepositData): Promise<void> {
 export async function getTotalDeposited(walletAddress: string): Promise<number> {
   const deposits = await getAllDeposits();
   const record = deposits[walletAddress.toLowerCase()];
-  return record?.totalDeposited || 0;
+  const totalDeposited = record?.totalDeposited || 0;
+  console.log(`[DepositTracker] getTotalDeposited for ${walletAddress.slice(0, 10)}...: $${totalDeposited.toFixed(6)}`);
+  return totalDeposited;
 }
 
 /**
@@ -72,8 +74,8 @@ export async function recordDeposit(
   };
 
   await saveDeposits(deposits);
-  console.log(`[DepositTracker] Recorded deposit: +$${amount.toFixed(2)} for ${address.slice(0, 10)}...`);
-  console.log(`[DepositTracker] New total deposited: $${deposits[address].totalDeposited.toFixed(2)}`);
+  console.log(`[DepositTracker] Recorded deposit: +$${amount.toFixed(6)} for ${address.slice(0, 10)}...`);
+  console.log(`[DepositTracker] New total deposited: $${deposits[address].totalDeposited.toFixed(6)}`);
 }
 
 /**
@@ -119,9 +121,9 @@ export async function recordWithdrawal(
       lastUpdated: Date.now(),
     };
 
-    console.log(`[DepositTracker] Withdrawal: $${withdrawnValue.toFixed(2)} (${(withdrawalRatio * 100).toFixed(1)}% of holdings)`);
-    console.log(`[DepositTracker] Deposit reduction: $${depositReduction.toFixed(2)}`);
-    console.log(`[DepositTracker] Remaining deposits: $${newTotalDeposited.toFixed(2)}`);
+    console.log(`[DepositTracker] Withdrawal: $${withdrawnValue.toFixed(6)} (${(withdrawalRatio * 100).toFixed(4)}% of holdings)`);
+    console.log(`[DepositTracker] Deposit reduction: $${depositReduction.toFixed(6)}`);
+    console.log(`[DepositTracker] Remaining deposits: $${newTotalDeposited.toFixed(6)}`);
   }
 
   await saveDeposits(deposits);

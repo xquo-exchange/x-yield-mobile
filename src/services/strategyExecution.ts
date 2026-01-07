@@ -352,20 +352,33 @@ export function buildWithdrawBatch(
         feeAmountRaw
       )
     );
-    console.log(`[Withdraw] Fee transfer added: $${feeAmount.toFixed(2)} to ${XYIELD_TREASURY_ADDRESS}`);
+    console.log(`[Withdraw] Fee transfer added: $${feeAmount.toFixed(6)} (${feeAmountRaw} raw) to ${XYIELD_TREASURY_ADDRESS}`);
   } else if (hasProfits) {
-    console.log(`[Withdraw] Fee skipped: $${feeAmount.toFixed(4)} below minimum $${XYIELD_MIN_FEE_USDC}`);
+    console.log(`[Withdraw] Fee skipped: $${feeAmount.toFixed(6)} below minimum $${XYIELD_MIN_FEE_USDC}`);
   } else {
     console.log(`[Withdraw] No fee: No profits`);
   }
 
-  // Format values with appropriate precision
-  // Use 4 decimals for small values, 2 for larger ones
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // FULL PRECISION DEBUG - Verify 15% fee calculation
+  // ═══════════════════════════════════════════════════════════════════════════════
+  console.log('[Withdraw] ══════════════════════════════════════════════════════');
+  console.log('[Withdraw] FULL PRECISION CALCULATION:');
+  console.log('[Withdraw] totalDeposited:', totalDeposited.toFixed(6));
+  console.log('[Withdraw] currentValue:', currentValue.toFixed(6));
+  console.log('[Withdraw] yield:', yieldAmount.toFixed(6));
+  console.log('[Withdraw] yieldPercent:', (yieldPercent).toFixed(6) + '%');
+  console.log('[Withdraw] fee (15% of yield):', feeAmount.toFixed(6));
+  console.log('[Withdraw] feeAmountRaw:', feeAmountRaw.toString(), 'raw USDC units');
+  console.log('[Withdraw] userReceives:', userReceives.toFixed(6));
+  console.log('[Withdraw] VERIFICATION: yield × 0.15 =', (yieldAmount * 0.15).toFixed(6));
+  console.log('[Withdraw] VERIFICATION: currentValue - fee =', (currentValue - feeAmount).toFixed(6));
+  console.log('[Withdraw] ══════════════════════════════════════════════════════');
+
+  // Format ALL values with full USDC precision (6 decimals)
+  // This allows accurate verification of fee calculations
   const formatValue = (val: number): string => {
-    if (Math.abs(val) < 0.01 && val !== 0) {
-      return val.toFixed(4); // Show more precision for tiny values
-    }
-    return val.toFixed(2);
+    return val.toFixed(6);
   };
 
   return {

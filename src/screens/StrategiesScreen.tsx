@@ -31,6 +31,7 @@ import {
   getTotalDeposited,
   recordWithdrawal,
 } from '../services/depositTracker';
+import AnimatedBalance from '../components/AnimatedBalance';
 
 type StrategiesScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Strategies'>;
@@ -54,9 +55,21 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [totalDeposited, setTotalDeposited] = useState(0);
 
   const hasPositions = positions.some(p => p.shares > BigInt(0));
   const savingsAmount = parseFloat(positionsTotal) || 0;
+
+  // Load total deposited for earnings calculation
+  React.useEffect(() => {
+    const loadDeposited = async () => {
+      if (displayAddress) {
+        const deposited = await getTotalDeposited(displayAddress);
+        setTotalDeposited(deposited);
+      }
+    };
+    loadDeposited();
+  }, [displayAddress, positions]); // Refresh when positions change
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -151,16 +164,20 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       totalDeposited
     );
 
-    // Build user-friendly confirmation message
+    // Build user-friendly confirmation message with FULL PRECISION (6 decimals)
+    // This allows verification that the 15% fee is calculated correctly
     let confirmMessage: string;
     if (batch.hasProfits) {
       // Show fee breakdown when there's profit (even tiny amounts)
+      // All values already have 6 decimal places from buildWithdrawBatch
       confirmMessage = [
         `You deposited: $${batch.totalDeposited}`,
         `Current value: $${batch.currentValue}`,
+        ``,
         `Earnings: +$${batch.yieldAmount} (+${batch.yieldPercent}%)`,
         ``,
         `Fee (${batch.feePercent}% of earnings): $${batch.feeAmount}`,
+        `Fee raw: ${batch.feeAmountRaw.toString()} USDC units`,
         ``,
         `You'll receive: $${batch.userReceives}`,
       ].join('\n');
@@ -201,10 +218,11 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
               let successMessage: string;
               if (batch.hasProfits) {
+                // Full precision for verification
                 successMessage = [
                   `Withdrew $${batch.currentValue}`,
                   `You earned: +$${batch.yieldAmount}`,
-                  `Fee paid: $${batch.feeAmount}`,
+                  `Fee paid: $${batch.feeAmount} (${batch.feeAmountRaw.toString()} raw)`,
                   `You received: $${batch.userReceives}`,
                 ].join('\n');
               } else {
@@ -272,12 +290,17 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             </View>
           ) : (
             <View style={styles.savingsContent}>
-              {/* Main Savings Display */}
-              <View style={styles.savingsMain}>
-                <Text style={styles.savingsLabel}>Your Savings</Text>
-                <Text style={styles.savingsAmount}>${savingsAmount.toFixed(2)}</Text>
-                <Text style={styles.savingsApy}>Earning ~{displayApy}% APY</Text>
-              </View>
+              {/* Animated Savings Display - shows real-time yield growth */}
+              <AnimatedBalance
+                balance={savingsAmount}
+                apy={parseFloat(displayApy)}
+                isAnimating={savingsAmount > 0}
+                fontSize={38}
+                label="Your Savings"
+                totalDeposited={totalDeposited}
+                showTotalEarned={totalDeposited > 0}
+                showYieldEstimate={true}
+              />
 
               {/* Diversification Note */}
               <TouchableOpacity
