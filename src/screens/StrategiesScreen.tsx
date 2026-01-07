@@ -30,6 +30,7 @@ import {
   recordDeposit,
   getTotalDeposited,
   recordWithdrawal,
+  recoverMissingDeposit,
 } from '../services/depositTracker';
 import AnimatedBalance from '../components/AnimatedBalance';
 
@@ -61,15 +62,25 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const savingsAmount = parseFloat(positionsTotal) || 0;
 
   // Load total deposited for earnings calculation
+  // Also recovers missing deposit data (security: prevents fee avoidance via reinstall)
   React.useEffect(() => {
     const loadDeposited = async () => {
-      if (displayAddress) {
+      if (displayAddress && savingsAmount > 0) {
+        // Try to recover missing deposit data first
+        const recovered = await recoverMissingDeposit(displayAddress, savingsAmount);
+        if (recovered) {
+          console.log('[Strategies] Deposit data was recovered from current value');
+        }
+
+        const deposited = await getTotalDeposited(displayAddress);
+        setTotalDeposited(deposited);
+      } else if (displayAddress) {
         const deposited = await getTotalDeposited(displayAddress);
         setTotalDeposited(deposited);
       }
     };
     loadDeposited();
-  }, [displayAddress, positions]); // Refresh when positions change
+  }, [displayAddress, positions, savingsAmount]); // Refresh when positions change
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

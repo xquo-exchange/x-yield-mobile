@@ -218,6 +218,43 @@ export async function getYieldBreakdown(
 }
 
 /**
+ * SECURITY: Recover deposit data when missing (e.g., after app reinstall)
+ *
+ * When user has vault positions but no deposit record, we treat the current
+ * value as their deposit to prevent fee avoidance. This function persists
+ * that recovered value so future operations don't need the safeguard.
+ *
+ * @param walletAddress - User's wallet address
+ * @param currentValue - Current value of their positions
+ * @returns true if recovery was performed, false if not needed
+ */
+export async function recoverMissingDeposit(
+  walletAddress: string,
+  currentValue: number
+): Promise<boolean> {
+  const existingDeposit = await getTotalDeposited(walletAddress);
+
+  if (existingDeposit === 0 && currentValue > 0) {
+    console.warn('[SECURITY] Recovering missing deposit data');
+    console.warn(`[SECURITY] Setting deposit to current value: $${currentValue.toFixed(6)}`);
+
+    const deposits = await getAllDeposits();
+    const address = walletAddress.toLowerCase();
+
+    deposits[address] = {
+      totalDeposited: currentValue,
+      lastUpdated: Date.now(),
+    };
+
+    await saveDeposits(deposits);
+    console.warn('[SECURITY] Deposit data recovered and saved');
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Clear all deposit data (for testing/debugging)
  */
 export async function clearAllDeposits(): Promise<void> {

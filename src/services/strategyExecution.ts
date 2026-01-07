@@ -310,18 +310,32 @@ export function buildWithdrawBatch(
   // Convert to USD values (USDC has 6 decimals)
   const currentValue = Number(totalAssets) / 1_000_000;
 
-  // SAFEGUARD: If totalDeposited is 0 but currentValue > 0, treat as principal
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // SECURITY SAFEGUARD: Prevent fee avoidance via app reinstall
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // If user has vault positions but no deposit record (AsyncStorage cleared/reinstall),
+  // treat current value as their deposit. This is CONSERVATIVE - we may miss some
+  // real profits, but we prevent fake "earnings" from inflated yield calculations.
+  //
+  // Production fix: Store deposits in backend database linked to wallet address
+  // ═══════════════════════════════════════════════════════════════════════════════
   if (totalDeposited === 0 && currentValue > 0) {
+    console.warn('[SECURITY] No deposit record but user has positions!');
+    console.warn('[SECURITY] Possible app reinstall or data loss');
+    console.warn('[SECURITY] Treating current value as deposit (no fee)');
+    console.warn(`[SECURITY] Wallet: ${walletAddress}`);
+    console.warn(`[SECURITY] Current value: $${currentValue.toFixed(6)}`);
+
     return {
       calls,
       positions: positionsWithBalance,
-      totalDeposited: currentValue.toFixed(2),
-      currentValue: currentValue.toFixed(2),
-      yieldAmount: '0.00',
+      totalDeposited: currentValue.toFixed(6),
+      currentValue: currentValue.toFixed(6),
+      yieldAmount: '0.000000',
       yieldPercent: '0.0',
-      feeAmount: '0.00',
+      feeAmount: '0.000000',
       feeAmountRaw: BigInt(0),
-      userReceives: currentValue.toFixed(2),
+      userReceives: currentValue.toFixed(6),
       feePercent: XYIELD_FEE_PERCENT,
       hasProfits: false,
     };
