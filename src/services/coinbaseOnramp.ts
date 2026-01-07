@@ -4,15 +4,11 @@
  * Simple approach: Open Coinbase app/website for users to buy USDC,
  * then they can send it to their X-Yield wallet address.
  *
- * Note: Direct Coinbase Onramp URLs now require server-side session tokens
- * (as of July 31, 2025). For a simpler integration without a backend,
- * we direct users to Coinbase to purchase USDC manually.
- *
- * For automatic onramp, use Privy's useFundWallet hook which handles
- * the Coinbase integration.
+ * TODO: Integrate with x-yield-api backend for direct Coinbase Onramp
+ * with session token authentication for seamless one-click purchases.
  */
 
-import { Linking, Alert, Platform } from 'react-native';
+import { Linking, Alert } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 
 // Coinbase URLs
@@ -62,6 +58,7 @@ export async function openCoinbaseToBuyUsdc(): Promise<boolean> {
  *
  * @param walletAddress - User's wallet address to display
  * @param onCopyAddress - Callback to copy the address
+ * @param onShowQrCode - Callback to show QR code
  */
 export function showBuyUsdcInstructions(
   walletAddress: string,
