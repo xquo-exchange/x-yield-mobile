@@ -11,6 +11,8 @@ import {
   Modal,
   Platform,
   Linking,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
@@ -41,6 +43,8 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const [copied, setCopied] = React.useState(false);
   const [isBuyingUsdc, setIsBuyingUsdc] = React.useState(false);
   const [prefetchedOnrampUrl, setPrefetchedOnrampUrl] = React.useState<string | null>(null);
+  const [isCheckingFunds, setIsCheckingFunds] = React.useState(false);
+  const [wasInCoinbase, setWasInCoinbase] = React.useState(false);
 
   const { apy: displayApy, refetch: refetchApy } = useVaultApy();
 
@@ -54,13 +58,27 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const smartWalletAddress = smartWalletFromHook || smartWalletFromLinkedAccounts;
   const displayAddress = smartWalletAddress || embeddedWalletAddress;
 
-  // Pre-warm browser AND pre-fetch session URL when funding modal opens
+  // Fetch balances and positions (must be before useEffects that use refetch functions)
+  const { usdc, isLoading: balanceLoading, refetch: refetchBalances } = useWalletBalance(displayAddress);
+  const { totalUsdValue: savingsTotal, isLoading: positionsLoading, refetch: refetchPositions } = usePositions(displayAddress);
+
+  const isLoading = balanceLoading || positionsLoading;
+
+  // Calculate totals
+  const cashBalance = usdc ? parseFloat(usdc.balance) : 0;
+  const savingsBalance = parseFloat(savingsTotal) || 0;
+  const totalBalance = cashBalance + savingsBalance;
+  const hasSavings = savingsBalance > 0;
+  const hasCash = cashBalance > 0;
+
+  // Pre-fetch session URL when funding modal opens
+  // NOTE: warmUpAsync disabled - was causing browser to hang
   React.useEffect(() => {
     if (showFundingModal && displayAddress) {
-      console.log('[Prefetch] Modal opened - pre-warming browser and fetching session...');
+      console.log('[Prefetch] Modal opened - fetching session URL...');
 
-      // Pre-warm the browser
-      WebBrowser.warmUpAsync();
+      // Pre-warm disabled - was blocking browser
+      // WebBrowser.warmUpAsync();
 
       // Pre-fetch the onramp session URL
       getOnrampSessionUrl(displayAddress).then((url) => {
@@ -74,23 +92,31 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       setPrefetchedOnrampUrl(null);
     }
 
-    return () => {
-      WebBrowser.coolDownAsync();
-    };
+    // Cleanup disabled
+    // return () => { WebBrowser.coolDownAsync(); };
   }, [showFundingModal, displayAddress]);
 
-  // Fetch balances and positions
-  const { usdc, isLoading: balanceLoading, refetch: refetchBalances } = useWalletBalance(displayAddress);
-  const { totalUsdValue: savingsTotal, isLoading: positionsLoading, refetch: refetchPositions } = usePositions(displayAddress);
+  // Auto-refresh when user returns from Coinbase
+  React.useEffect(() => {
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      // When app comes to foreground and user was in Coinbase
+      if (nextAppState === 'active' && wasInCoinbase) {
+        console.log('[AppState] User returned from Coinbase - refreshing balances...');
+        setWasInCoinbase(false);
+        setIsCheckingFunds(true);
 
-  const isLoading = balanceLoading || positionsLoading;
+        // Wait a moment then refresh
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await Promise.all([refetchBalances(), refetchPositions()]);
 
-  // Calculate totals
-  const cashBalance = usdc ? parseFloat(usdc.balance) : 0;
-  const savingsBalance = parseFloat(savingsTotal) || 0;
-  const totalBalance = cashBalance + savingsBalance;
-  const hasSavings = savingsBalance > 0;
-  const hasCash = cashBalance > 0;
+        setIsCheckingFunds(false);
+        console.log('[AppState] Balance refresh complete');
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [wasInCoinbase, refetchBalances, refetchPositions]);
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -125,10 +151,20 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   };
 
   const handleBuyUsdc = async () => {
+    // Prevent double execution
+    if (isBuyingUsdc) {
+      console.log('[BuyUSDC] Already in progress, ignoring');
+      return;
+    }
+
     if (!displayAddress) {
       Alert.alert('Error', 'No wallet address available');
       return;
     }
+
+    // IMPORTANT: Capture the prefetched URL BEFORE closing modal
+    // (closing modal triggers useEffect that clears prefetchedOnrampUrl)
+    const urlToOpen = prefetchedOnrampUrl;
 
     // Close modal and show loading
     setShowFundingModal(false);
@@ -136,28 +172,40 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
     const startTime = Date.now();
     console.log('[BuyUSDC] Starting...');
+    console.log('[BuyUSDC] Prefetched URL available:', !!urlToOpen);
 
     try {
       let opened = false;
 
       // Use prefetched URL if available (instant!)
-      if (prefetchedOnrampUrl) {
+      if (urlToOpen) {
         console.log('[BuyUSDC] Using prefetched URL - skipping API call!');
+        console.log('[BuyUSDC] URL preview:', urlToOpen.substring(0, 80) + '...');
+
         const browserStart = Date.now();
+        console.log('[BuyUSDC] Opening with Linking.openURL...');
 
-        const result = await WebBrowser.openBrowserAsync(prefetchedOnrampUrl, {
-          dismissButtonStyle: 'close',
-          presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
-        });
+        // Mark that user is going to Coinbase (for auto-refresh on return)
+        setWasInCoinbase(true);
 
-        const browserTime = Date.now() - browserStart;
+        // Open in Safari - WebBrowser.openBrowserAsync hangs in simulator
+        await Linking.openURL(urlToOpen);
+
         const totalTime = Date.now() - startTime;
-        console.log(`[BuyUSDC] Browser opened in ${browserTime}ms, total: ${totalTime}ms (prefetched)`);
-        console.log('[BuyUSDC] Browser result:', result.type);
+        console.log(`[BuyUSDC] Safari opened in ${totalTime}ms (prefetched)`);
+
+        // Show message to user
+        Alert.alert(
+          'Complete Your Purchase',
+          'You\'ll be taken to Coinbase to buy USDC. When done, return here and your balance will update automatically.',
+          [{ text: 'OK' }]
+        );
+
         opened = true;
       } else {
         // Fallback: fetch URL and open (slower path)
         console.log('[BuyUSDC] No prefetched URL, calling API...');
+        setWasInCoinbase(true);
         opened = await openCoinbaseOnramp(displayAddress);
         const totalTime = Date.now() - startTime;
         console.log(`[BuyUSDC] Total time (non-prefetched): ${totalTime}ms`);
@@ -409,6 +457,14 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#22c55e" />
           <Text style={styles.loadingText}>Opening Coinbase...</Text>
+        </View>
+      )}
+
+      {/* Loading Overlay for Checking Funds */}
+      {isCheckingFunds && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#22c55e" />
+          <Text style={styles.loadingText}>Checking for new funds...</Text>
         </View>
       )}
 
