@@ -24,7 +24,7 @@ import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
 import AnimatedBalance from '../components/AnimatedBalance';
-import { openCoinbaseToBuyUsdc } from '../services/coinbaseOnramp';
+import { openCoinbaseOnramp, openCoinbaseToBuyUsdc } from '../services/coinbaseOnramp';
 
 type DashboardScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Dashboard'>;
@@ -38,6 +38,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const [showFundingModal, setShowFundingModal] = React.useState(false);
   const [fundingView, setFundingView] = React.useState<'options' | 'receive'>('options');
   const [copied, setCopied] = React.useState(false);
+  const [isBuyingUsdc, setIsBuyingUsdc] = React.useState(false);
 
   const { apy: displayApy, refetch: refetchApy } = useVaultApy();
 
@@ -102,40 +103,57 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       return;
     }
 
-    // Show buy instructions with options
-    const shortAddress = `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}`;
+    // Close modal and show loading
+    setShowFundingModal(false);
+    setIsBuyingUsdc(true);
 
-    Alert.alert(
-      'Buy USDC',
-      `To add funds to X-Yield:\n\n` +
-        `1. Buy USDC on Coinbase\n` +
-        `2. Withdraw to your wallet\n` +
-        `3. Use Base network\n\n` +
-        `Your address: ${shortAddress}`,
-      [
-        {
-          text: 'Open Coinbase',
-          onPress: async () => {
-            const opened = await openCoinbaseToBuyUsdc();
-            if (!opened) {
-              Alert.alert('Error', 'Could not open Coinbase');
-            }
+    try {
+      // Try to open Coinbase Onramp via backend
+      const opened = await openCoinbaseOnramp(displayAddress);
+
+      if (!opened) {
+        // Show fallback options if Coinbase Onramp failed
+        Alert.alert(
+          'Buy USDC',
+          'Choose how to get USDC:',
+          [
+            {
+              text: 'Open Coinbase App',
+              onPress: async () => {
+                await openCoinbaseToBuyUsdc();
+              },
+            },
+            {
+              text: 'Show QR Code',
+              onPress: () => {
+                setShowFundingModal(true);
+                setFundingView('receive');
+              },
+            },
+            {
+              text: 'Copy Address',
+              onPress: handleCopyAddress,
+            },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('[Dashboard] Buy USDC error:', error);
+      Alert.alert(
+        'Error',
+        'Could not open Coinbase. Would you like to copy your wallet address instead?',
+        [
+          {
+            text: 'Copy Address',
+            onPress: handleCopyAddress,
           },
-        },
-        {
-          text: 'Show QR Code',
-          onPress: () => {
-            setShowFundingModal(true);
-            setFundingView('receive');
-          },
-        },
-        {
-          text: 'Copy Address',
-          onPress: handleCopyAddress,
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+    } finally {
+      setIsBuyingUsdc(false);
+    }
   };
 
   const openFundingModal = () => {
@@ -333,6 +351,14 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           </>
         )}
       </ScrollView>
+
+      {/* Loading Overlay for Buy USDC */}
+      {isBuyingUsdc && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#22c55e" />
+          <Text style={styles.loadingText}>Opening Coinbase...</Text>
+        </View>
+      )}
 
       {/* Add Funds Modal */}
       <Modal
@@ -886,6 +912,24 @@ const styles = StyleSheet.create({
   networkText: {
     fontSize: 13,
     color: '#3b82f6',
+    fontWeight: '500',
+  },
+  // Loading Overlay
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#ffffff',
+    marginTop: 16,
     fontWeight: '500',
   },
 });

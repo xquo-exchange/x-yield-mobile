@@ -1,26 +1,120 @@
 /**
- * Coinbase Funding Service
+ * Coinbase Onramp Service
  *
- * Simple approach: Open Coinbase app/website for users to buy USDC,
- * then they can send it to their X-Yield wallet address.
+ * Integrates with x-yield-api backend to get Coinbase Onramp session tokens
+ * for seamless one-click USDC purchases.
  *
- * TODO: Integrate with x-yield-api backend for direct Coinbase Onramp
- * with session token authentication for seamless one-click purchases.
+ * Flow:
+ * 1. User taps "Buy USDC"
+ * 2. App calls backend POST /api/onramp/session
+ * 3. Backend returns Coinbase URL with sessionToken
+ * 4. App opens URL in browser
+ * 5. User completes purchase on Coinbase
+ * 6. USDC arrives in wallet on Base
  */
 
 import { Linking, Alert } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 
-// Coinbase URLs
-const COINBASE_APP_URL = 'coinbase://';
-const COINBASE_WEB_URL = 'https://www.coinbase.com';
-const COINBASE_USDC_URL = 'https://www.coinbase.com/price/usd-coin';
+// Backend API URL
+const API_BASE_URL = 'https://x-yield-api.vercel.app';
 
-// Deep link to buy USDC on Coinbase app
+// Base chain ID
+const BASE_CHAIN_ID = 8453;
+
+// Fallback Coinbase URLs (if backend fails)
+const COINBASE_APP_URL = 'coinbase://';
+const COINBASE_USDC_URL = 'https://www.coinbase.com/price/usd-coin';
 const COINBASE_BUY_USDC_DEEP_LINK = 'coinbase://buy?asset=USDC';
 
+interface OnrampSessionResponse {
+  url: string;
+  error?: string;
+}
+
 /**
- * Open Coinbase to buy USDC
+ * Get Coinbase Onramp session URL from backend
+ *
+ * @param walletAddress - User's wallet address for receiving USDC
+ * @returns The Coinbase Onramp URL with session token, or null if failed
+ */
+export async function getOnrampSessionUrl(walletAddress: string): Promise<string | null> {
+  try {
+    console.log('[Coinbase] Requesting onramp session for:', walletAddress);
+
+    const response = await fetch(`${API_BASE_URL}/api/onramp/session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        walletAddress,
+        chainId: BASE_CHAIN_ID,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Coinbase] Backend error:', response.status, errorText);
+      return null;
+    }
+
+    const data: OnrampSessionResponse = await response.json();
+
+    if (data.url) {
+      console.log('[Coinbase] Got onramp URL');
+      return data.url;
+    }
+
+    if (data.error) {
+      console.error('[Coinbase] API error:', data.error);
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[Coinbase] Failed to get session:', error);
+    return null;
+  }
+}
+
+/**
+ * Open Coinbase Onramp with session token
+ *
+ * Gets session URL from backend and opens it in browser.
+ * Falls back to manual Coinbase flow if backend fails.
+ *
+ * @param walletAddress - User's wallet address
+ * @returns true if opened successfully, false otherwise
+ */
+export async function openCoinbaseOnramp(walletAddress: string): Promise<boolean> {
+  try {
+    // Get session URL from backend
+    const onrampUrl = await getOnrampSessionUrl(walletAddress);
+
+    if (onrampUrl) {
+      console.log('[Coinbase] Opening onramp URL');
+
+      // Open in browser
+      const result = await WebBrowser.openBrowserAsync(onrampUrl, {
+        dismissButtonStyle: 'close',
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+      });
+
+      console.log('[Coinbase] Browser result:', result.type);
+      return true;
+    }
+
+    // Fallback to manual flow
+    console.log('[Coinbase] Session failed, using fallback');
+    return await openCoinbaseToBuyUsdc();
+  } catch (error) {
+    console.error('[Coinbase] Error opening onramp:', error);
+    return await openCoinbaseToBuyUsdc();
+  }
+}
+
+/**
+ * Fallback: Open Coinbase to buy USDC manually
  *
  * Tries to open the Coinbase app first, falls back to web
  */
