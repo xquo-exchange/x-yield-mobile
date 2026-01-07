@@ -40,6 +40,7 @@ interface OnrampSessionResponse {
  */
 export async function getOnrampSessionUrl(walletAddress: string): Promise<string | null> {
   try {
+    const startTime = Date.now();
     console.log('[Coinbase] Requesting onramp session for:', walletAddress);
 
     const response = await fetch(`${API_BASE_URL}/api/onramp/session`, {
@@ -53,6 +54,9 @@ export async function getOnrampSessionUrl(walletAddress: string): Promise<string
       }),
     });
 
+    const fetchTime = Date.now() - startTime;
+    console.log(`[Coinbase] API response received in ${fetchTime}ms`);
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Coinbase] Backend error:', response.status, errorText);
@@ -60,6 +64,8 @@ export async function getOnrampSessionUrl(walletAddress: string): Promise<string
     }
 
     const data: OnrampSessionResponse = await response.json();
+    const totalTime = Date.now() - startTime;
+    console.log(`[Coinbase] Total getOnrampSessionUrl time: ${totalTime}ms`);
 
     if (data.url) {
       console.log('[Coinbase] Got onramp URL');
@@ -88,11 +94,17 @@ export async function getOnrampSessionUrl(walletAddress: string): Promise<string
  */
 export async function openCoinbaseOnramp(walletAddress: string): Promise<boolean> {
   try {
+    const totalStart = Date.now();
+    console.log('[Coinbase] openCoinbaseOnramp started');
+
     // Get session URL from backend
     const onrampUrl = await getOnrampSessionUrl(walletAddress);
+    const apiTime = Date.now() - totalStart;
+    console.log(`[Coinbase] API call completed in ${apiTime}ms`);
 
     if (onrampUrl) {
       console.log('[Coinbase] Opening onramp URL');
+      const browserStart = Date.now();
 
       // Open in browser
       const result = await WebBrowser.openBrowserAsync(onrampUrl, {
@@ -100,6 +112,9 @@ export async function openCoinbaseOnramp(walletAddress: string): Promise<boolean
         presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
       });
 
+      const browserTime = Date.now() - browserStart;
+      const totalTime = Date.now() - totalStart;
+      console.log(`[Coinbase] Browser opened in ${browserTime}ms, total flow: ${totalTime}ms`);
       console.log('[Coinbase] Browser result:', result.type);
       return true;
     }

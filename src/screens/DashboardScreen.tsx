@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
+import * as WebBrowser from 'expo-web-browser';
 import QRCode from 'react-native-qrcode-svg';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePrivy, useEmbeddedEthereumWallet } from '@privy-io/expo';
@@ -24,7 +25,7 @@ import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
 import AnimatedBalance from '../components/AnimatedBalance';
-import { openCoinbaseOnramp, openCoinbaseToBuyUsdc } from '../services/coinbaseOnramp';
+import { openCoinbaseOnramp, openCoinbaseToBuyUsdc, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 
 type DashboardScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Dashboard'>;
@@ -39,6 +40,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const [fundingView, setFundingView] = React.useState<'options' | 'receive'>('options');
   const [copied, setCopied] = React.useState(false);
   const [isBuyingUsdc, setIsBuyingUsdc] = React.useState(false);
+  const [prefetchedOnrampUrl, setPrefetchedOnrampUrl] = React.useState<string | null>(null);
 
   const { apy: displayApy, refetch: refetchApy } = useVaultApy();
 
@@ -51,6 +53,31 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const smartWalletFromLinkedAccounts = smartWalletAccount?.address || '';
   const smartWalletAddress = smartWalletFromHook || smartWalletFromLinkedAccounts;
   const displayAddress = smartWalletAddress || embeddedWalletAddress;
+
+  // Pre-warm browser AND pre-fetch session URL when funding modal opens
+  React.useEffect(() => {
+    if (showFundingModal && displayAddress) {
+      console.log('[Prefetch] Modal opened - pre-warming browser and fetching session...');
+
+      // Pre-warm the browser
+      WebBrowser.warmUpAsync();
+
+      // Pre-fetch the onramp session URL
+      getOnrampSessionUrl(displayAddress).then((url) => {
+        if (url) {
+          console.log('[Prefetch] Session URL ready!');
+          setPrefetchedOnrampUrl(url);
+        }
+      });
+    } else {
+      // Clear prefetched URL when modal closes
+      setPrefetchedOnrampUrl(null);
+    }
+
+    return () => {
+      WebBrowser.coolDownAsync();
+    };
+  }, [showFundingModal, displayAddress]);
 
   // Fetch balances and positions
   const { usdc, isLoading: balanceLoading, refetch: refetchBalances } = useWalletBalance(displayAddress);
@@ -107,9 +134,34 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     setShowFundingModal(false);
     setIsBuyingUsdc(true);
 
+    const startTime = Date.now();
+    console.log('[BuyUSDC] Starting...');
+
     try {
-      // Try to open Coinbase Onramp via backend
-      const opened = await openCoinbaseOnramp(displayAddress);
+      let opened = false;
+
+      // Use prefetched URL if available (instant!)
+      if (prefetchedOnrampUrl) {
+        console.log('[BuyUSDC] Using prefetched URL - skipping API call!');
+        const browserStart = Date.now();
+
+        const result = await WebBrowser.openBrowserAsync(prefetchedOnrampUrl, {
+          dismissButtonStyle: 'close',
+          presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+        });
+
+        const browserTime = Date.now() - browserStart;
+        const totalTime = Date.now() - startTime;
+        console.log(`[BuyUSDC] Browser opened in ${browserTime}ms, total: ${totalTime}ms (prefetched)`);
+        console.log('[BuyUSDC] Browser result:', result.type);
+        opened = true;
+      } else {
+        // Fallback: fetch URL and open (slower path)
+        console.log('[BuyUSDC] No prefetched URL, calling API...');
+        opened = await openCoinbaseOnramp(displayAddress);
+        const totalTime = Date.now() - startTime;
+        console.log(`[BuyUSDC] Total time (non-prefetched): ${totalTime}ms`);
+      }
 
       if (!opened) {
         // Show fallback options if Coinbase Onramp failed
