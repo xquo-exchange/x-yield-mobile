@@ -24,10 +24,7 @@ import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
 import AnimatedBalance from '../components/AnimatedBalance';
-import {
-  openCoinbaseOnramp,
-  isCoinbaseConfigured,
-} from '../services/coinbaseOnramp';
+import { openCoinbaseToBuyUsdc } from '../services/coinbaseOnramp';
 
 type DashboardScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Dashboard'>;
@@ -105,45 +102,36 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       return;
     }
 
-    // Check if Coinbase Onramp is configured
-    if (isCoinbaseConfigured()) {
-      try {
-        // Open Coinbase Onramp directly
-        await openCoinbaseOnramp(displayAddress);
-      } catch (error) {
-        console.error('[Dashboard] Coinbase Onramp error:', error);
-        // Fallback to manual instructions
-        showManualBuyInstructions();
-      }
-    } else {
-      // Coinbase not configured, show manual instructions
-      showManualBuyInstructions();
-    }
-  };
+    // Show buy instructions with options
+    const shortAddress = `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}`;
 
-  const showManualBuyInstructions = () => {
     Alert.alert(
       'Buy USDC',
-      'Get USDC to start earning yield:\n\n' +
-        '1. Buy USDC on Coinbase or any exchange\n' +
-        '2. Send it to your X-Yield wallet on Base network\n\n' +
-        'Make sure to select Base network when withdrawing!',
+      `To add funds to X-Yield:\n\n` +
+        `1. Buy USDC on Coinbase\n` +
+        `2. Withdraw to your wallet\n` +
+        `3. Use Base network\n\n` +
+        `Your address: ${shortAddress}`,
       [
         {
           text: 'Open Coinbase',
-          onPress: () => {
-            Linking.openURL('https://www.coinbase.com/price/usd-coin').catch(() => {
+          onPress: async () => {
+            const opened = await openCoinbaseToBuyUsdc();
+            if (!opened) {
               Alert.alert('Error', 'Could not open Coinbase');
-            });
+            }
           },
         },
         {
-          text: 'Copy My Address',
+          text: 'Show QR Code',
           onPress: () => {
-            handleCopyAddress();
             setShowFundingModal(true);
             setFundingView('receive');
           },
+        },
+        {
+          text: 'Copy Address',
+          onPress: handleCopyAddress,
         },
         { text: 'Cancel', style: 'cancel' },
       ]

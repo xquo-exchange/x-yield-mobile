@@ -1,146 +1,116 @@
 /**
- * Coinbase Onramp Service
+ * Coinbase Funding Service
  *
- * Generates URLs to open Coinbase Onramp for buying USDC.
- * Users can purchase USDC which is sent directly to their X-Yield wallet.
+ * Simple approach: Open Coinbase app/website for users to buy USDC,
+ * then they can send it to their X-Yield wallet address.
  *
- * Configuration:
- * 1. Get your Project ID from https://portal.cdp.coinbase.com/
- * 2. Add redirect URLs to your domain allowlist:
- *    - xyield://
- *    - xyield://onramp-callback
+ * Note: Direct Coinbase Onramp URLs now require server-side session tokens
+ * (as of July 31, 2025). For a simpler integration without a backend,
+ * we direct users to Coinbase to purchase USDC manually.
  *
- * For sandbox testing, use pay-sandbox.coinbase.com
+ * For automatic onramp, use Privy's useFundWallet hook which handles
+ * the Coinbase integration.
  */
 
-import { Linking } from 'react-native';
+import { Linking, Alert, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 
-// Your Coinbase Developer Platform Project ID
-// Get this from: https://portal.cdp.coinbase.com/
-const COINBASE_PROJECT_ID = 'cefdcbd9-ec86-4be4-89c4-5454ec084cbd';
+// Coinbase URLs
+const COINBASE_APP_URL = 'coinbase://';
+const COINBASE_WEB_URL = 'https://www.coinbase.com';
+const COINBASE_USDC_URL = 'https://www.coinbase.com/price/usd-coin';
 
-// Use sandbox for testing, production for real purchases
-// Sandbox: 25 test transactions, max $5 each
-const USE_SANDBOX = true;
-const COINBASE_BASE_URL = USE_SANDBOX
-  ? 'https://pay-sandbox.coinbase.com'
-  : 'https://pay.coinbase.com';
-
-// Our app's URL scheme for redirects
-const APP_SCHEME = 'xyield';
-const REDIRECT_URL = `${APP_SCHEME}://onramp-callback`;
-
-interface OnrampOptions {
-  /** Wallet address to receive funds */
-  walletAddress: string;
-  /** Preset fiat amount in USD (optional) */
-  presetAmount?: number;
-  /** Asset to buy (default: USDC) */
-  asset?: string;
-  /** Network (default: base) */
-  network?: string;
-}
+// Deep link to buy USDC on Coinbase app
+const COINBASE_BUY_USDC_DEEP_LINK = 'coinbase://buy?asset=USDC';
 
 /**
- * Generate a Coinbase Onramp URL
+ * Open Coinbase to buy USDC
  *
- * @param options - Configuration for the onramp
- * @returns The full Coinbase Onramp URL
+ * Tries to open the Coinbase app first, falls back to web
  */
-export function generateOnrampUrl(options: OnrampOptions): string {
-  const {
-    walletAddress,
-    presetAmount,
-    asset = 'USDC',
-    network = 'base',
-  } = options;
-
-  // Build the addresses parameter
-  // Format: {"0xAddress": ["network1", "network2"]}
-  const addresses = JSON.stringify({
-    [walletAddress]: [network],
-  });
-
-  // Build the assets parameter
-  const assets = JSON.stringify([asset]);
-
-  // Build URL with query parameters
-  const params = new URLSearchParams({
-    appId: COINBASE_PROJECT_ID,
-    addresses: addresses,
-    assets: assets,
-    defaultNetwork: network,
-    defaultAsset: asset,
-  });
-
-  // Add optional parameters
-  if (presetAmount) {
-    params.append('presetFiatAmount', presetAmount.toString());
-  }
-
-  // Add redirect URL for mobile app callback
-  params.append('redirectUrl', REDIRECT_URL);
-
-  return `${COINBASE_BASE_URL}/buy/select-asset?${params.toString()}`;
-}
-
-/**
- * Open Coinbase Onramp in a web browser
- *
- * @param walletAddress - The wallet address to receive USDC
- * @param presetAmount - Optional preset amount in USD
- */
-export async function openCoinbaseOnramp(
-  walletAddress: string,
-  presetAmount?: number
-): Promise<void> {
-  const url = generateOnrampUrl({
-    walletAddress,
-    presetAmount,
-    asset: 'USDC',
-    network: 'base',
-  });
-
-  console.log('[CoinbaseOnramp] Opening URL:', url);
-
+export async function openCoinbaseToBuyUsdc(): Promise<boolean> {
   try {
-    // Use expo-web-browser for better integration
-    // This opens a modal browser that can redirect back to the app
-    const result = await WebBrowser.openBrowserAsync(url, {
+    // Try to open Coinbase app deep link to buy USDC
+    const canOpenApp = await Linking.canOpenURL(COINBASE_APP_URL);
+
+    if (canOpenApp) {
+      // Try the buy deep link first
+      const canOpenBuy = await Linking.canOpenURL(COINBASE_BUY_USDC_DEEP_LINK);
+      if (canOpenBuy) {
+        await Linking.openURL(COINBASE_BUY_USDC_DEEP_LINK);
+        return true;
+      }
+      // Fallback to just opening the app
+      await Linking.openURL(COINBASE_APP_URL);
+      return true;
+    }
+
+    // Fallback to web browser
+    await WebBrowser.openBrowserAsync(COINBASE_USDC_URL, {
       dismissButtonStyle: 'close',
       presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
-      // Enable redirects back to our app
-      createTask: false,
     });
-
-    console.log('[CoinbaseOnramp] Browser result:', result);
+    return true;
   } catch (error) {
-    console.error('[CoinbaseOnramp] Error opening browser:', error);
-
-    // Fallback to system browser
-    const canOpen = await Linking.canOpenURL(url);
-    if (canOpen) {
-      await Linking.openURL(url);
-    } else {
-      throw new Error('Cannot open Coinbase Onramp');
-    }
+    console.error('[Coinbase] Error opening Coinbase:', error);
+    return false;
   }
 }
 
 /**
- * Check if Coinbase is configured
+ * Show instructions for buying USDC on Coinbase
+ *
+ * @param walletAddress - User's wallet address to display
+ * @param onCopyAddress - Callback to copy the address
  */
-export function isCoinbaseConfigured(): boolean {
-  return COINBASE_PROJECT_ID !== 'YOUR_COINBASE_PROJECT_ID';
+export function showBuyUsdcInstructions(
+  walletAddress: string,
+  onCopyAddress: () => void,
+  onShowQrCode: () => void
+): void {
+  Alert.alert(
+    'Buy USDC',
+    'To add funds to X-Yield:\n\n' +
+      '1. Buy USDC on Coinbase\n' +
+      '2. Withdraw to your X-Yield wallet\n' +
+      '3. Select Base network when withdrawing\n\n' +
+      'Your wallet address:',
+    [
+      {
+        text: 'Open Coinbase',
+        onPress: async () => {
+          const opened = await openCoinbaseToBuyUsdc();
+          if (!opened) {
+            Alert.alert('Error', 'Could not open Coinbase');
+          }
+        },
+      },
+      {
+        text: 'Show QR Code',
+        onPress: onShowQrCode,
+      },
+      {
+        text: 'Copy Address',
+        onPress: onCopyAddress,
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]
+  );
 }
 
 /**
- * Get configuration status message
+ * Get a formatted message explaining how to fund the wallet
  */
-export function getConfigStatus(): string {
-  if (!isCoinbaseConfigured()) {
-    return 'Coinbase Onramp not configured. Add your Project ID to coinbaseOnramp.ts';
-  }
-  return `Coinbase Onramp ready (${USE_SANDBOX ? 'sandbox' : 'production'})`;
+export function getFundingInstructions(walletAddress: string): string {
+  const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
+  return [
+    'How to add funds:',
+    '',
+    '1. Buy USDC on Coinbase or any exchange',
+    '2. Withdraw to your X-Yield wallet',
+    `3. Your address: ${shortAddress}`,
+    '4. Network: Base',
+    '',
+    'Need help? Tap "Show QR Code" to scan with your exchange app.',
+  ].join('\n');
 }
