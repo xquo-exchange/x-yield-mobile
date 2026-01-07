@@ -25,9 +25,15 @@ export interface DepositData {
 async function getAllDeposits(): Promise<DepositData> {
   try {
     const data = await AsyncStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : {};
+    if (!data) {
+      console.log('[DepositTracker] No existing deposit data found (first deposit)');
+      return {};
+    }
+    const parsed = JSON.parse(data);
+    return parsed;
   } catch (error) {
-    console.log('[DepositTracker] Error reading deposits:', error);
+    console.error('[DepositTracker] ERROR reading deposits - DATA MAY BE LOST:', error);
+    // Return empty but log loudly - this is a critical issue
     return {};
   }
 }
@@ -37,9 +43,13 @@ async function getAllDeposits(): Promise<DepositData> {
  */
 async function saveDeposits(data: DepositData): Promise<void> {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const jsonData = JSON.stringify(data);
+    console.log('[DepositTracker] Saving deposits:', jsonData);
+    await AsyncStorage.setItem(STORAGE_KEY, jsonData);
+    console.log('[DepositTracker] Save successful');
   } catch (error) {
-    console.log('[DepositTracker] Error saving deposits:', error);
+    console.error('[DepositTracker] SAVE FAILED:', error);
+    throw new Error(`Failed to save deposit data: ${error}`);
   }
 }
 
@@ -67,15 +77,26 @@ export async function recordDeposit(
   const address = walletAddress.toLowerCase();
 
   const currentRecord = deposits[address] || { totalDeposited: 0, lastUpdated: 0 };
+  const previousTotal = currentRecord.totalDeposited;
+  const newTotal = previousTotal + amount;
+
+  console.log('[DepositTracker] ══════════════════════════════════════════════════════');
+  console.log('[DepositTracker] Recording deposit:', amount);
+  console.log('[DepositTracker] Previous total:', previousTotal);
+  console.log('[DepositTracker] New total:', newTotal);
+  console.log('[DepositTracker] ══════════════════════════════════════════════════════');
 
   deposits[address] = {
-    totalDeposited: currentRecord.totalDeposited + amount,
+    totalDeposited: newTotal,
     lastUpdated: Date.now(),
   };
 
   await saveDeposits(deposits);
-  console.log(`[DepositTracker] Recorded deposit: +$${amount.toFixed(6)} for ${address.slice(0, 10)}...`);
-  console.log(`[DepositTracker] New total deposited: $${deposits[address].totalDeposited.toFixed(6)}`);
+
+  // Verify it was saved correctly
+  const verifyDeposits = await getAllDeposits();
+  const verifyRecord = verifyDeposits[address];
+  console.log('[DepositTracker] Verified saved total:', verifyRecord?.totalDeposited);
 }
 
 /**

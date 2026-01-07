@@ -119,6 +119,11 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       const depositAmount = parseFloat(amount);
       await recordDeposit(displayAddress, depositAmount);
 
+      // Update local state with new total
+      const newTotalDeposited = await getTotalDeposited(displayAddress);
+      setTotalDeposited(newTotalDeposited);
+      console.log('[Strategies] Updated totalDeposited to:', newTotalDeposited);
+
       setAmount('');
       refetchBalances();
       refetchPositions();
