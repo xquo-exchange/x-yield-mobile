@@ -4,11 +4,16 @@
  *
  * Performance fee model: 15% fee on YIELD only, not principal
  * Example: Deposit $100, grows to $105, yield = $5, fee = $0.75
+ *
+ * Data is persisted in two places:
+ * 1. Backend (Vercel KV) - source of truth, survives app reinstalls
+ * 2. AsyncStorage - local cache for offline access
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'xyield_deposits';
+const API_BASE_URL = 'https://x-yield-api.vercel.app';
 
 export interface DepositRecord {
   totalDeposited: number; // Total USDC deposited (in USD, not raw)
@@ -53,14 +58,136 @@ async function saveDeposits(data: DepositData): Promise<void> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Backend API Functions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Fetch deposit record from backend
+ */
+async function fetchFromBackend(walletAddress: string): Promise<DepositRecord | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/deposits/${walletAddress.toLowerCase()}`);
+    if (!response.ok) {
+      console.error('[DepositTracker] Backend fetch failed:', response.status);
+      return null;
+    }
+    const data = await response.json();
+    if (data.totalDeposited === 0 && data.lastUpdated === null) {
+      return null; // No record exists
+    }
+    return {
+      totalDeposited: data.totalDeposited,
+      lastUpdated: data.lastUpdated,
+    };
+  } catch (error) {
+    console.error('[DepositTracker] Backend fetch error:', error);
+    return null;
+  }
+}
+
+/**
+ * Record deposit to backend
+ */
+async function recordDepositToBackend(walletAddress: string, amount: number): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/deposits/${walletAddress.toLowerCase()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount }),
+    });
+    if (!response.ok) {
+      console.error('[DepositTracker] Backend deposit failed:', response.status);
+      return false;
+    }
+    console.log('[DepositTracker] Backend deposit recorded');
+    return true;
+  } catch (error) {
+    console.error('[DepositTracker] Backend deposit error:', error);
+    return false;
+  }
+}
+
+/**
+ * Record withdrawal to backend
+ */
+async function recordWithdrawalToBackend(
+  walletAddress: string,
+  withdrawnValue: number,
+  totalValueBeforeWithdraw: number
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/deposits/${walletAddress.toLowerCase()}/withdraw`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ withdrawnValue, totalValueBeforeWithdraw }),
+    });
+    if (!response.ok) {
+      console.error('[DepositTracker] Backend withdrawal failed:', response.status);
+      return false;
+    }
+    console.log('[DepositTracker] Backend withdrawal recorded');
+    return true;
+  } catch (error) {
+    console.error('[DepositTracker] Backend withdrawal error:', error);
+    return false;
+  }
+}
+
+/**
+ * Sync local deposit to backend (for migration)
+ */
+async function syncToBackend(walletAddress: string, totalDeposited: number): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/deposits/${walletAddress.toLowerCase()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ totalDeposited, sync: true }),
+    });
+    if (!response.ok) {
+      console.error('[DepositTracker] Backend sync failed:', response.status);
+      return false;
+    }
+    console.log('[DepositTracker] Backend sync successful');
+    return true;
+  } catch (error) {
+    console.error('[DepositTracker] Backend sync error:', error);
+    return false;
+  }
+}
+
 /**
  * Get the total deposited amount for a wallet
+ * Fetches from backend first (source of truth), falls back to local storage
  * Returns 0 if no deposits recorded (first-time user)
  */
 export async function getTotalDeposited(walletAddress: string): Promise<number> {
+  const address = walletAddress.toLowerCase();
+
+  // Try backend first (source of truth)
+  const backendRecord = await fetchFromBackend(address);
+  if (backendRecord) {
+    console.log(`[DepositTracker] Got from backend: $${backendRecord.totalDeposited.toFixed(6)}`);
+
+    // Update local cache
+    const deposits = await getAllDeposits();
+    deposits[address] = backendRecord;
+    await saveDeposits(deposits);
+
+    return backendRecord.totalDeposited;
+  }
+
+  // Fallback to local storage
   const deposits = await getAllDeposits();
-  const record = deposits[walletAddress.toLowerCase()];
-  const totalDeposited = record?.totalDeposited || 0;
+  const localRecord = deposits[address];
+  const totalDeposited = localRecord?.totalDeposited || 0;
+
+  // If we have local data but backend doesn't, sync it
+  if (totalDeposited > 0) {
+    console.log('[DepositTracker] Local data exists but not in backend, syncing...');
+    await syncToBackend(address, totalDeposited);
+  }
+
   console.log(`[DepositTracker] getTotalDeposited for ${walletAddress.slice(0, 10)}...: $${totalDeposited.toFixed(6)}`);
   return totalDeposited;
 }
@@ -68,6 +195,7 @@ export async function getTotalDeposited(walletAddress: string): Promise<number> 
 /**
  * Record a new deposit
  * Adds to the user's total deposited amount
+ * Syncs to backend and local storage
  */
 export async function recordDeposit(
   walletAddress: string,
@@ -86,12 +214,21 @@ export async function recordDeposit(
   console.log('[DepositTracker] New total:', newTotal);
   console.log('[DepositTracker] ══════════════════════════════════════════════════════');
 
+  // Save to local storage first (for immediate access)
   deposits[address] = {
     totalDeposited: newTotal,
     lastUpdated: Date.now(),
   };
-
   await saveDeposits(deposits);
+
+  // Sync to backend (fire and forget, but log result)
+  recordDepositToBackend(address, amount).then((success) => {
+    if (success) {
+      console.log('[DepositTracker] Backend sync complete');
+    } else {
+      console.warn('[DepositTracker] Backend sync failed, will retry on next read');
+    }
+  });
 
   // Verify it was saved correctly
   const verifyDeposits = await getAllDeposits();
@@ -101,6 +238,7 @@ export async function recordDeposit(
 
 /**
  * Record a withdrawal and update deposit tracking
+ * Syncs to backend and local storage
  *
  * When user withdraws, we need to reduce their "totalDeposited" proportionally
  * to maintain accurate yield calculations for future withdrawals.
@@ -147,7 +285,17 @@ export async function recordWithdrawal(
     console.log(`[DepositTracker] Remaining deposits: $${newTotalDeposited.toFixed(6)}`);
   }
 
+  // Save to local storage first
   await saveDeposits(deposits);
+
+  // Sync to backend (fire and forget, but log result)
+  recordWithdrawalToBackend(address, withdrawnValue, totalValueBeforeWithdraw).then((success) => {
+    if (success) {
+      console.log('[DepositTracker] Backend withdrawal sync complete');
+    } else {
+      console.warn('[DepositTracker] Backend withdrawal sync failed, will retry on next read');
+    }
+  });
 }
 
 /**
