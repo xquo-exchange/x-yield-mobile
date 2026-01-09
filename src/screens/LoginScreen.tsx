@@ -11,9 +11,19 @@ import {
   Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
 import { usePrivy, useLoginWithEmail } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+
+// Color Palette
+const COLORS = {
+  primary: '#200191',
+  secondary: '#6198FF',
+  white: '#F5F6FF',
+  grey: '#484848',
+  black: '#00041B',
+};
 
 type LoginScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Login'>;
@@ -25,7 +35,6 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   const [code, setCode] = useState('');
   const [showCodeInput, setShowCodeInput] = useState(false);
 
-  // Redirect to Dashboard if already authenticated
   useEffect(() => {
     if (user) {
       navigation.replace('Dashboard');
@@ -62,6 +71,23 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
     await loginWithCode({ code: code.trim() });
   };
 
+  const handleBack = () => {
+    if (showCodeInput) {
+      setShowCodeInput(false);
+      setCode('');
+    } else {
+      navigation.goBack();
+    }
+  };
+
+  const handleHelp = () => {
+    Alert.alert(
+      'Need Help?',
+      'Enter your email address to receive a one-time verification code. Use this code to securely sign in to your account.',
+      [{ text: 'Got it' }]
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -69,105 +95,101 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
     >
       <StatusBar style="light" />
 
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => navigation.goBack()}
-      >
-        <Text style={styles.backButtonText}>Back</Text>
-      </TouchableOpacity>
+      {/* Header with Back and Help buttons */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.headerButton} onPress={handleBack}>
+          <Ionicons name="chevron-back" size={24} color={COLORS.white} />
+        </TouchableOpacity>
 
-      <View style={styles.headerContainer}>
-        <View style={styles.logoCircle}>
-          <Text style={styles.logoText}>X</Text>
-        </View>
-        <Text style={styles.title}>
-          {showCodeInput ? 'Enter Code' : 'Welcome Back'}
-        </Text>
-        <Text style={styles.subtitle}>
-          {showCodeInput
-            ? `We sent a code to ${email}`
-            : 'Sign in with your email to continue'}
-        </Text>
+        <TouchableOpacity style={styles.headerButton} onPress={handleHelp}>
+          <Ionicons name="help" size={20} color={COLORS.white} />
+        </TouchableOpacity>
       </View>
 
-      <View style={styles.formContainer}>
+      {/* Main Content */}
+      <View style={styles.content}>
         {!showCodeInput ? (
           <>
+            {/* Email Entry Screen */}
+            <Text style={styles.title}>Enter your email address</Text>
+
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Email</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Enter your email"
-                placeholderTextColor="#52525b"
+                placeholder="Email Address"
+                placeholderTextColor={COLORS.grey}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                autoComplete="email"
                 editable={!isLoading}
               />
             </View>
 
             <TouchableOpacity
-              style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
+              style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
               onPress={handleSendCode}
               disabled={isLoading}
               activeOpacity={0.8}
             >
               {isLoading ? (
-                <ActivityIndicator color="#ffffff" />
+                <ActivityIndicator color={COLORS.white} />
               ) : (
-                <Text style={styles.primaryButtonText}>Continue</Text>
+                <Text style={styles.continueButtonText}>Continue</Text>
               )}
             </TouchableOpacity>
           </>
         ) : (
           <>
+            {/* Code Verification Screen */}
+            <Text style={styles.title}>Enter verification code</Text>
+            <Text style={styles.subtitle}>
+              We sent a code to {email}
+            </Text>
+
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Verification Code</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Enter 6-digit code"
-                placeholderTextColor="#52525b"
+                placeholder="6-digit code"
+                placeholderTextColor={COLORS.grey}
                 value={code}
                 onChangeText={setCode}
                 keyboardType="number-pad"
                 maxLength={6}
                 editable={!isLoading}
+                autoFocus
               />
             </View>
 
             <TouchableOpacity
-              style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
+              style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
               onPress={handleVerifyCode}
               disabled={isLoading}
               activeOpacity={0.8}
             >
               {isLoading ? (
-                <ActivityIndicator color="#ffffff" />
+                <ActivityIndicator color={COLORS.white} />
               ) : (
-                <Text style={styles.primaryButtonText}>Verify</Text>
+                <Text style={styles.continueButtonText}>Verify</Text>
               )}
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.resendButton}
-              onPress={() => {
-                setShowCodeInput(false);
-                setCode('');
-              }}
+              onPress={() => sendCode({ email: email.trim() })}
               disabled={isLoading}
             >
-              <Text style={styles.resendButtonText}>Use a different email</Text>
+              <Text style={styles.resendButtonText}>Resend code</Text>
             </TouchableOpacity>
           </>
         )}
       </View>
 
-      <View style={styles.footerContainer}>
-        <Text style={styles.footerText}>
-          Secured by Privy
-        </Text>
+      {/* Footer */}
+      <View style={styles.footer}>
+        <Text style={styles.footerText}>Secured by Privy</Text>
       </View>
     </KeyboardAvoidingView>
   );
@@ -176,100 +198,83 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
+    backgroundColor: COLORS.black,
   },
-  backButton: {
-    marginBottom: 32,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#6366f1',
-  },
-  headerContainer: {
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 48,
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 20,
   },
-  logoCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#1a1a2e',
-    borderWidth: 2,
-    borderColor: '#6366f1',
+  headerButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(72, 72, 72, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 24,
   },
-  logoText: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#6366f1',
+  content: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 40,
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 8,
+    color: COLORS.white,
+    marginBottom: 12,
   },
   subtitle: {
     fontSize: 16,
-    color: '#71717a',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  formContainer: {
-    flex: 1,
+    color: COLORS.grey,
+    marginBottom: 32,
   },
   inputContainer: {
     marginBottom: 24,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#a1a1aa',
-    marginBottom: 8,
+    marginTop: 20,
   },
   input: {
     height: 56,
-    backgroundColor: '#141419',
+    backgroundColor: 'rgba(72, 72, 72, 0.15)',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#27272a',
     paddingHorizontal: 16,
-    fontSize: 16,
-    color: '#ffffff',
+    fontSize: 17,
+    color: COLORS.white,
   },
-  primaryButton: {
+  continueButton: {
     height: 56,
-    backgroundColor: '#6366f1',
+    backgroundColor: COLORS.secondary,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  buttonDisabled: {
+  continueButtonDisabled: {
     opacity: 0.6,
   },
-  primaryButtonText: {
-    fontSize: 18,
+  continueButtonText: {
+    fontSize: 17,
     fontWeight: '600',
-    color: '#ffffff',
+    color: COLORS.white,
   },
   resendButton: {
-    marginTop: 16,
+    marginTop: 20,
     alignItems: 'center',
+    paddingVertical: 12,
   },
   resendButtonText: {
-    fontSize: 14,
-    color: '#6366f1',
+    fontSize: 15,
+    color: COLORS.secondary,
+    fontWeight: '500',
   },
-  footerContainer: {
+  footer: {
+    paddingBottom: 40,
     alignItems: 'center',
   },
   footerText: {
-    fontSize: 12,
-    color: '#52525b',
+    fontSize: 13,
+    color: COLORS.grey,
   },
 });

@@ -1,199 +1,385 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Dimensions,
+  FlatList,
+  Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { usePrivy } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
 const { width } = Dimensions.get('window');
 
+// Color Palette
+const COLORS = {
+  primary: '#200191',
+  secondary: '#6198FF',
+  white: '#F5F6FF',
+  grey: '#484848',
+  black: '#00041B',
+};
+
 type WelcomeScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Welcome'>;
 };
 
+interface SlideData {
+  id: string;
+  icon: 'orb' | 'lock' | 'clock';
+  title: string;
+  highlightText?: string;
+  subtitle: string;
+}
+
+const SLIDES: SlideData[] = [
+  {
+    id: '1',
+    icon: 'orb',
+    title: 'Earn up to ',
+    highlightText: '8.5%',
+    subtitle: 'Secure your savings and earn interest every second.',
+  },
+  {
+    id: '2',
+    icon: 'lock',
+    title: 'Your Savings. Protected.',
+    subtitle: 'Industry leading protection on your savings.',
+  },
+  {
+    id: '3',
+    icon: 'clock',
+    title: 'Your money. Your way.',
+    subtitle: 'No deposit fees and no minimums. Withdraw anytime.',
+  },
+];
+
+// Glowing Icon Wrapper Component
+const GlowingIconWrapper = ({ children }: { children: React.ReactNode }) => {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.05,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [pulseAnim]);
+
+  return (
+    <Animated.View style={[styles.iconContainer, { transform: [{ scale: pulseAnim }] }]}>
+      {/* Outer glow */}
+      <View style={styles.outerGlow} />
+      {/* Middle glow */}
+      <View style={styles.middleGlow} />
+      {/* Inner glow circle */}
+      <LinearGradient
+        colors={[COLORS.secondary, COLORS.primary]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.iconBackground}
+      />
+      {/* Icon */}
+      <View style={styles.iconInner}>
+        {children}
+      </View>
+    </Animated.View>
+  );
+};
+
+// Slide 1: Glowing Orb (Dollar/Savings icon)
+const GlowingOrb = () => {
+  return (
+    <GlowingIconWrapper>
+      <Ionicons name="wallet-outline" size={56} color={COLORS.white} />
+    </GlowingIconWrapper>
+  );
+};
+
+// Slide 2: Lock Icon
+const GlowingLock = () => {
+  return (
+    <GlowingIconWrapper>
+      <Ionicons name="lock-closed-outline" size={56} color={COLORS.white} />
+    </GlowingIconWrapper>
+  );
+};
+
+// Slide 3: Clock Icon
+const GlowingClock = () => {
+  return (
+    <GlowingIconWrapper>
+      <Ionicons name="time-outline" size={56} color={COLORS.white} />
+    </GlowingIconWrapper>
+  );
+};
+
+const SlideItem = ({ item }: { item: SlideData }) => {
+  const renderIcon = () => {
+    switch (item.icon) {
+      case 'orb':
+        return <GlowingOrb />;
+      case 'lock':
+        return <GlowingLock />;
+      case 'clock':
+        return <GlowingClock />;
+    }
+  };
+
+  const renderTitle = () => {
+    if (item.highlightText) {
+      return (
+        <Text style={styles.title}>
+          {item.title}
+          <Text style={styles.titleHighlight}>{item.highlightText}</Text>
+          {' on your cash with X-Yield.'}
+        </Text>
+      );
+    }
+    return <Text style={styles.title}>{item.title}</Text>;
+  };
+
+  return (
+    <View style={styles.slide}>
+      <View style={styles.iconWrapper}>{renderIcon()}</View>
+      <View style={styles.textContainer}>
+        {renderTitle()}
+        <Text style={styles.subtitle}>{item.subtitle}</Text>
+      </View>
+    </View>
+  );
+};
+
 export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
   const { user } = usePrivy();
+  const [activeIndex, setActiveIndex] = useState(0);
+  const flatListRef = useRef<FlatList>(null);
 
-  // Redirect to Dashboard if already authenticated
   useEffect(() => {
     if (user) {
       navigation.replace('Dashboard');
     }
   }, [user, navigation]);
 
+  const handleScroll = (event: any) => {
+    const scrollPosition = event.nativeEvent.contentOffset.x;
+    const index = Math.round(scrollPosition / width);
+    setActiveIndex(index);
+  };
+
+  const renderPaginationDots = () => {
+    return (
+      <View style={styles.pagination}>
+        {SLIDES.map((_, index) => (
+          <View
+            key={index}
+            style={[
+              styles.paginationDot,
+              index === activeIndex ? styles.paginationDotActive : styles.paginationDotInactive,
+            ]}
+          />
+        ))}
+      </View>
+    );
+  };
+
   return (
-    <View style={styles.container}>
+    <LinearGradient
+      colors={[COLORS.primary, COLORS.black]}
+      locations={[0, 0.6]}
+      style={styles.container}
+    >
       <StatusBar style="light" />
 
-      <View style={styles.logoContainer}>
-        <View style={styles.logoCircle}>
-          <Text style={styles.logoText}>X</Text>
-        </View>
-        <Text style={styles.brandName}>X-Yield</Text>
-        <Text style={styles.tagline}>DeFi Yield Optimization</Text>
-      </View>
+      {/* Carousel */}
+      <FlatList
+        ref={flatListRef}
+        data={SLIDES}
+        renderItem={({ item }) => <SlideItem item={item} />}
+        keyExtractor={(item) => item.id}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        bounces={false}
+        style={styles.flatList}
+      />
 
-      <View style={styles.featuresContainer}>
-        <View style={styles.featureItem}>
-          <View style={styles.featureIcon}>
-            <Text style={styles.featureIconText}>%</Text>
-          </View>
-          <View style={styles.featureTextContainer}>
-            <Text style={styles.featureTitle}>Maximize Yields</Text>
-            <Text style={styles.featureDescription}>
-              Automatically find the best yield opportunities across DeFi
-            </Text>
-          </View>
-        </View>
+      {/* Pagination Dots */}
+      {renderPaginationDots()}
 
-        <View style={styles.featureItem}>
-          <View style={styles.featureIcon}>
-            <Text style={styles.featureIconText}>$</Text>
-          </View>
-          <View style={styles.featureTextContainer}>
-            <Text style={styles.featureTitle}>Secure Wallet</Text>
-            <Text style={styles.featureDescription}>
-              Built-in embedded wallet for seamless transactions
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.featureItem}>
-          <View style={styles.featureIcon}>
-            <Text style={styles.featureIconText}>+</Text>
-          </View>
-          <View style={styles.featureTextContainer}>
-            <Text style={styles.featureTitle}>Auto-Compound</Text>
-            <Text style={styles.featureDescription}>
-              Reinvest earnings automatically for maximum growth
-            </Text>
-          </View>
-        </View>
-      </View>
-
+      {/* Bottom Section */}
       <View style={styles.bottomContainer}>
         <TouchableOpacity
           style={styles.getStartedButton}
           onPress={() => navigation.navigate('Login')}
-          activeOpacity={0.8}
+          activeOpacity={0.9}
         >
           <Text style={styles.getStartedButtonText}>Get Started</Text>
         </TouchableOpacity>
 
         <Text style={styles.termsText}>
-          By continuing, you agree to our Terms of Service
+          By using X-Yield, you agree to accept our{' '}
+          <Text style={styles.termsLink}>Terms of Use</Text> and{' '}
+          <Text style={styles.termsLink}>Privacy Policy</Text>
         </Text>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
-    paddingHorizontal: 24,
-    paddingTop: 80,
-    paddingBottom: 40,
   },
-  logoContainer: {
+  flatList: {
+    flex: 1,
+  },
+  slide: {
+    width: width,
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingTop: 60,
+  },
+  iconWrapper: {
     marginBottom: 60,
   },
-  logoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#1a1a2e',
-    borderWidth: 2,
-    borderColor: '#6366f1',
-    justifyContent: 'center',
+  // Icon Container & Glow Effects
+  iconContainer: {
+    width: 160,
+    height: 160,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outerGlow: {
+    position: 'absolute',
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: COLORS.secondary,
+    opacity: 0.15,
+  },
+  middleGlow: {
+    position: 'absolute',
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: COLORS.secondary,
+    opacity: 0.25,
+  },
+  iconBackground: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    shadowColor: COLORS.secondary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 30,
+    elevation: 20,
+  },
+  iconInner: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Text Styles
+  textContainer: {
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: COLORS.white,
+    textAlign: 'center',
+    lineHeight: 36,
     marginBottom: 16,
   },
-  logoText: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#6366f1',
+  titleHighlight: {
+    color: COLORS.secondary,
   },
-  brandName: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  tagline: {
+  subtitle: {
     fontSize: 16,
-    color: '#71717a',
+    color: COLORS.grey,
+    textAlign: 'center',
+    lineHeight: 24,
   },
-  featuresContainer: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  featureItem: {
+  // Pagination Styles
+  pagination: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-    backgroundColor: '#141419',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  featureIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#1a1a2e',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    paddingVertical: 20,
   },
-  featureIconText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#6366f1',
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginHorizontal: 6,
   },
-  featureTextContainer: {
-    flex: 1,
+  paginationDotActive: {
+    backgroundColor: COLORS.secondary,
+    width: 24,
   },
-  featureTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 4,
+  paginationDotInactive: {
+    backgroundColor: COLORS.grey,
   },
-  featureDescription: {
-    fontSize: 14,
-    color: '#71717a',
-    lineHeight: 20,
-  },
+  // Bottom Section
   bottomContainer: {
+    paddingHorizontal: 24,
+    paddingBottom: 50,
     alignItems: 'center',
   },
   getStartedButton: {
-    width: width - 48,
+    width: '100%',
     height: 56,
-    backgroundColor: '#6366f1',
-    borderRadius: 12,
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
+    shadowColor: COLORS.secondary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 8,
   },
   getStartedButtonText: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: '700',
+    color: COLORS.black,
   },
   termsText: {
-    fontSize: 12,
-    color: '#52525b',
+    fontSize: 13,
+    color: COLORS.grey,
     textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 20,
+  },
+  termsLink: {
+    textDecorationLine: 'underline',
   },
 });

@@ -1,0 +1,2145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>X-Yield Mobile - Screen Previews</title>
+  <style>
+    /* Reset & Base */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #ffffff;
+      min-height: 100vh;
+      padding: 40px;
+    }
+
+    /* Page Layout */
+    .page-header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .page-header h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .page-header p {
+      color: #71717a;
+      font-size: 16px;
+    }
+
+    .screens-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(375px, 1fr));
+      gap: 40px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .screen-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .screen-label {
+      color: #a1a1aa;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* Phone Frame */
+    .phone-frame {
+      width: 375px;
+      height: 812px;
+      background: #0a0a0a;
+      border-radius: 40px;
+      border: 8px solid #27272a;
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    .phone-notch {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 150px;
+      height: 30px;
+      background: #0a0a0a;
+      border-bottom-left-radius: 20px;
+      border-bottom-right-radius: 20px;
+      z-index: 100;
+    }
+
+    .screen-content {
+      height: 100%;
+      overflow-y: auto;
+      padding-top: 44px;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       COLOR PALETTE (from StyleSheet)
+    ═══════════════════════════════════════════════════════════════ */
+    :root {
+      --bg-primary: #0a0a0a;
+      --bg-card: #141419;
+      --bg-card-darker: #1a1a1f;
+      --border-color: #27272a;
+      --primary: #6366f1;
+      --primary-bg: #1a1a2e;
+      --success: #22c55e;
+      --success-bg: #0f1a14;
+      --success-border: #22c55e30;
+      --warning: #eab308;
+      --warning-bg: #2a2517;
+      --danger: #ef4444;
+      --text-primary: #ffffff;
+      --text-secondary: #71717a;
+      --text-tertiary: #52525b;
+      --text-label: #a1a1aa;
+      --blue: #3b82f6;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       WELCOME SCREEN
+    ═══════════════════════════════════════════════════════════════ */
+    .welcome-screen {
+      background: var(--bg-primary);
+      padding: 80px 24px 40px;
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 60px;
+    }
+
+    .logo-circle {
+      width: 80px;
+      height: 80px;
+      border-radius: 40px;
+      background: var(--primary-bg);
+      border: 2px solid var(--primary);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .logo-text {
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .brand-name {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+
+    .tagline {
+      font-size: 16px;
+      color: var(--text-secondary);
+    }
+
+    .features-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .feature-item {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-bottom: 24px;
+      background: var(--bg-card);
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 24px;
+      background: var(--primary-bg);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-right: 16px;
+      flex-shrink: 0;
+    }
+
+    .feature-icon-text {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .feature-text-container {
+      flex: 1;
+    }
+
+    .feature-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .feature-description {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 20px;
+    }
+
+    .bottom-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .get-started-button {
+      width: 100%;
+      height: 56px;
+      background: var(--primary);
+      border-radius: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 16px;
+      cursor: pointer;
+      border: none;
+    }
+
+    .get-started-button:hover {
+      opacity: 0.9;
+    }
+
+    .get-started-button-text {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .terms-text {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      text-align: center;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       LOGIN SCREEN
+    ═══════════════════════════════════════════════════════════════ */
+    .login-screen {
+      background: var(--bg-primary);
+      padding: 60px 24px 40px;
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .back-button {
+      margin-bottom: 32px;
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+
+    .back-button-text {
+      font-size: 16px;
+      color: var(--primary);
+    }
+
+    .header-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 48px;
+    }
+
+    .logo-circle-small {
+      width: 64px;
+      height: 64px;
+      border-radius: 32px;
+      background: var(--primary-bg);
+      border: 2px solid var(--primary);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .logo-text-small {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .title {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 16px;
+      color: var(--text-secondary);
+      text-align: center;
+      line-height: 24px;
+    }
+
+    .form-container {
+      flex: 1;
+    }
+
+    .input-container {
+      margin-bottom: 24px;
+    }
+
+    .input-label {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-label);
+      margin-bottom: 8px;
+    }
+
+    .input {
+      height: 56px;
+      background: var(--bg-card);
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+      padding: 0 16px;
+      font-size: 16px;
+      color: var(--text-primary);
+      width: 100%;
+    }
+
+    .input::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    .primary-button {
+      height: 56px;
+      background: var(--primary);
+      border-radius: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      border: none;
+      width: 100%;
+    }
+
+    .primary-button-text {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .resend-button {
+      margin-top: 16px;
+      display: flex;
+      justify-content: center;
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+
+    .resend-button-text {
+      font-size: 14px;
+      color: var(--primary);
+    }
+
+    .footer-container {
+      display: flex;
+      justify-content: center;
+    }
+
+    .footer-text {
+      font-size: 12px;
+      color: var(--text-tertiary);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       DASHBOARD SCREEN
+    ═══════════════════════════════════════════════════════════════ */
+    .dashboard-screen {
+      background: var(--bg-primary);
+      min-height: 100%;
+    }
+
+    .scroll-content {
+      padding: 60px 20px 40px;
+    }
+
+    .header {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .greeting {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 2px;
+    }
+
+    .user-email {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .logout-button {
+      padding: 8px 14px;
+      background: var(--bg-card-darker);
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+
+    .logout-button-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .total-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+
+    .total-label {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .total-value {
+      font-size: 40px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -1px;
+    }
+
+    .account-card {
+      background: var(--bg-card);
+      border-radius: 20px;
+      border: 1px solid var(--border-color);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .savings-card {
+      border-color: var(--success-border);
+      background: var(--success-bg);
+    }
+
+    .account-header {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .account-icon-container {
+      width: 44px;
+      height: 44px;
+      border-radius: 22px;
+      background: var(--border-color);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-right: 12px;
+    }
+
+    .savings-icon-container {
+      background: rgba(34, 197, 94, 0.125);
+    }
+
+    .account-icon {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .account-info {
+      flex: 1;
+    }
+
+    .account-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+
+    .account-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .apy-badge {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-top: 2px;
+    }
+
+    .apy-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--success);
+      margin-right: 6px;
+    }
+
+    .apy-badge-text {
+      font-size: 13px;
+      color: var(--success);
+      font-weight: 500;
+    }
+
+    .account-balance {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .empty-state-text {
+      font-size: 14px;
+      color: var(--text-tertiary);
+      margin-bottom: 16px;
+    }
+
+    .account-button {
+      background: var(--border-color);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      justify-content: center;
+      margin-top: 12px;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .savings-button {
+      background: var(--success);
+    }
+
+    .account-button-text {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    /* Animated Balance Component */
+    .animated-balance-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .animated-balance-label {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+    }
+
+    .animated-balance-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.5px;
+    }
+
+    .yield-estimate {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 6px;
+      letter-spacing: 0.2px;
+    }
+
+    .apy-indicator {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-top: 8px;
+    }
+
+    .apy-indicator-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--success);
+      margin-right: 6px;
+    }
+
+    .apy-indicator-text {
+      font-size: 14px;
+      color: var(--success);
+      font-weight: 500;
+    }
+
+    /* How it Works Section */
+    .how-it-works-section {
+      background: var(--bg-card);
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      padding: 20px;
+      margin-top: 8px;
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 20px;
+    }
+
+    .step-row {
+      display: flex;
+      flex-direction: row;
+      align-items: flex-start;
+    }
+
+    .step-number {
+      width: 28px;
+      height: 28px;
+      border-radius: 14px;
+      background: var(--border-color);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-right: 14px;
+      flex-shrink: 0;
+    }
+
+    .step-number-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-label);
+    }
+
+    .step-content {
+      flex: 1;
+    }
+
+    .step-title {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+
+    .step-description {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 18px;
+    }
+
+    .step-connector {
+      width: 2px;
+      height: 20px;
+      background: var(--border-color);
+      margin-left: 13px;
+      margin: 6px 0 6px 13px;
+    }
+
+    /* Features Row */
+    .features-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+    }
+
+    .feature-row-item {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      width: 48%;
+      margin-bottom: 10px;
+    }
+
+    .feature-row-icon {
+      font-size: 12px;
+      color: var(--success);
+      margin-right: 6px;
+    }
+
+    .feature-row-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       STRATEGIES SCREEN
+    ═══════════════════════════════════════════════════════════════ */
+    .strategies-screen {
+      background: var(--bg-primary);
+      min-height: 100%;
+    }
+
+    .strategies-header {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .back-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 20px;
+      background: var(--bg-card-darker);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border: none;
+      cursor: pointer;
+    }
+
+    .back-btn-text {
+      color: var(--text-primary);
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .header-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .header-spacer {
+      width: 40px;
+    }
+
+    .savings-section {
+      background: var(--bg-card);
+      border-radius: 20px;
+      padding: 24px;
+      margin-bottom: 20px;
+      border: 1px solid var(--border-color);
+    }
+
+    .savings-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .details-toggle {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 0;
+      border-top: 1px solid var(--border-color);
+      width: 100%;
+      cursor: pointer;
+      background: none;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+    }
+
+    .diversified-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-right: 6px;
+    }
+
+    .details-arrow {
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
+
+    .details-section {
+      background: var(--bg-card-darker);
+      border-radius: 12px;
+      padding: 12px;
+      margin-top: 8px;
+      margin-bottom: 8px;
+      width: 100%;
+    }
+
+    .detail-row {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+    }
+
+    .detail-row-border {
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .detail-left {
+      flex: 1;
+    }
+
+    .detail-name {
+      font-size: 13px;
+      color: var(--text-label);
+    }
+
+    .detail-apy {
+      font-size: 11px;
+      color: var(--success);
+      margin-top: 2px;
+    }
+
+    .detail-value {
+      font-size: 13px;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .withdraw-button {
+      margin-top: 16px;
+      background: transparent;
+      border: 1px solid var(--text-tertiary);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      justify-content: center;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .withdraw-button-text {
+      color: var(--text-primary);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    /* Balance Card */
+    .balance-card {
+      background: var(--bg-card);
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 20px;
+      border: 1px solid var(--border-color);
+    }
+
+    .balance-label {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .balance-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    /* Info Card */
+    .info-card {
+      background: #1a2e1a;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 24px;
+      border: 1px solid var(--success-border);
+    }
+
+    .info-header {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .info-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 22px;
+      background: rgba(34, 197, 94, 0.125);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-right: 12px;
+    }
+
+    .info-icon-text {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--success);
+    }
+
+    .info-content {
+      flex: 1;
+    }
+
+    .info-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+
+    .info-apy {
+      font-size: 15px;
+      color: var(--success);
+      font-weight: 600;
+    }
+
+    .info-description {
+      font-size: 14px;
+      color: var(--text-label);
+      line-height: 20px;
+    }
+
+    /* Input Section */
+    .input-section {
+      margin-bottom: 20px;
+    }
+
+    .input-row {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+    }
+
+    .currency-prefix {
+      background: var(--bg-card);
+      border-radius: 12px 0 0 12px;
+      padding: 18px;
+      border: 1px solid var(--border-color);
+      border-right: none;
+    }
+
+    .currency-text {
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .amount-input {
+      flex: 1;
+      background: var(--bg-card);
+      border-radius: 0 12px 12px 0;
+      padding: 18px;
+      padding-left: 4px;
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+      border-left: none;
+    }
+
+    .amount-input::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    .max-button {
+      background: var(--success);
+      padding: 16px 20px;
+      border-radius: 12px;
+      margin-left: 12px;
+      border: none;
+      cursor: pointer;
+    }
+
+    .max-button-text {
+      color: var(--text-primary);
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    /* Deposit Button */
+    .deposit-button {
+      background: var(--success);
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      justify-content: center;
+      margin-bottom: 24px;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .deposit-button-disabled {
+      background: var(--border-color);
+    }
+
+    .deposit-button-text {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    /* Footer Section */
+    .footer-section {
+      background: var(--bg-card);
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid var(--border-color);
+    }
+
+    .footer-row {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .footer-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .footer-icon {
+      font-size: 14px;
+      color: var(--success);
+      margin-right: 10px;
+    }
+
+    .footer-row-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    /* No Savings State */
+    .no-savings {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 0;
+    }
+
+    .no-savings-title {
+      color: var(--text-primary);
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .no-savings-subtext {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    /* Total Earned Container */
+    .total-earned-container {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-top: 12px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      background: rgba(34, 197, 94, 0.08);
+      gap: 6px;
+    }
+
+    .total-earned-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .total-earned-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--success);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       MODAL STYLES (Dashboard Add Funds)
+    ═══════════════════════════════════════════════════════════════ */
+    .modal-demo {
+      margin-top: 40px;
+    }
+
+    .modal-overlay {
+      background: rgba(0, 0, 0, 0.85);
+      border-radius: 0 0 32px 32px;
+      padding-top: 200px;
+    }
+
+    .modal-content {
+      background: var(--bg-card);
+      border-radius: 24px 24px 0 0;
+      padding: 24px;
+      padding-bottom: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .modal-header {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 24px;
+    }
+
+    .modal-back-button {
+      width: 32px;
+      height: 32px;
+      border-radius: 16px;
+      background: var(--border-color);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border: none;
+      cursor: pointer;
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .modal-close-button {
+      width: 32px;
+      height: 32px;
+      border-radius: 16px;
+      background: var(--border-color);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border: none;
+      cursor: pointer;
+    }
+
+    .modal-close-text {
+      font-size: 16px;
+      color: var(--text-secondary);
+    }
+
+    .options-container {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .funding-option {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      background: var(--bg-card-darker);
+      border-radius: 14px;
+      padding: 16px;
+      border: 1px solid var(--border-color);
+      cursor: pointer;
+    }
+
+    .funding-option-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 22px;
+      background: var(--border-color);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-right: 14px;
+    }
+
+    .funding-option-icon-text {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .funding-option-content {
+      flex: 1;
+    }
+
+    .funding-option-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+
+    .funding-option-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .funding-option-arrow {
+      font-size: 16px;
+      color: var(--text-tertiary);
+      margin-left: 8px;
+    }
+
+    .funding-info {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    /* QR Code View */
+    .qr-container {
+      background: #ffffff;
+      padding: 16px;
+      border-radius: 16px;
+      margin-bottom: 20px;
+    }
+
+    .qr-placeholder {
+      width: 180px;
+      height: 180px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #f0f0f0;
+      border-radius: 8px;
+    }
+
+    .modal-instructions {
+      font-size: 14px;
+      color: var(--text-label);
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .address-box {
+      background: var(--bg-card-darker);
+      border-radius: 10px;
+      padding: 14px;
+      width: 100%;
+      margin-bottom: 16px;
+    }
+
+    .address-text {
+      font-size: 13px;
+      color: var(--text-primary);
+      font-family: 'Menlo', monospace;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .copy-button {
+      background: var(--success);
+      padding: 14px 32px;
+      border-radius: 12px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      margin-bottom: 16px;
+      border: none;
+      cursor: pointer;
+    }
+
+    .copy-button-text {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .warning-box {
+      background: var(--warning-bg);
+      border-radius: 10px;
+      padding: 12px;
+      width: 100%;
+      margin-bottom: 16px;
+    }
+
+    .warning-text {
+      font-size: 12px;
+      color: #ca8a04;
+      text-align: center;
+      line-height: 16px;
+    }
+
+    .network-badge {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      background: var(--primary-bg);
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+
+    .network-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 4px;
+      background: var(--blue);
+      margin-right: 8px;
+    }
+
+    .network-text {
+      font-size: 13px;
+      color: var(--blue);
+      font-weight: 500;
+    }
+
+    /* Color Palette Section */
+    .color-palette-section {
+      margin-top: 60px;
+      padding: 40px;
+      background: var(--bg-card);
+      border-radius: 20px;
+      max-width: 1600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .color-palette-title {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      color: var(--text-primary);
+    }
+
+    .color-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+    }
+
+    .color-swatch {
+      display: flex;
+      flex-direction: column;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+    }
+
+    .color-preview {
+      height: 80px;
+    }
+
+    .color-info {
+      padding: 12px;
+      background: var(--bg-card-darker);
+    }
+
+    .color-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .color-hex {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-family: 'Menlo', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <h1>X-Yield Mobile - Screen Previews</h1>
+    <p>Complete UI preview with exact styling from React Native code</p>
+  </div>
+
+  <div class="screens-grid">
+    <!-- ═══════════════════════════════════════════════════════════════
+         WELCOME SCREEN
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Welcome Screen</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="welcome-screen">
+            <div class="logo-container">
+              <div class="logo-circle">
+                <span class="logo-text">X</span>
+              </div>
+              <div class="brand-name">X-Yield</div>
+              <div class="tagline">DeFi Yield Optimization</div>
+            </div>
+
+            <div class="features-container">
+              <div class="feature-item">
+                <div class="feature-icon">
+                  <span class="feature-icon-text">%</span>
+                </div>
+                <div class="feature-text-container">
+                  <div class="feature-title">Maximize Yields</div>
+                  <div class="feature-description">Automatically find the best yield opportunities across DeFi</div>
+                </div>
+              </div>
+
+              <div class="feature-item">
+                <div class="feature-icon">
+                  <span class="feature-icon-text">$</span>
+                </div>
+                <div class="feature-text-container">
+                  <div class="feature-title">Secure Wallet</div>
+                  <div class="feature-description">Built-in embedded wallet for seamless transactions</div>
+                </div>
+              </div>
+
+              <div class="feature-item">
+                <div class="feature-icon">
+                  <span class="feature-icon-text">+</span>
+                </div>
+                <div class="feature-text-container">
+                  <div class="feature-title">Auto-Compound</div>
+                  <div class="feature-description">Reinvest earnings automatically for maximum growth</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bottom-container">
+              <button class="get-started-button">
+                <span class="get-started-button-text">Get Started</span>
+              </button>
+              <div class="terms-text">By continuing, you agree to our Terms of Service</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         LOGIN SCREEN
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Login Screen</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="login-screen">
+            <button class="back-button">
+              <span class="back-button-text">Back</span>
+            </button>
+
+            <div class="header-container">
+              <div class="logo-circle-small">
+                <span class="logo-text-small">X</span>
+              </div>
+              <div class="title">Welcome Back</div>
+              <div class="subtitle">Sign in with your email to continue</div>
+            </div>
+
+            <div class="form-container">
+              <div class="input-container">
+                <div class="input-label">Email</div>
+                <input type="email" class="input" placeholder="Enter your email">
+              </div>
+
+              <button class="primary-button">
+                <span class="primary-button-text">Continue</span>
+              </button>
+            </div>
+
+            <div class="footer-container">
+              <div class="footer-text">Secured by Privy</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         LOGIN SCREEN (OTP View)
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Login Screen (OTP)</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="login-screen">
+            <button class="back-button">
+              <span class="back-button-text">Back</span>
+            </button>
+
+            <div class="header-container">
+              <div class="logo-circle-small">
+                <span class="logo-text-small">X</span>
+              </div>
+              <div class="title">Enter Code</div>
+              <div class="subtitle">We sent a code to user@example.com</div>
+            </div>
+
+            <div class="form-container">
+              <div class="input-container">
+                <div class="input-label">Verification Code</div>
+                <input type="text" class="input" placeholder="Enter 6-digit code" maxlength="6">
+              </div>
+
+              <button class="primary-button">
+                <span class="primary-button-text">Verify</span>
+              </button>
+
+              <button class="resend-button">
+                <span class="resend-button-text">Use a different email</span>
+              </button>
+            </div>
+
+            <div class="footer-container">
+              <div class="footer-text">Secured by Privy</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         DASHBOARD SCREEN (Empty State)
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Dashboard (Empty)</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="dashboard-screen">
+            <div class="scroll-content">
+              <div class="header">
+                <div>
+                  <div class="greeting">Welcome back</div>
+                  <div class="user-email">user@example.com</div>
+                </div>
+                <button class="logout-button">
+                  <span class="logout-button-text">Logout</span>
+                </button>
+              </div>
+
+              <div class="total-section">
+                <div class="total-label">Total Balance</div>
+                <div class="total-value">$0.00</div>
+              </div>
+
+              <!-- Cash Account Card -->
+              <div class="account-card">
+                <div class="account-header">
+                  <div class="account-icon-container">
+                    <span class="account-icon">$</span>
+                  </div>
+                  <div class="account-info">
+                    <div class="account-title">Cash</div>
+                    <div class="account-subtitle">Available to use or invest</div>
+                  </div>
+                </div>
+                <div class="account-balance">$0.00</div>
+                <div class="empty-state-text">Add funds to get started</div>
+                <button class="account-button">
+                  <span class="account-button-text">+ Add Funds</span>
+                </button>
+              </div>
+
+              <!-- Savings Account Card -->
+              <div class="account-card savings-card">
+                <div class="account-header">
+                  <div class="account-icon-container savings-icon-container">
+                    <span class="account-icon">%</span>
+                  </div>
+                  <div class="account-info">
+                    <div class="account-title">Savings</div>
+                    <div class="apy-badge">
+                      <div class="apy-dot"></div>
+                      <span class="apy-badge-text">5.5% APY</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="account-balance">$0.00</div>
+                <div class="empty-state-text">Move cash here to start earning 5.5% APY</div>
+                <button class="account-button savings-button">
+                  <span class="account-button-text">Start Earning</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         DASHBOARD SCREEN (With Balance)
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Dashboard (With Balance)</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="dashboard-screen">
+            <div class="scroll-content">
+              <div class="header">
+                <div>
+                  <div class="greeting">Welcome back</div>
+                  <div class="user-email">user@example.com</div>
+                </div>
+                <button class="logout-button">
+                  <span class="logout-button-text">Logout</span>
+                </button>
+              </div>
+
+              <div class="total-section">
+                <div class="total-label">Total Balance</div>
+                <div class="total-value">$1,234.56</div>
+              </div>
+
+              <!-- Cash Account Card -->
+              <div class="account-card">
+                <div class="account-header">
+                  <div class="account-icon-container">
+                    <span class="account-icon">$</span>
+                  </div>
+                  <div class="account-info">
+                    <div class="account-title">Cash</div>
+                    <div class="account-subtitle">Available to use or invest</div>
+                  </div>
+                </div>
+                <div class="account-balance">$234.56</div>
+                <button class="account-button">
+                  <span class="account-button-text">+ Add Funds</span>
+                </button>
+              </div>
+
+              <!-- Savings Account Card (with animated balance) -->
+              <div class="account-card savings-card">
+                <div class="account-header">
+                  <div class="account-icon-container savings-icon-container">
+                    <span class="account-icon">%</span>
+                  </div>
+                  <div class="account-info">
+                    <div class="account-title">Savings</div>
+                    <div class="apy-badge">
+                      <div class="apy-dot"></div>
+                      <span class="apy-badge-text">5.5% APY</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- AnimatedBalance Component -->
+                <div class="animated-balance-container">
+                  <div class="animated-balance-value">$1,000.003847</div>
+                  <div class="yield-estimate">~$0.151/day  •  ~$4.58/month</div>
+                  <div class="apy-indicator">
+                    <div class="apy-indicator-dot"></div>
+                    <span class="apy-indicator-text">Earning 5.5% APY</span>
+                  </div>
+                </div>
+
+                <button class="account-button savings-button">
+                  <span class="account-button-text">Manage Savings</span>
+                </button>
+              </div>
+
+              <!-- How it Works -->
+              <div class="how-it-works-section">
+                <div class="section-title">How it works</div>
+
+                <div class="step-row">
+                  <div class="step-number">
+                    <span class="step-number-text">1</span>
+                  </div>
+                  <div class="step-content">
+                    <div class="step-title">Add funds to Cash</div>
+                    <div class="step-description">Deposit USDC via bank, card, or crypto transfer</div>
+                  </div>
+                </div>
+
+                <div class="step-connector"></div>
+
+                <div class="step-row">
+                  <div class="step-number">
+                    <span class="step-number-text">2</span>
+                  </div>
+                  <div class="step-content">
+                    <div class="step-title">Move to Savings</div>
+                    <div class="step-description">Tap "Start Earning" to put your cash to work</div>
+                  </div>
+                </div>
+
+                <div class="step-connector"></div>
+
+                <div class="step-row">
+                  <div class="step-number">
+                    <span class="step-number-text">3</span>
+                  </div>
+                  <div class="step-content">
+                    <div class="step-title">Watch it grow</div>
+                    <div class="step-description">Earn ~5.5% APY, withdraw anytime with no lockup</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Features -->
+              <div class="features-row">
+                <div class="feature-row-item">
+                  <span class="feature-row-icon">✓</span>
+                  <span class="feature-row-text">No fees on deposits</span>
+                </div>
+                <div class="feature-row-item">
+                  <span class="feature-row-icon">✓</span>
+                  <span class="feature-row-text">Withdraw anytime</span>
+                </div>
+                <div class="feature-row-item">
+                  <span class="feature-row-icon">✓</span>
+                  <span class="feature-row-text">15% fee on profits only</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         STRATEGIES SCREEN (Empty)
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Strategies (Empty)</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="strategies-screen">
+            <div class="scroll-content" style="padding: 60px 24px 40px;">
+              <div class="strategies-header">
+                <button class="back-btn">
+                  <span class="back-btn-text">&lt;</span>
+                </button>
+                <span class="header-title">Savings</span>
+                <div class="header-spacer"></div>
+              </div>
+
+              <!-- No Savings State -->
+              <div class="savings-section">
+                <div class="no-savings">
+                  <div class="no-savings-title">Start Earning</div>
+                  <div class="no-savings-subtext">Add money below to earn ~5.5% APY</div>
+                </div>
+              </div>
+
+              <!-- Available Balance -->
+              <div class="balance-card">
+                <div class="balance-label">Available</div>
+                <div class="balance-value">$500.00</div>
+              </div>
+
+              <!-- Info Card -->
+              <div class="info-card">
+                <div class="info-header">
+                  <div class="info-icon">
+                    <span class="info-icon-text">$</span>
+                  </div>
+                  <div class="info-content">
+                    <div class="info-title">High-Yield Savings</div>
+                    <div class="info-apy">~5.5% APY</div>
+                  </div>
+                </div>
+                <div class="info-description">Your money earns yield automatically. Withdraw anytime, no fees on your deposits.</div>
+              </div>
+
+              <!-- Amount Input -->
+              <div class="input-section">
+                <div class="input-label">Amount to add</div>
+                <div class="input-row">
+                  <div class="currency-prefix">
+                    <span class="currency-text">$</span>
+                  </div>
+                  <input type="text" class="amount-input" placeholder="0.00">
+                  <button class="max-button">
+                    <span class="max-button-text">MAX</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Deposit Button -->
+              <button class="deposit-button deposit-button-disabled">
+                <span class="deposit-button-text">Add Money</span>
+              </button>
+
+              <!-- Footer -->
+              <div class="footer-section">
+                <div class="footer-row">
+                  <span class="footer-icon">✓</span>
+                  <span class="footer-row-text">No transaction fees</span>
+                </div>
+                <div class="footer-row">
+                  <span class="footer-icon">✓</span>
+                  <span class="footer-row-text">Withdraw anytime</span>
+                </div>
+                <div class="footer-row">
+                  <span class="footer-icon">✓</span>
+                  <span class="footer-row-text">15% fee on earnings only</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         STRATEGIES SCREEN (With Savings)
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Strategies (With Savings)</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="strategies-screen">
+            <div class="scroll-content" style="padding: 60px 24px 40px;">
+              <div class="strategies-header">
+                <button class="back-btn">
+                  <span class="back-btn-text">&lt;</span>
+                </button>
+                <span class="header-title">Savings</span>
+                <div class="header-spacer"></div>
+              </div>
+
+              <!-- Savings Section with Balance -->
+              <div class="savings-section">
+                <div class="savings-content">
+                  <!-- AnimatedBalance -->
+                  <div class="animated-balance-container">
+                    <div class="animated-balance-label">Your Savings</div>
+                    <div class="animated-balance-value" style="font-size: 38px;">$1,000.003847</div>
+                    <div class="yield-estimate">~$0.151/day  •  ~$4.58/month</div>
+                    <div class="total-earned-container">
+                      <span class="total-earned-label">Total earned</span>
+                      <span class="total-earned-value">+$0.003847</span>
+                    </div>
+                    <div class="apy-indicator">
+                      <div class="apy-indicator-dot"></div>
+                      <span class="apy-indicator-text">Earning 5.5% APY</span>
+                    </div>
+                  </div>
+
+                  <!-- Diversification Toggle -->
+                  <button class="details-toggle">
+                    <span class="diversified-text">Diversified across 3 lending markets</span>
+                    <span class="details-arrow">▼</span>
+                  </button>
+
+                  <!-- Details Section (Expanded) -->
+                  <div class="details-section">
+                    <div class="detail-row detail-row-border">
+                      <div class="detail-left">
+                        <div class="detail-name">Steakhouse High Yield</div>
+                        <div class="detail-apy">6.2% APY</div>
+                      </div>
+                      <div class="detail-value">$400.00</div>
+                    </div>
+                    <div class="detail-row detail-row-border">
+                      <div class="detail-left">
+                        <div class="detail-name">Re7 USDC</div>
+                        <div class="detail-apy">5.4% APY</div>
+                      </div>
+                      <div class="detail-value">$350.00</div>
+                    </div>
+                    <div class="detail-row">
+                      <div class="detail-left">
+                        <div class="detail-name">Steakhouse Prime</div>
+                        <div class="detail-apy">4.8% APY</div>
+                      </div>
+                      <div class="detail-value">$250.00</div>
+                    </div>
+                  </div>
+
+                  <!-- Withdraw Button -->
+                  <button class="withdraw-button">
+                    <span class="withdraw-button-text">Withdraw</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Available Balance -->
+              <div class="balance-card">
+                <div class="balance-label">Available</div>
+                <div class="balance-value">$234.56</div>
+              </div>
+
+              <!-- Amount Input -->
+              <div class="input-section">
+                <div class="input-label">Amount to add</div>
+                <div class="input-row">
+                  <div class="currency-prefix">
+                    <span class="currency-text">$</span>
+                  </div>
+                  <input type="text" class="amount-input" value="100.00">
+                  <button class="max-button">
+                    <span class="max-button-text">MAX</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Deposit Button -->
+              <button class="deposit-button">
+                <span class="deposit-button-text">Add $100.00</span>
+              </button>
+
+              <!-- Footer -->
+              <div class="footer-section">
+                <div class="footer-row">
+                  <span class="footer-icon">✓</span>
+                  <span class="footer-row-text">No transaction fees</span>
+                </div>
+                <div class="footer-row">
+                  <span class="footer-icon">✓</span>
+                  <span class="footer-row-text">Withdraw anytime</span>
+                </div>
+                <div class="footer-row">
+                  <span class="footer-icon">✓</span>
+                  <span class="footer-row-text">15% fee on earnings only</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         ADD FUNDS MODAL
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Add Funds Modal</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="modal-overlay">
+            <div class="modal-content">
+              <div class="modal-header">
+                <div class="modal-back-button" style="visibility: hidden;"></div>
+                <span class="modal-title">Add Funds</span>
+                <button class="modal-close-button">
+                  <span class="modal-close-text">✕</span>
+                </button>
+              </div>
+
+              <div class="options-container">
+                <div class="funding-option">
+                  <div class="funding-option-icon">
+                    <span class="funding-option-icon-text">$</span>
+                  </div>
+                  <div class="funding-option-content">
+                    <div class="funding-option-title">Buy USDC</div>
+                    <div class="funding-option-subtitle">Via Coinbase or other exchanges</div>
+                  </div>
+                  <span class="funding-option-arrow">&gt;</span>
+                </div>
+
+                <div class="funding-option">
+                  <div class="funding-option-icon">
+                    <span class="funding-option-icon-text">↓</span>
+                  </div>
+                  <div class="funding-option-content">
+                    <div class="funding-option-title">Receive from Wallet</div>
+                    <div class="funding-option-subtitle">Send USDC from another wallet</div>
+                  </div>
+                  <span class="funding-option-arrow">&gt;</span>
+                </div>
+
+                <div class="funding-info">Funds will be added to your Cash account on Base network</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         RECEIVE QR MODAL
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="screen-wrapper">
+      <div class="screen-label">Receive QR Modal</div>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="screen-content">
+          <div class="modal-overlay">
+            <div class="modal-content">
+              <div class="modal-header">
+                <button class="modal-back-button">
+                  <span style="color: #fff; font-weight: 600;">&lt;</span>
+                </button>
+                <span class="modal-title">Add Funds</span>
+                <button class="modal-close-button">
+                  <span class="modal-close-text">✕</span>
+                </button>
+              </div>
+
+              <div class="qr-container">
+                <div class="qr-placeholder">
+                  <span style="color: #71717a; font-size: 14px;">[QR Code]</span>
+                </div>
+              </div>
+
+              <div class="modal-instructions">Send USDC on Base network to this address</div>
+
+              <div class="address-box">
+                <div class="address-text">0x1234...5678abcd</div>
+              </div>
+
+              <button class="copy-button">
+                <span class="copy-button-text">Copy Address</span>
+              </button>
+
+              <div class="warning-box">
+                <div class="warning-text">Only send USDC on Base network. Other tokens or networks may result in loss.</div>
+              </div>
+
+              <div class="network-badge">
+                <div class="network-dot"></div>
+                <span class="network-text">Base Network</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       COLOR PALETTE REFERENCE
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="color-palette-section">
+    <h2 class="color-palette-title">Color Palette Reference</h2>
+    <div class="color-grid">
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #0a0a0a;"></div>
+        <div class="color-info">
+          <div class="color-name">Background</div>
+          <div class="color-hex">#0a0a0a</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #141419;"></div>
+        <div class="color-info">
+          <div class="color-name">Card Background</div>
+          <div class="color-hex">#141419</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #1a1a1f;"></div>
+        <div class="color-info">
+          <div class="color-name">Card Darker</div>
+          <div class="color-hex">#1a1a1f</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #27272a;"></div>
+        <div class="color-info">
+          <div class="color-name">Border</div>
+          <div class="color-hex">#27272a</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #6366f1;"></div>
+        <div class="color-info">
+          <div class="color-name">Primary (Indigo)</div>
+          <div class="color-hex">#6366f1</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #1a1a2e;"></div>
+        <div class="color-info">
+          <div class="color-name">Primary BG</div>
+          <div class="color-hex">#1a1a2e</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #22c55e;"></div>
+        <div class="color-info">
+          <div class="color-name">Success (Green)</div>
+          <div class="color-hex">#22c55e</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #0f1a14;"></div>
+        <div class="color-info">
+          <div class="color-name">Success BG</div>
+          <div class="color-hex">#0f1a14</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #eab308;"></div>
+        <div class="color-info">
+          <div class="color-name">Warning</div>
+          <div class="color-hex">#eab308</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #ef4444;"></div>
+        <div class="color-info">
+          <div class="color-name">Danger</div>
+          <div class="color-hex">#ef4444</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #3b82f6;"></div>
+        <div class="color-info">
+          <div class="color-name">Blue (Network)</div>
+          <div class="color-hex">#3b82f6</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #ffffff;"></div>
+        <div class="color-info">
+          <div class="color-name">Text Primary</div>
+          <div class="color-hex">#ffffff</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #a1a1aa;"></div>
+        <div class="color-info">
+          <div class="color-name">Text Label</div>
+          <div class="color-hex">#a1a1aa</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #71717a;"></div>
+        <div class="color-info">
+          <div class="color-name">Text Secondary</div>
+          <div class="color-hex">#71717a</div>
+        </div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-preview" style="background: #52525b;"></div>
+        <div class="color-info">
+          <div class="color-name">Text Tertiary</div>
+          <div class="color-hex">#52525b</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align: center; padding: 40px; color: #71717a; font-size: 14px;">
+    Generated from X-Yield Mobile React Native codebase • All styles extracted from StyleSheet definitions
+  </div>
+</body>
+</html>

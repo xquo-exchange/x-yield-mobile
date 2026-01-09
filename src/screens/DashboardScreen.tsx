@@ -13,11 +13,12 @@ import {
   Linking,
   AppState,
   AppStateStatus,
+  Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
-import * as WebBrowser from 'expo-web-browser';
 import QRCode from 'react-native-qrcode-svg';
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePrivy, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { useSmartWallets } from '@privy-io/expo/smart-wallets';
@@ -26,8 +27,155 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
-import AnimatedBalance from '../components/AnimatedBalance';
-import { openCoinbaseOnramp, openCoinbaseToBuyUsdc, getOnrampSessionUrl } from '../services/coinbaseOnramp';
+import { getTotalDeposited } from '../services/depositTracker';
+import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
+
+// Brand Color Palette - unflat (ONLY these 5 colors)
+const COLORS = {
+  primary: '#200191',    // Deep violet - card backgrounds, badges
+  secondary: '#6198FF',  // Light blue - CTAs, earnings, APY numbers
+  white: '#F5F6FF',      // Main text, titles, balances
+  grey: '#484848',       // Labels, subtitles, secondary borders
+  black: '#00041B',      // Screen backgrounds
+};
+
+// AnimatedBalance Component - Real-time yield accumulation with USDC precision
+interface AnimatedBalanceProps {
+  balance: number;
+  apy: number;
+  isEarning: boolean;
+  size?: 'large' | 'medium';
+}
+
+function AnimatedBalance({ balance, apy, isEarning, size = 'large' }: AnimatedBalanceProps) {
+  const [displayBalance, setDisplayBalance] = React.useState(balance);
+  const startTimeRef = React.useRef(Date.now());
+  const startBalanceRef = React.useRef(balance);
+
+  // Reset when balance changes significantly (new deposit/withdrawal)
+  React.useEffect(() => {
+    const diff = Math.abs(balance - startBalanceRef.current);
+    if (diff > 0.01) {
+      startBalanceRef.current = balance;
+      startTimeRef.current = Date.now();
+      setDisplayBalance(balance);
+    }
+  }, [balance]);
+
+  // Real-time yield accumulation
+  React.useEffect(() => {
+    if (!isEarning || apy <= 0 || balance <= 0) {
+      setDisplayBalance(balance);
+      return;
+    }
+
+    // yieldPerSecond = balance * (APY / 100) / seconds_per_year
+    const secondsPerYear = 31536000;
+    const yieldPerSecond = balance * (apy / 100) / secondsPerYear;
+
+    const interval = setInterval(() => {
+      const elapsedSeconds = (Date.now() - startTimeRef.current) / 1000;
+      const accumulatedYield = yieldPerSecond * elapsedSeconds;
+      setDisplayBalance(startBalanceRef.current + accumulatedYield);
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [balance, apy, isEarning]);
+
+  // Format with 6 decimal places (USDC precision)
+  const formatBalance = (value: number): string => {
+    const formatted = value.toFixed(6);
+    const parts = formatted.split('.');
+    const integerPart = parseInt(parts[0]).toLocaleString('en-US');
+    return `$${integerPart}.${parts[1]}`;
+  };
+
+  const fontSize = size === 'large' ? 44 : 28;
+
+  return (
+    <Text style={[animatedBalanceStyles.balance, { fontSize }]}>
+      {formatBalance(displayBalance)}
+    </Text>
+  );
+}
+
+const animatedBalanceStyles = StyleSheet.create({
+  balance: {
+    fontWeight: '700',
+    color: COLORS.white,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -0.5,
+  },
+});
+
+// AnimatedEarned Component - Real-time earnings with USDC precision
+interface AnimatedEarnedProps {
+  currentBalance: number;
+  depositedAmount: number;
+  apy: number;
+}
+
+function AnimatedEarned({ currentBalance, depositedAmount, apy }: AnimatedEarnedProps) {
+  const [displayEarned, setDisplayEarned] = React.useState(
+    Math.max(0, currentBalance - depositedAmount)
+  );
+  const startTimeRef = React.useRef(Date.now());
+  const startBalanceRef = React.useRef(currentBalance);
+
+  // Reset when balance changes significantly
+  React.useEffect(() => {
+    const diff = Math.abs(currentBalance - startBalanceRef.current);
+    if (diff > 0.01) {
+      startBalanceRef.current = currentBalance;
+      startTimeRef.current = Date.now();
+      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
+    }
+  }, [currentBalance, depositedAmount]);
+
+  // Real-time yield accumulation for earned amount
+  React.useEffect(() => {
+    if (apy <= 0 || currentBalance <= 0 || depositedAmount <= 0) {
+      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
+      return;
+    }
+
+    // yieldPerSecond based on current balance
+    const secondsPerYear = 31536000;
+    const yieldPerSecond = currentBalance * (apy / 100) / secondsPerYear;
+
+    const interval = setInterval(() => {
+      const elapsedSeconds = (Date.now() - startTimeRef.current) / 1000;
+      const accumulatedYield = yieldPerSecond * elapsedSeconds;
+      const newBalance = startBalanceRef.current + accumulatedYield;
+      setDisplayEarned(Math.max(0, newBalance - depositedAmount));
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [currentBalance, depositedAmount, apy]);
+
+  // Format with 6 decimal places (USDC precision)
+  const formatEarned = (value: number): string => {
+    const formatted = value.toFixed(6);
+    const parts = formatted.split('.');
+    const integerPart = parseInt(parts[0]).toLocaleString('en-US');
+    return `+$${integerPart}.${parts[1]}`;
+  };
+
+  return (
+    <Text style={animatedEarnedStyles.earned}>
+      {formatEarned(displayEarned)}
+    </Text>
+  );
+}
+
+const animatedEarnedStyles = StyleSheet.create({
+  earned: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.secondary,
+    fontVariant: ['tabular-nums'],
+  },
+});
 
 type DashboardScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Dashboard'>;
@@ -45,6 +193,22 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const [prefetchedOnrampUrl, setPrefetchedOnrampUrl] = React.useState<string | null>(null);
   const [isCheckingFunds, setIsCheckingFunds] = React.useState(false);
   const [wasInCoinbase, setWasInCoinbase] = React.useState(false);
+  const [showHowItWorks, setShowHowItWorks] = React.useState(false);
+  const [totalDeposited, setTotalDeposited] = React.useState(0);
+
+  // Pulse animation for earning indicator
+  const pulseAnim = React.useRef(new Animated.Value(1)).current;
+
+  React.useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.2, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [pulseAnim]);
 
   const { apy: displayApy, refetch: refetchApy } = useVaultApy();
 
@@ -58,62 +222,50 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const smartWalletAddress = smartWalletFromHook || smartWalletFromLinkedAccounts;
   const displayAddress = smartWalletAddress || embeddedWalletAddress;
 
-  // Fetch balances and positions (must be before useEffects that use refetch functions)
   const { usdc, isLoading: balanceLoading, refetch: refetchBalances } = useWalletBalance(displayAddress);
   const { totalUsdValue: savingsTotal, isLoading: positionsLoading, refetch: refetchPositions } = usePositions(displayAddress);
 
   const isLoading = balanceLoading || positionsLoading;
 
-  // Calculate totals
   const cashBalance = usdc ? parseFloat(usdc.balance) : 0;
   const savingsBalance = parseFloat(savingsTotal) || 0;
   const totalBalance = cashBalance + savingsBalance;
-  const hasSavings = savingsBalance > 0;
-  const hasCash = cashBalance > 0;
 
-  // Pre-fetch session URL when funding modal opens
-  // NOTE: warmUpAsync disabled - was causing browser to hang
+  // Calculate earnings
+  const totalEarned = totalDeposited > 0 ? Math.max(0, savingsBalance - totalDeposited) : 0;
+  const dailyEarnings = (savingsBalance * (parseFloat(displayApy) / 100)) / 365;
+
+  // Load total deposited
   React.useEffect(() => {
-    if (showFundingModal && displayAddress) {
-      console.log('[Prefetch] Modal opened - fetching session URL...');
-
-      // Pre-warm disabled - was blocking browser
-      // WebBrowser.warmUpAsync();
-
-      // Pre-fetch the onramp session URL
-      getOnrampSessionUrl(displayAddress).then((url) => {
-        if (url) {
-          console.log('[Prefetch] Session URL ready!');
-          setPrefetchedOnrampUrl(url);
-        }
-      });
-    } else {
-      // Clear prefetched URL when modal closes
-      setPrefetchedOnrampUrl(null);
-    }
-
-    // Cleanup disabled
-    // return () => { WebBrowser.coolDownAsync(); };
-  }, [showFundingModal, displayAddress]);
-
-  // Auto-refresh when user returns from Coinbase
-  React.useEffect(() => {
-    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
-      // When app comes to foreground and user was in Coinbase
-      if (nextAppState === 'active' && wasInCoinbase) {
-        console.log('[AppState] User returned from Coinbase - refreshing balances...');
-        setWasInCoinbase(false);
-        setIsCheckingFunds(true);
-
-        // Wait a moment then refresh
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await Promise.all([refetchBalances(), refetchPositions()]);
-
-        setIsCheckingFunds(false);
-        console.log('[AppState] Balance refresh complete');
+    const loadDeposited = async () => {
+      if (displayAddress) {
+        const deposited = await getTotalDeposited(displayAddress);
+        setTotalDeposited(deposited);
       }
     };
+    loadDeposited();
+  }, [displayAddress, savingsBalance]);
 
+  React.useEffect(() => {
+    if (showFundingModal && displayAddress) {
+      getOnrampSessionUrl(displayAddress).then((url) => {
+        if (url) setPrefetchedOnrampUrl(url);
+      });
+    } else {
+      setPrefetchedOnrampUrl(null);
+    }
+  }, [showFundingModal, displayAddress]);
+
+  React.useEffect(() => {
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active' && wasInCoinbase) {
+        setWasInCoinbase(false);
+        setIsCheckingFunds(true);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await Promise.all([refetchBalances(), refetchPositions()]);
+        setIsCheckingFunds(false);
+      }
+    };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
   }, [wasInCoinbase, refetchBalances, refetchPositions]);
@@ -124,10 +276,10 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     setRefreshing(false);
   }, [refetchBalances, refetchPositions, refetchApy]);
 
-  const handleLogout = async () => {
+  const handleSettings = () => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      'Settings',
+      'What would you like to do?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -150,123 +302,36 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     }
   };
 
-  const handleBuyUsdc = async () => {
-    // Prevent double execution
-    if (isBuyingUsdc) {
-      console.log('[BuyUSDC] Already in progress, ignoring');
-      return;
-    }
-
+  const handleBuyWithCard = async () => {
+    if (isBuyingUsdc) return;
     if (!displayAddress) {
       Alert.alert('Error', 'No wallet address available');
       return;
     }
 
-    // IMPORTANT: Capture the prefetched URL BEFORE closing modal
-    // (closing modal triggers useEffect that clears prefetchedOnrampUrl)
     const urlToOpen = prefetchedOnrampUrl;
-
-    // Close modal and show loading
     setShowFundingModal(false);
     setIsBuyingUsdc(true);
 
-    const startTime = Date.now();
-    console.log('[BuyUSDC] Starting...');
-    console.log('[BuyUSDC] Prefetched URL available:', !!urlToOpen);
-
     try {
-      let opened = false;
-
-      // Use prefetched URL if available (instant!)
       if (urlToOpen) {
-        console.log('[BuyUSDC] Using prefetched URL - skipping API call!');
-        console.log('[BuyUSDC] URL preview:', urlToOpen.substring(0, 80) + '...');
-
-        const browserStart = Date.now();
-        console.log('[BuyUSDC] Opening with Linking.openURL...');
-
-        // Mark that user is going to Coinbase (for auto-refresh on return)
         setWasInCoinbase(true);
-
-        // Open in Safari - WebBrowser.openBrowserAsync hangs in simulator
         await Linking.openURL(urlToOpen);
-
-        const totalTime = Date.now() - startTime;
-        console.log(`[BuyUSDC] Safari opened in ${totalTime}ms (prefetched)`);
-
-        // Show message to user
-        Alert.alert(
-          'Complete Your Purchase',
-          'You\'ll be taken to Coinbase to buy USDC. When done, return here and your balance will update automatically.',
-          [{ text: 'OK' }]
-        );
-
-        opened = true;
       } else {
-        // Fallback: fetch URL and open (slower path)
-        console.log('[BuyUSDC] No prefetched URL, calling API...');
         setWasInCoinbase(true);
-        opened = await openCoinbaseOnramp(displayAddress);
-        const totalTime = Date.now() - startTime;
-        console.log(`[BuyUSDC] Total time (non-prefetched): ${totalTime}ms`);
-      }
-
-      if (!opened) {
-        // Show fallback options if Coinbase Onramp failed
-        Alert.alert(
-          'Buy USDC',
-          'Choose how to get USDC:',
-          [
-            {
-              text: 'Open Coinbase App',
-              onPress: async () => {
-                await openCoinbaseToBuyUsdc();
-              },
-            },
-            {
-              text: 'Show QR Code',
-              onPress: () => {
-                setShowFundingModal(true);
-                setFundingView('receive');
-              },
-            },
-            {
-              text: 'Copy Address',
-              onPress: handleCopyAddress,
-            },
-            { text: 'Cancel', style: 'cancel' },
-          ]
-        );
+        await openCoinbaseOnramp(displayAddress);
       }
     } catch (error) {
-      console.error('[Dashboard] Buy USDC error:', error);
-      Alert.alert(
-        'Error',
-        'Could not open Coinbase. Would you like to copy your wallet address instead?',
-        [
-          {
-            text: 'Copy Address',
-            onPress: handleCopyAddress,
-          },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
+      Alert.alert('Error', 'Could not open payment provider');
     } finally {
       setIsBuyingUsdc(false);
     }
-  };
-
-  const openFundingModal = () => {
-    setFundingView('options');
-    setShowFundingModal(true);
   };
 
   const closeFundingModal = () => {
     setShowFundingModal(false);
     setFundingView('options');
   };
-
-  const userEmail = (user?.linked_accounts?.find((a) => a.type === 'email') as { address?: string } | undefined)?.address || 'User';
 
   return (
     <View style={styles.container}>
@@ -276,195 +341,190 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#22c55e"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.secondary} />
         }
       >
         {/* Header */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>Welcome back</Text>
-            <Text style={styles.userEmail}>{userEmail}</Text>
+          <View style={styles.logoContainer}>
+            <View style={styles.logoIcon}>
+              <Ionicons name="arrow-up" size={16} color={COLORS.white} />
+            </View>
+            <Text style={styles.logoText}>unflat</Text>
           </View>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Logout</Text>
+          <TouchableOpacity style={styles.settingsButton} onPress={handleSettings}>
+            <Ionicons name="settings-outline" size={22} color={COLORS.grey} />
           </TouchableOpacity>
         </View>
 
-        {/* Total Balance Summary */}
-        <View style={styles.totalSection}>
-          <Text style={styles.totalLabel}>Total Balance</Text>
+        {/* Main Balance Section */}
+        <View style={styles.balanceSection}>
+          <Text style={styles.balanceLabel}>Total Balance</Text>
           {isLoading ? (
-            <ActivityIndicator size="small" color="#22c55e" />
+            <ActivityIndicator size="small" color={COLORS.secondary} style={{ marginVertical: 20 }} />
           ) : (
-            <Text style={styles.totalValue}>${totalBalance.toFixed(2)}</Text>
+            <>
+              <AnimatedBalance
+                balance={totalBalance}
+                apy={parseFloat(displayApy)}
+                isEarning={savingsBalance > 0}
+              />
+              <Text style={styles.balanceSubtext}>Across 2 accounts</Text>
+            </>
           )}
         </View>
 
-        {isLoading ? (
-          <ActivityIndicator size="large" color="#22c55e" style={{ marginVertical: 40 }} />
-        ) : (
-          <>
-            {/* ═══════════════════════════════════════════════════════════════
-                CASH ACCOUNT CARD
-                USDC in wallet, not earning yield
-            ═══════════════════════════════════════════════════════════════ */}
-            <View style={styles.accountCard}>
-              <View style={styles.accountHeader}>
-                <View style={styles.accountIconContainer}>
-                  <Text style={styles.accountIcon}>$</Text>
-                </View>
-                <View style={styles.accountInfo}>
-                  <Text style={styles.accountTitle}>Cash</Text>
-                  <Text style={styles.accountSubtitle}>Available to use or invest</Text>
+        {/* Cash Account Card */}
+        {!isLoading && (
+          <View style={styles.cashCard}>
+            <View style={styles.cardHeader}>
+              <View style={styles.cardIconContainer}>
+                <Ionicons name="wallet-outline" size={20} color={COLORS.white} />
+              </View>
+              <View style={styles.cardTitleContainer}>
+                <Text style={styles.cardTitle}>Cash</Text>
+                <Text style={styles.cardSubtitle}>Available to use or invest</Text>
+              </View>
+            </View>
+            <Text style={styles.cashBalance}>${cashBalance.toFixed(2)}</Text>
+            <TouchableOpacity
+              style={styles.addFundsButton}
+              onPress={() => setShowFundingModal(true)}
+            >
+              <Ionicons name="add" size={18} color={COLORS.white} />
+              <Text style={styles.addFundsButtonText}>Add Funds</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Savings Account Card */}
+        {!isLoading && (
+          <View style={styles.savingsCard}>
+            <View style={styles.cardHeader}>
+              <View style={styles.savingsIconContainer}>
+                <Ionicons name="trending-up" size={20} color={COLORS.white} />
+              </View>
+              <View style={styles.cardTitleContainer}>
+                <Text style={styles.cardTitle}>Savings</Text>
+                <View style={styles.apyBadge}>
+                  <Animated.View style={[styles.apyDot, { transform: [{ scale: pulseAnim }] }]} />
+                  <Text style={styles.apyBadgeText}>
+                    <Text style={styles.apyNumber}>{displayApy}%</Text> APY
+                  </Text>
                 </View>
               </View>
-
-              <Text style={styles.accountBalance}>${cashBalance.toFixed(2)}</Text>
-
-              {!hasCash && (
-                <Text style={styles.emptyStateText}>
-                  Add funds to get started
-                </Text>
-              )}
-
-              <TouchableOpacity
-                style={styles.accountButton}
-                onPress={openFundingModal}
-              >
-                <Text style={styles.accountButtonText}>+ Add Funds</Text>
-              </TouchableOpacity>
             </View>
 
-            {/* ═══════════════════════════════════════════════════════════════
-                SAVINGS ACCOUNT CARD
-                USDC in Morpho vaults, earning yield
-            ═══════════════════════════════════════════════════════════════ */}
-            <View style={[styles.accountCard, styles.savingsCard]}>
-              <View style={styles.accountHeader}>
-                <View style={[styles.accountIconContainer, styles.savingsIconContainer]}>
-                  <Text style={styles.accountIcon}>%</Text>
-                </View>
-                <View style={styles.accountInfo}>
-                  <Text style={styles.accountTitle}>Savings</Text>
-                  <View style={styles.apyBadge}>
-                    <View style={styles.apyDot} />
-                    <Text style={styles.apyBadgeText}>{displayApy}% APY</Text>
+            {savingsBalance > 0 ? (
+              <>
+                <AnimatedBalance
+                  balance={savingsBalance}
+                  apy={parseFloat(displayApy)}
+                  isEarning={true}
+                  size="medium"
+                />
+                <View style={styles.savingsBreakdown}>
+                  <View style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel}>Deposited</Text>
+                    <Text style={styles.breakdownValue}>${totalDeposited.toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel}>Earned</Text>
+                    <AnimatedEarned
+                      currentBalance={savingsBalance}
+                      depositedAmount={totalDeposited}
+                      apy={parseFloat(displayApy)}
+                    />
                   </View>
                 </View>
-              </View>
-
-              {hasSavings ? (
-                <>
-                  <AnimatedBalance
-                    balance={savingsBalance}
-                    apy={parseFloat(displayApy)}
-                    isAnimating={true}
-                    fontSize={32}
-                    showYieldEstimate={true}
-                  />
-                </>
-              ) : (
-                <>
-                  <Text style={styles.accountBalance}>$0.00</Text>
+                <View style={styles.savingsButtons}>
+                  <TouchableOpacity
+                    style={styles.startEarningButton}
+                    onPress={() => navigation.navigate('Strategies')}
+                  >
+                    <Text style={styles.startEarningButtonText}>Add More</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.withdrawButton}
+                    onPress={() => navigation.navigate('Strategies')}
+                  >
+                    <Text style={styles.withdrawButtonText}>Withdraw</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateTitle}>Start earning today</Text>
                   <Text style={styles.emptyStateText}>
-                    Move cash here to start earning {displayApy}% APY
+                    Your money grows while you sleep. Withdraw anytime.
                   </Text>
-                </>
-              )}
+                </View>
+                <TouchableOpacity
+                  style={styles.startEarningButton}
+                  onPress={() => navigation.navigate('Strategies')}
+                >
+                  <Text style={styles.startEarningButtonText}>Start Earning</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        )}
 
-              <TouchableOpacity
-                style={[styles.accountButton, styles.savingsButton]}
-                onPress={() => navigation.navigate('Strategies')}
-              >
-                <Text style={[styles.accountButtonText, styles.savingsButtonText]}>
-                  {hasSavings ? 'Manage Savings' : 'Start Earning'}
-                </Text>
-              </TouchableOpacity>
+        {/* Trust Indicators */}
+        <View style={styles.trustSection}>
+          <View style={styles.trustItem}>
+            <Ionicons name="lock-closed-outline" size={16} color={COLORS.white} />
+            <Text style={styles.trustText}>Non-custodial</Text>
+          </View>
+          <View style={styles.trustItem}>
+            <Ionicons name="flash-outline" size={16} color={COLORS.white} />
+            <Text style={styles.trustText}>No gas fees</Text>
+          </View>
+          <View style={styles.trustItem}>
+            <Ionicons name="arrow-undo-outline" size={16} color={COLORS.white} />
+            <Text style={styles.trustText}>Exit anytime</Text>
+          </View>
+        </View>
+
+        {/* How It Works (Expandable) */}
+        <TouchableOpacity
+          style={styles.howItWorksToggle}
+          onPress={() => setShowHowItWorks(!showHowItWorks)}
+        >
+          <Text style={styles.howItWorksToggleText}>How does it work?</Text>
+          <Ionicons
+            name={showHowItWorks ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={COLORS.grey}
+          />
+        </TouchableOpacity>
+
+        {showHowItWorks && (
+          <View style={styles.howItWorksContent}>
+            <View style={styles.stepItem}>
+              <View style={styles.stepNumber}><Text style={styles.stepNumberText}>1</Text></View>
+              <Text style={styles.stepText}>Add USDC to your account</Text>
             </View>
-
-            {/* ═══════════════════════════════════════════════════════════════
-                HOW IT WORKS SECTION
-            ═══════════════════════════════════════════════════════════════ */}
-            <View style={styles.howItWorksSection}>
-              <Text style={styles.sectionTitle}>How it works</Text>
-
-              <View style={styles.stepRow}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>1</Text>
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Add funds to Cash</Text>
-                  <Text style={styles.stepDescription}>
-                    Deposit USDC via bank, card, or crypto transfer
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.stepConnector} />
-
-              <View style={styles.stepRow}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>2</Text>
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Move to Savings</Text>
-                  <Text style={styles.stepDescription}>
-                    Tap "Start Earning" to put your cash to work
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.stepConnector} />
-
-              <View style={styles.stepRow}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>3</Text>
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Watch it grow</Text>
-                  <Text style={styles.stepDescription}>
-                    Earn ~{displayApy}% APY, withdraw anytime with no lockup
-                  </Text>
-                </View>
-              </View>
+            <View style={styles.stepItem}>
+              <View style={styles.stepNumber}><Text style={styles.stepNumberText}>2</Text></View>
+              <Text style={styles.stepText}>We allocate across trusted managers</Text>
             </View>
-
-            {/* Features */}
-            <View style={styles.featuresRow}>
-              <View style={styles.featureItem}>
-                <Text style={styles.featureIcon}>✓</Text>
-                <Text style={styles.featureText}>No fees on deposits</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Text style={styles.featureIcon}>✓</Text>
-                <Text style={styles.featureText}>Withdraw anytime</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Text style={styles.featureIcon}>✓</Text>
-                <Text style={styles.featureText}>15% fee on profits only</Text>
-              </View>
+            <View style={styles.stepItem}>
+              <View style={styles.stepNumber}><Text style={styles.stepNumberText}>3</Text></View>
+              <Text style={styles.stepText}>You earn yield, withdraw anytime</Text>
             </View>
-          </>
+          </View>
         )}
       </ScrollView>
 
-      {/* Loading Overlay for Buy USDC */}
-      {isBuyingUsdc && (
+      {/* Loading Overlays */}
+      {(isBuyingUsdc || isCheckingFunds) && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#22c55e" />
-          <Text style={styles.loadingText}>Opening Coinbase...</Text>
-        </View>
-      )}
-
-      {/* Loading Overlay for Checking Funds */}
-      {isCheckingFunds && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#22c55e" />
-          <Text style={styles.loadingText}>Checking for new funds...</Text>
+          <ActivityIndicator size="large" color={COLORS.secondary} />
+          <Text style={styles.loadingText}>
+            {isBuyingUsdc ? 'Opening payment...' : 'Updating balance...'}
+          </Text>
         </View>
       )}
 
@@ -477,124 +537,77 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {/* Modal Header */}
             <View style={styles.modalHeader}>
               {fundingView === 'receive' ? (
-                <TouchableOpacity
-                  style={styles.modalBackButton}
-                  onPress={() => setFundingView('options')}
-                >
-                  <Text style={styles.modalBackText}>{'<'}</Text>
+                <TouchableOpacity style={styles.modalHeaderButton} onPress={() => setFundingView('options')}>
+                  <Ionicons name="chevron-back" size={20} color={COLORS.white} />
                 </TouchableOpacity>
               ) : (
-                <View style={styles.modalBackButton} />
+                <View style={styles.modalHeaderButton} />
               )}
               <Text style={styles.modalTitle}>Add Funds</Text>
-              <TouchableOpacity
-                style={styles.modalCloseButton}
-                onPress={closeFundingModal}
-              >
-                <Text style={styles.modalCloseText}>✕</Text>
+              <TouchableOpacity style={styles.modalHeaderButton} onPress={closeFundingModal}>
+                <Ionicons name="close" size={20} color={COLORS.grey} />
               </TouchableOpacity>
             </View>
 
             {fundingView === 'options' ? (
-              /* Options View */
               <View style={styles.optionsContainer}>
-                {/* Buy USDC Option */}
-                <TouchableOpacity
-                  style={styles.fundingOption}
-                  onPress={handleBuyUsdc}
-                >
+                <TouchableOpacity style={styles.fundingOption} onPress={() => setFundingView('receive')}>
                   <View style={styles.fundingOptionIcon}>
-                    <Text style={styles.fundingOptionIconText}>$</Text>
+                    <Ionicons name="arrow-down" size={24} color={COLORS.white} />
                   </View>
                   <View style={styles.fundingOptionContent}>
-                    <Text style={styles.fundingOptionTitle}>Buy USDC</Text>
-                    <Text style={styles.fundingOptionSubtitle}>
-                      Via Coinbase or other exchanges
-                    </Text>
+                    <Text style={styles.fundingOptionTitle}>Transfer USDC</Text>
+                    <Text style={styles.fundingOptionSubtitle}>Send from any wallet</Text>
                   </View>
-                  <Text style={styles.fundingOptionArrow}>{'>'}</Text>
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
                 </TouchableOpacity>
 
-                {/* Receive from Wallet Option */}
-                <TouchableOpacity
-                  style={styles.fundingOption}
-                  onPress={() => setFundingView('receive')}
-                >
+                <TouchableOpacity style={styles.fundingOption} onPress={handleBuyWithCard}>
                   <View style={styles.fundingOptionIcon}>
-                    <Text style={styles.fundingOptionIconText}>↓</Text>
+                    <Ionicons name="card-outline" size={24} color={COLORS.white} />
                   </View>
                   <View style={styles.fundingOptionContent}>
-                    <Text style={styles.fundingOptionTitle}>Receive from Wallet</Text>
-                    <Text style={styles.fundingOptionSubtitle}>
-                      Send USDC from another wallet
-                    </Text>
+                    <Text style={styles.fundingOptionTitle}>Buy with Card</Text>
+                    <Text style={styles.fundingOptionSubtitle}>Via Coinbase</Text>
                   </View>
-                  <Text style={styles.fundingOptionArrow}>{'>'}</Text>
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
                 </TouchableOpacity>
-
-                {/* Info Text */}
-                <Text style={styles.fundingInfo}>
-                  Funds will be added to your Cash account on Base network
-                </Text>
               </View>
             ) : (
-              /* Receive View (QR Code) */
-              <>
-                {/* QR Code */}
+              <View style={styles.receiveContainer}>
                 <View style={styles.qrContainer}>
                   {displayAddress ? (
-                    <QRCode
-                      value={displayAddress}
-                      size={180}
-                      backgroundColor="#ffffff"
-                      color="#000000"
-                    />
+                    <QRCode value={displayAddress} size={160} backgroundColor="#ffffff" color="#000000" />
                   ) : (
-                    <View style={styles.qrPlaceholder}>
-                      <Text style={styles.qrPlaceholderText}>No wallet</Text>
-                    </View>
+                    <View style={styles.qrPlaceholder}><Text style={styles.qrPlaceholderText}>No wallet</Text></View>
                   )}
                 </View>
 
-                {/* Instructions */}
-                <Text style={styles.modalInstructions}>
-                  Send USDC on Base network to this address
-                </Text>
+                <Text style={styles.receiveInstructions}>Send USDC on Base network</Text>
 
-                {/* Address Box */}
                 <View style={styles.addressBox}>
                   <Text style={styles.addressText} numberOfLines={1} ellipsizeMode="middle">
-                    {displayAddress || 'No wallet address'}
+                    {displayAddress || 'No address'}
                   </Text>
                 </View>
 
-                {/* Copy Button */}
                 <TouchableOpacity
                   style={[styles.copyButton, copied && styles.copyButtonCopied]}
                   onPress={handleCopyAddress}
-                  disabled={!displayAddress}
                 >
+                  <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? COLORS.secondary : COLORS.white} />
                   <Text style={[styles.copyButtonText, copied && styles.copyButtonTextCopied]}>
-                    {copied ? '✓ Copied!' : 'Copy Address'}
+                    {copied ? 'Copied!' : 'Copy Address'}
                   </Text>
                 </TouchableOpacity>
 
-                {/* Warning */}
-                <View style={styles.warningBox}>
-                  <Text style={styles.warningText}>
-                    Only send USDC on Base network. Other tokens or networks may result in loss.
-                  </Text>
-                </View>
-
-                {/* Network Badge */}
-                <View style={styles.networkBadge}>
+                <View style={styles.networkInfo}>
                   <View style={styles.networkDot} />
-                  <Text style={styles.networkText}>Base Network</Text>
+                  <Text style={styles.networkText}>Base Network only</Text>
                 </View>
-              </>
+              </View>
             )}
           </View>
         </View>
@@ -606,13 +619,13 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: COLORS.black,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingTop: 60,
     paddingBottom: 40,
   },
@@ -621,406 +634,281 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 40,
   },
-  greeting: {
-    fontSize: 14,
-    color: '#71717a',
-    marginBottom: 2,
-  },
-  userEmail: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  logoutButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: '#1a1a1f',
-    borderRadius: 8,
-  },
-  logoutButtonText: {
-    fontSize: 13,
-    color: '#71717a',
-  },
-  // Total Balance
-  totalSection: {
+  logoContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 28,
+    gap: 8,
   },
-  totalLabel: {
+  logoIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  settingsButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(72, 72, 72, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Balance Section
+  balanceSection: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  balanceLabel: {
     fontSize: 14,
-    color: '#71717a',
-    marginBottom: 4,
+    color: COLORS.grey,
+    marginBottom: 8,
   },
-  totalValue: {
-    fontSize: 40,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -1,
+  balanceSubtext: {
+    fontSize: 13,
+    color: COLORS.grey,
+    marginTop: 8,
   },
-  // Account Cards
-  accountCard: {
-    backgroundColor: '#141419',
+  // Cash Card
+  cashCard: {
+    backgroundColor: 'rgba(72, 72, 72, 0.08)',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: 'rgba(72, 72, 72, 0.15)',
     padding: 20,
     marginBottom: 16,
   },
-  savingsCard: {
-    borderColor: '#22c55e30',
-    backgroundColor: '#0f1a14',
-  },
-  accountHeader: {
+  cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 16,
   },
-  accountIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#27272a',
+  cardIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(72, 72, 72, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   savingsIconContainer: {
-    backgroundColor: '#22c55e20',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
-  accountIcon: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  accountInfo: {
+  cardTitleContainer: {
     flex: 1,
   },
-  accountTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 2,
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.white,
   },
-  accountSubtitle: {
+  cardSubtitle: {
     fontSize: 13,
-    color: '#71717a',
+    color: COLORS.grey,
+    marginTop: 2,
+  },
+  cashBalance: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: COLORS.white,
+    marginBottom: 16,
+    fontVariant: ['tabular-nums'],
+  },
+  addFundsButton: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.secondary,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  addFundsButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  // Savings Card
+  savingsCard: {
+    backgroundColor: 'rgba(32, 1, 145, 0.08)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(32, 1, 145, 0.2)',
+    padding: 20,
+    marginBottom: 24,
   },
   apyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 2,
+    marginTop: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    gap: 6,
   },
   apyDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#22c55e',
-    marginRight: 6,
+    backgroundColor: COLORS.secondary,
   },
   apyBadgeText: {
-    fontSize: 13,
-    color: '#22c55e',
+    fontSize: 12,
+    color: COLORS.white,
     fontWeight: '500',
   },
-  accountBalance: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 4,
+  apyNumber: {
+    color: COLORS.secondary,
+    fontWeight: '600',
   },
-  emptyStateText: {
-    fontSize: 14,
-    color: '#52525b',
+  savingsBreakdown: {
+    gap: 10,
+    marginTop: 16,
     marginBottom: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(32, 1, 145, 0.15)',
   },
-  accountButton: {
-    backgroundColor: '#27272a',
-    borderRadius: 12,
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  breakdownLabel: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  breakdownValue: {
+    fontSize: 14,
+    color: COLORS.white,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
+  breakdownValueAccent: {
+    fontSize: 14,
+    color: COLORS.secondary,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  savingsButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  startEarningButton: {
+    flex: 1,
+    backgroundColor: COLORS.secondary,
+    borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 12,
   },
-  savingsButton: {
-    backgroundColor: '#22c55e',
-  },
-  accountButtonText: {
+  startEarningButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#ffffff',
+    color: COLORS.white,
   },
-  savingsButtonText: {
-    color: '#ffffff',
-  },
-  // How it works
-  howItWorksSection: {
-    backgroundColor: '#141419',
-    borderRadius: 16,
+  withdrawButton: {
+    flex: 1,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#27272a',
-    padding: 20,
-    marginTop: 8,
-    marginBottom: 20,
+    borderColor: COLORS.grey,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
-  sectionTitle: {
-    fontSize: 16,
+  withdrawButtonText: {
+    fontSize: 15,
     fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 20,
+    color: COLORS.white,
   },
-  stepRow: {
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  emptyStateTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.white,
+    marginBottom: 6,
+  },
+  emptyStateText: {
+    fontSize: 13,
+    color: COLORS.grey,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  // Trust Section
+  trustSection: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  trustItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  trustText: {
+    fontSize: 12,
+    color: COLORS.grey,
+  },
+  // How It Works
+  howItWorksToggle: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 16,
+    gap: 6,
+  },
+  howItWorksToggleText: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  howItWorksContent: {
+    backgroundColor: 'rgba(32, 1, 145, 0.05)',
+    borderRadius: 16,
+    padding: 20,
+    gap: 16,
+  },
+  stepItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
   stepNumber: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#27272a',
+    backgroundColor: 'rgba(32, 1, 145, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 14,
   },
   stepNumberText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  stepText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#a1a1aa',
-  },
-  stepContent: {
+    color: COLORS.grey,
     flex: 1,
-  },
-  stepTitle: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#ffffff',
-    marginBottom: 2,
-  },
-  stepDescription: {
-    fontSize: 13,
-    color: '#71717a',
-    lineHeight: 18,
-  },
-  stepConnector: {
-    width: 2,
-    height: 20,
-    backgroundColor: '#27272a',
-    marginLeft: 13,
-    marginVertical: 6,
-  },
-  // Features
-  featuresRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  featureItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '48%',
-    marginBottom: 10,
-  },
-  featureIcon: {
-    fontSize: 12,
-    color: '#22c55e',
-    marginRight: 6,
-  },
-  featureText: {
-    fontSize: 12,
-    color: '#71717a',
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#141419',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-    alignItems: 'center',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
-    marginBottom: 24,
-  },
-  modalBackButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#27272a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalBackText: {
-    fontSize: 18,
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  modalCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#27272a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalCloseText: {
-    fontSize: 16,
-    color: '#71717a',
-  },
-  // Funding Options
-  optionsContainer: {
-    width: '100%',
-    gap: 12,
-  },
-  fundingOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1a1a1f',
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  fundingOptionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#27272a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-  },
-  fundingOptionIconText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  fundingOptionContent: {
-    flex: 1,
-  },
-  fundingOptionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 2,
-  },
-  fundingOptionSubtitle: {
-    fontSize: 13,
-    color: '#71717a',
-  },
-  fundingOptionArrow: {
-    fontSize: 16,
-    color: '#52525b',
-    marginLeft: 8,
-  },
-  fundingInfo: {
-    fontSize: 12,
-    color: '#52525b',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  qrContainer: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 20,
-  },
-  qrPlaceholder: {
-    width: 180,
-    height: 180,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-  },
-  qrPlaceholderText: {
-    color: '#71717a',
-    fontSize: 14,
-  },
-  modalInstructions: {
-    fontSize: 14,
-    color: '#a1a1aa',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  addressBox: {
-    backgroundColor: '#1a1a1f',
-    borderRadius: 10,
-    padding: 14,
-    width: '100%',
-    marginBottom: 16,
-  },
-  addressText: {
-    fontSize: 13,
-    color: '#ffffff',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    textAlign: 'center',
-  },
-  copyButton: {
-    backgroundColor: '#22c55e',
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 12,
-    width: '100%',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  copyButtonCopied: {
-    backgroundColor: '#1a2e1a',
-  },
-  copyButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  copyButtonTextCopied: {
-    color: '#22c55e',
-  },
-  warningBox: {
-    backgroundColor: '#2a2517',
-    borderRadius: 10,
-    padding: 12,
-    width: '100%',
-    marginBottom: 16,
-  },
-  warningText: {
-    fontSize: 12,
-    color: '#ca8a04',
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-  networkBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1a1a2e',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  networkDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#3b82f6',
-    marginRight: 8,
-  },
-  networkText: {
-    fontSize: 13,
-    color: '#3b82f6',
-    fontWeight: '500',
   },
   // Loading Overlay
   loadingOverlay: {
@@ -1029,15 +917,154 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    backgroundColor: 'rgba(0, 4, 27, 0.95)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1000,
   },
   loadingText: {
     fontSize: 16,
-    color: '#ffffff',
+    color: COLORS.white,
     marginTop: 16,
-    fontWeight: '500',
+  },
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: COLORS.black,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    paddingBottom: Platform.OS === 'ios' ? 44 : 24,
+    borderTopWidth: 1,
+    borderColor: 'rgba(72, 72, 72, 0.2)',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 28,
+  },
+  modalHeaderButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(72, 72, 72, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  optionsContainer: {
+    gap: 12,
+  },
+  fundingOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(32, 1, 145, 0.08)',
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(32, 1, 145, 0.2)',
+  },
+  fundingOptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  fundingOptionContent: {
+    flex: 1,
+  },
+  fundingOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.white,
+    marginBottom: 4,
+  },
+  fundingOptionSubtitle: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  // Receive View
+  receiveContainer: {
+    alignItems: 'center',
+  },
+  qrContainer: {
+    backgroundColor: COLORS.white,
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 24,
+  },
+  qrPlaceholder: {
+    width: 160,
+    height: 160,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qrPlaceholderText: {
+    color: COLORS.grey,
+  },
+  receiveInstructions: {
+    fontSize: 15,
+    color: COLORS.grey,
+    marginBottom: 16,
+  },
+  addressBox: {
+    backgroundColor: 'rgba(72, 72, 72, 0.15)',
+    borderRadius: 12,
+    padding: 14,
+    width: '100%',
+    marginBottom: 16,
+  },
+  addressText: {
+    fontSize: 13,
+    color: COLORS.white,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    textAlign: 'center',
+  },
+  copyButton: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.secondary,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 20,
+  },
+  copyButtonCopied: {
+    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+  },
+  copyButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  copyButtonTextCopied: {
+    color: COLORS.secondary,
+  },
+  networkInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  networkDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.secondary,
+  },
+  networkText: {
+    fontSize: 13,
+    color: COLORS.grey,
   },
 });

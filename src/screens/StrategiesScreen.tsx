@@ -1,3 +1,10 @@
+/**
+ * ManageFundsScreen (formerly StrategiesScreen)
+ *
+ * Calm, fintech-first approach to managing deposits and withdrawals.
+ * Hides crypto complexity, emphasizes trust and simplicity.
+ */
+
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -12,6 +19,7 @@ import {
   Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
 import { useSmartWallets } from '@privy-io/expo/smart-wallets';
 import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -32,13 +40,92 @@ import {
   recordWithdrawal,
   recoverMissingDeposit,
 } from '../services/depositTracker';
-import AnimatedBalance from '../components/AnimatedBalance';
+
+// Brand Color Palette - unflat (ONLY these 5 colors)
+const COLORS = {
+  primary: '#200191',    // Deep violet - card backgrounds, badges, MAX button
+  secondary: '#6198FF',  // Light blue - CTAs only, APY numbers, earnings
+  white: '#F5F6FF',      // Main text, titles, balances, icons
+  grey: '#484848',       // Labels, subtitles, secondary borders
+  black: '#00041B',      // Screen backgrounds
+};
+
+// AnimatedEarned Component - Real-time earnings with USDC precision
+interface AnimatedEarnedProps {
+  currentBalance: number;
+  depositedAmount: number;
+  apy: number;
+}
+
+function AnimatedEarned({ currentBalance, depositedAmount, apy }: AnimatedEarnedProps) {
+  const [displayEarned, setDisplayEarned] = React.useState(
+    Math.max(0, currentBalance - depositedAmount)
+  );
+  const startTimeRef = React.useRef(Date.now());
+  const startBalanceRef = React.useRef(currentBalance);
+
+  // Reset when balance changes significantly
+  React.useEffect(() => {
+    const diff = Math.abs(currentBalance - startBalanceRef.current);
+    if (diff > 0.01) {
+      startBalanceRef.current = currentBalance;
+      startTimeRef.current = Date.now();
+      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
+    }
+  }, [currentBalance, depositedAmount]);
+
+  // Real-time yield accumulation for earned amount
+  React.useEffect(() => {
+    if (apy <= 0 || currentBalance <= 0 || depositedAmount <= 0) {
+      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
+      return;
+    }
+
+    // yieldPerSecond based on current balance
+    const secondsPerYear = 31536000;
+    const yieldPerSecond = currentBalance * (apy / 100) / secondsPerYear;
+
+    const interval = setInterval(() => {
+      const elapsedSeconds = (Date.now() - startTimeRef.current) / 1000;
+      const accumulatedYield = yieldPerSecond * elapsedSeconds;
+      const newBalance = startBalanceRef.current + accumulatedYield;
+      setDisplayEarned(Math.max(0, newBalance - depositedAmount));
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [currentBalance, depositedAmount, apy]);
+
+  // Format with 6 decimal places (USDC precision)
+  const formatEarned = (value: number): string => {
+    const formatted = value.toFixed(6);
+    const parts = formatted.split('.');
+    const integerPart = parseInt(parts[0]).toLocaleString('en-US');
+    return `+$${integerPart}.${parts[1]}`;
+  };
+
+  return (
+    <Text style={animatedEarnedStyles.earned}>
+      {formatEarned(displayEarned)}
+    </Text>
+  );
+}
+
+const animatedEarnedStyles = StyleSheet.create({
+  earned: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.secondary,
+    fontVariant: ['tabular-nums'],
+  },
+});
 
 type StrategiesScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Strategies'>;
 };
 
 const STRATEGY = STRATEGIES.find(s => s.id === 'conservative-usdc')!;
+
+type TabType = 'add' | 'withdraw';
 
 export default function StrategiesScreen({ navigation }: StrategiesScreenProps) {
   const { client: smartWalletClient } = useSmartWallets();
@@ -55,23 +142,21 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [amount, setAmount] = useState('');
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [totalDeposited, setTotalDeposited] = useState(0);
+  const [activeTab, setActiveTab] = useState<TabType>('add');
 
   const hasPositions = positions.some(p => p.shares > BigInt(0));
   const savingsAmount = parseFloat(positionsTotal) || 0;
+  const availableBalance = usdc ? parseFloat(usdc.balance) : 0;
 
-  // Load total deposited for earnings calculation
-  // Also recovers missing deposit data (security: prevents fee avoidance via reinstall)
   React.useEffect(() => {
     const loadDeposited = async () => {
       if (displayAddress && savingsAmount > 0) {
-        // Try to recover missing deposit data first
         const recovered = await recoverMissingDeposit(displayAddress, savingsAmount);
         if (recovered) {
-          console.log('[Strategies] Deposit data was recovered from current value');
+          console.log('[ManageFunds] Deposit data was recovered from current value');
         }
-
         const deposited = await getTotalDeposited(displayAddress);
         setTotalDeposited(deposited);
       } else if (displayAddress) {
@@ -80,7 +165,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       }
     };
     loadDeposited();
-  }, [displayAddress, positions, savingsAmount]); // Refresh when positions change
+  }, [displayAddress, positions, savingsAmount]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -94,14 +179,16 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   };
 
   const handleSetMaxAmount = () => {
-    if (usdc) {
+    if (activeTab === 'add' && usdc) {
       setAmount(usdc.balance);
+    } else if (activeTab === 'withdraw' && savingsAmount > 0) {
+      setAmount(savingsAmount.toFixed(2));
     }
   };
 
   const handleDeposit = async () => {
     if (!amount || parseFloat(amount) <= 0) {
-      Alert.alert('Enter Amount', 'Please enter an amount to deposit');
+      Alert.alert('Enter Amount', 'Please enter an amount to add');
       return;
     }
 
@@ -126,26 +213,23 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
       const txHash = await executeStrategyBatch(smartWalletClient, batch);
 
-      // Record deposit for yield tracking
       const depositAmount = parseFloat(amount);
       await recordDeposit(displayAddress, depositAmount);
 
-      // Update local state with new total
       const newTotalDeposited = await getTotalDeposited(displayAddress);
       setTotalDeposited(newTotalDeposited);
-      console.log('[Strategies] Updated totalDeposited to:', newTotalDeposited);
 
       setAmount('');
       refetchBalances();
       refetchPositions();
 
       Alert.alert(
-        'Success!',
-        `$${depositAmount.toFixed(2)} added to your savings.`,
+        'Success',
+        `$${depositAmount.toFixed(2)} added to your yield account.`,
         [
           { text: 'OK' },
           {
-            text: 'View Transaction',
+            text: 'View Details',
             onPress: () => Linking.openURL(`https://basescan.org/tx/${txHash}`),
           },
         ]
@@ -161,7 +245,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     const positionsWithBalance = positions.filter(p => p.shares > BigInt(0));
 
     if (positionsWithBalance.length === 0) {
-      Alert.alert('No Savings', 'You have no savings to withdraw.');
+      Alert.alert('No Funds', 'You have no funds to withdraw.');
       return;
     }
 
@@ -170,56 +254,45 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       return;
     }
 
-    // Get total deposited for yield calculation
     const totalDeposited = await getTotalDeposited(displayAddress);
 
-    // Pre-calculate batch with yield-based fee
     const batch = buildWithdrawBatch(
       positions,
       displayAddress as `0x${string}`,
       totalDeposited
     );
 
-    // Build user-friendly confirmation message with FULL PRECISION (6 decimals)
-    // This allows verification that the 15% fee is calculated correctly
     let confirmMessage: string;
     if (batch.hasProfits) {
-      // Show fee breakdown when there's profit (even tiny amounts)
-      // All values already have 6 decimal places from buildWithdrawBatch
       confirmMessage = [
-        `You deposited: $${batch.totalDeposited}`,
-        `Current value: $${batch.currentValue}`,
+        `Your account value: $${batch.currentValue}`,
         ``,
-        `Earnings: +$${batch.yieldAmount} (+${batch.yieldPercent}%)`,
+        `Total deposited: $${batch.totalDeposited}`,
+        `Earnings: +$${batch.yieldAmount}`,
         ``,
-        `Fee (${batch.feePercent}% of earnings): $${batch.feeAmount}`,
-        `Fee raw: ${batch.feeAmountRaw.toString()} USDC units`,
+        `Performance fee (15% of earnings): $${batch.feeAmount}`,
         ``,
         `You'll receive: $${batch.userReceives}`,
       ].join('\n');
     } else if (parseFloat(batch.yieldAmount) < 0) {
-      // Loss scenario
       confirmMessage = [
-        `You deposited: $${batch.totalDeposited}`,
-        `Current value: $${batch.currentValue}`,
+        `Your account value: $${batch.currentValue}`,
         ``,
-        `No fee applies (no profit).`,
+        `No fee applies (withdraw at any time).`,
         ``,
         `You'll receive: $${batch.userReceives}`,
       ].join('\n');
     } else {
-      // Break-even scenario
       confirmMessage = `Withdraw $${batch.currentValue}?\n\nNo fee applies.`;
     }
 
     Alert.alert(
-      'Withdraw Savings',
+      'Withdraw Funds',
       confirmMessage,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Withdraw',
-          style: 'destructive',
+          text: 'Confirm Withdrawal',
           onPress: async () => {
             setIsWithdrawing(true);
 
@@ -234,21 +307,22 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
               let successMessage: string;
               if (batch.hasProfits) {
-                // Full precision for verification
                 successMessage = [
                   `Withdrew $${batch.currentValue}`,
-                  `You earned: +$${batch.yieldAmount}`,
-                  `Fee paid: $${batch.feeAmount} (${batch.feeAmountRaw.toString()} raw)`,
-                  `You received: $${batch.userReceives}`,
+                  ``,
+                  `Earnings: +$${batch.yieldAmount}`,
+                  `Fee: $${batch.feeAmount}`,
+                  ``,
+                  `Received: $${batch.userReceives}`,
                 ].join('\n');
               } else {
                 successMessage = `Withdrew $${batch.currentValue}`;
               }
 
-              Alert.alert('Success!', successMessage, [
+              Alert.alert('Success', successMessage, [
                 { text: 'OK' },
                 {
-                  text: 'View Transaction',
+                  text: 'View Details',
                   onPress: () => Linking.openURL(`https://basescan.org/tx/${txHash}`),
                 },
               ]);
@@ -263,6 +337,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     );
   };
 
+  // Calculate earnings
+  const totalEarned = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
+
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
@@ -271,181 +348,270 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#22c55e" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.secondary} />
         }
       >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>{'<'}</Text>
+            <Ionicons name="chevron-back" size={24} color={COLORS.white} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Savings</Text>
+          <Text style={styles.headerTitle}>Manage Funds</Text>
           <View style={styles.headerSpacer} />
         </View>
 
-        {/* Your Savings - Simplified */}
-        <View style={styles.savingsSection}>
+        {/* Account Summary Card */}
+        <View style={styles.summaryCard}>
           {positionsLoading ? (
-            <View style={styles.savingsLoading}>
-              <ActivityIndicator size="small" color="#22c55e" />
-              <Text style={styles.savingsLoadingText}>Loading...</Text>
+            <View style={styles.loadingState}>
+              <ActivityIndicator size="small" color={COLORS.secondary} />
+              <Text style={styles.loadingText}>Loading...</Text>
             </View>
           ) : positionsError ? (
-            <View style={styles.savingsError}>
-              <Text style={styles.savingsErrorText}>Unable to load savings</Text>
+            <View style={styles.errorState}>
+              <Ionicons name="alert-circle-outline" size={24} color={COLORS.grey} />
+              <Text style={styles.errorText}>Unable to load account</Text>
               <TouchableOpacity onPress={refetchPositions} style={styles.retryButton}>
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
-          ) : !hasPositions ? (
-            <View style={styles.noSavings}>
-              <Text style={styles.noSavingsTitle}>Start Earning</Text>
-              <Text style={styles.noSavingsSubtext}>
-                Add money below to earn ~{displayApy}% APY
-              </Text>
-            </View>
           ) : (
-            <View style={styles.savingsContent}>
-              {/* Animated Savings Display - shows real-time yield growth */}
-              <AnimatedBalance
-                balance={savingsAmount}
-                apy={parseFloat(displayApy)}
-                isAnimating={savingsAmount > 0}
-                fontSize={38}
-                label="Your Savings"
-                totalDeposited={totalDeposited}
-                showTotalEarned={totalDeposited > 0}
-                showYieldEstimate={true}
-              />
+            <>
+              <Text style={styles.summaryLabel}>Yield Account Balance</Text>
+              <Text style={styles.summaryValue}>${savingsAmount.toFixed(2)}</Text>
 
-              {/* Diversification Note */}
-              <TouchableOpacity
-                style={styles.detailsToggle}
-                onPress={() => setShowDetails(!showDetails)}
-              >
-                <Text style={styles.diversifiedText}>
-                  Diversified across 3 lending markets
-                </Text>
-                <Text style={styles.detailsArrow}>{showDetails ? '▲' : '▼'}</Text>
-              </TouchableOpacity>
-
-              {/* Expandable Details */}
-              {showDetails && (
-                <View style={styles.detailsSection}>
-                  {positions.map((position, index) => {
-                    const vaultApy = getVaultApy(position.vaultAddress);
-                    return (
-                      <View key={position.vaultId} style={[
-                        styles.detailRow,
-                        index < positions.length - 1 && styles.detailRowBorder
-                      ]}>
-                        <View style={styles.detailLeft}>
-                          <Text style={styles.detailName}>{position.vaultName}</Text>
-                          {vaultApy && (
-                            <Text style={styles.detailApy}>{vaultApy}% APY</Text>
-                          )}
-                        </View>
-                        <Text style={styles.detailValue}>
-                          ${parseFloat(position.usdValue).toFixed(2)}
-                        </Text>
-                      </View>
-                    );
-                  })}
+              {hasPositions && (
+                <View style={styles.earningRow}>
+                  <View style={styles.earningDot} />
+                  <Text style={styles.earningText}>
+                    Earning {displayApy}% APY
+                  </Text>
                 </View>
               )}
 
-              {/* Withdraw Button */}
-              <TouchableOpacity
-                style={[styles.withdrawButton, isWithdrawing && styles.withdrawButtonDisabled]}
-                onPress={handleWithdraw}
-                disabled={isWithdrawing}
-              >
-                {isWithdrawing ? (
-                  <ActivityIndicator color="#ef4444" size="small" />
-                ) : (
-                  <Text style={styles.withdrawButtonText}>Withdraw</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+              {totalDeposited > 0 && (
+                <View style={styles.earningsDisplay}>
+                  <Text style={styles.earningsLabel}>Total earned</Text>
+                  <AnimatedEarned
+                    currentBalance={savingsAmount}
+                    depositedAmount={totalDeposited}
+                    apy={parseFloat(displayApy)}
+                  />
+                </View>
+              )}
+            </>
           )}
         </View>
 
         {/* Available Balance */}
-        <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Available</Text>
-          <Text style={styles.balanceValue}>
-            ${usdc ? parseFloat(usdc.balance).toFixed(2) : '0.00'}
-          </Text>
+        <View style={styles.availableCard}>
+          <Text style={styles.availableLabel}>Available to add</Text>
+          <Text style={styles.availableValue}>${availableBalance.toFixed(2)}</Text>
         </View>
 
-        {/* Savings Info Card - Simplified */}
-        <View style={styles.infoCard}>
-          <View style={styles.infoHeader}>
-            <View style={styles.infoIcon}>
-              <Text style={styles.infoIconText}>$</Text>
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoTitle}>High-Yield Savings</Text>
-              <Text style={styles.infoApy}>~{displayApy}% APY</Text>
-            </View>
-          </View>
-          <Text style={styles.infoDescription}>
-            Your money earns yield automatically. Withdraw anytime, no fees on your deposits.
-          </Text>
-        </View>
-
-        {/* Amount Input */}
-        <View style={styles.inputSection}>
-          <Text style={styles.inputLabel}>Amount to add</Text>
-          <View style={styles.inputRow}>
-            <View style={styles.currencyPrefix}>
-              <Text style={styles.currencyText}>$</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              value={amount}
-              onChangeText={handleAmountChange}
-              placeholder="0.00"
-              placeholderTextColor="#52525b"
-              keyboardType="decimal-pad"
+        {/* Tab Selector */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'add' && styles.tabActive]}
+            onPress={() => { setActiveTab('add'); setAmount(''); }}
+          >
+            <Ionicons
+              name="add-circle-outline"
+              size={20}
+              color={activeTab === 'add' ? COLORS.white : COLORS.grey}
             />
-            <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
-              <Text style={styles.maxButtonText}>MAX</Text>
-            </TouchableOpacity>
-          </View>
+            <Text style={[styles.tabText, activeTab === 'add' && styles.tabTextActive]}>
+              Add Funds
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
+            onPress={() => { setActiveTab('withdraw'); setAmount(''); }}
+          >
+            <Ionicons
+              name="arrow-down-circle-outline"
+              size={20}
+              color={activeTab === 'withdraw' ? COLORS.white : COLORS.grey}
+            />
+            <Text style={[styles.tabText, activeTab === 'withdraw' && styles.tabTextActive]}>
+              Withdraw
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Deposit Button */}
-        <TouchableOpacity
-          style={[
-            styles.depositButton,
-            (!amount || parseFloat(amount) <= 0 || isDepositing) && styles.depositButtonDisabled,
-          ]}
-          onPress={handleDeposit}
-          disabled={!amount || parseFloat(amount) <= 0 || isDepositing}
-        >
-          {isDepositing ? (
-            <ActivityIndicator color="#ffffff" />
+        {/* Action Area */}
+        <View style={styles.actionArea}>
+          {activeTab === 'add' ? (
+            // Add Funds Tab
+            <>
+              <Text style={styles.inputLabel}>Amount to add</Text>
+              <View style={styles.inputRow}>
+                <View style={styles.currencyPrefix}>
+                  <Text style={styles.currencyText}>$</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  value={amount}
+                  onChangeText={handleAmountChange}
+                  placeholder="0.00"
+                  placeholderTextColor={COLORS.grey}
+                  keyboardType="decimal-pad"
+                />
+                <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
+                  <Text style={styles.maxButtonText}>MAX</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.actionButton,
+                  (!amount || parseFloat(amount) <= 0 || isDepositing) && styles.actionButtonDisabled,
+                ]}
+                onPress={handleDeposit}
+                disabled={!amount || parseFloat(amount) <= 0 || isDepositing}
+              >
+                {isDepositing ? (
+                  <ActivityIndicator color={COLORS.white} />
+                ) : (
+                  <Text style={styles.actionButtonText}>
+                    {amount && parseFloat(amount) > 0 ? `Add $${parseFloat(amount).toFixed(2)}` : 'Add Funds'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </>
           ) : (
-            <Text style={styles.depositButtonText}>
-              {amount && parseFloat(amount) > 0 ? `Add $${parseFloat(amount).toFixed(2)}` : 'Add Money'}
-            </Text>
+            // Withdraw Tab
+            <>
+              {!hasPositions ? (
+                <View style={styles.noFundsState}>
+                  <Ionicons name="wallet-outline" size={40} color={COLORS.white} />
+                  <Text style={styles.noFundsText}>No funds to withdraw</Text>
+                  <Text style={styles.noFundsSubtext}>
+                    Add funds first to start earning yield
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.withdrawInfo}>
+                    Withdraw your full balance of ${savingsAmount.toFixed(2)}
+                  </Text>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.actionButton,
+                      styles.withdrawButton,
+                      isWithdrawing && styles.actionButtonDisabled,
+                    ]}
+                    onPress={handleWithdraw}
+                    disabled={isWithdrawing}
+                  >
+                    {isWithdrawing ? (
+                      <ActivityIndicator color={COLORS.white} />
+                    ) : (
+                      <Text style={styles.actionButtonText}>Withdraw All</Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <Text style={styles.withdrawNote}>
+                    You'll receive funds instantly with no withdrawal fees
+                  </Text>
+                </>
+              )}
+            </>
           )}
+        </View>
+
+        {/* How It Works - Expandable */}
+        <TouchableOpacity
+          style={styles.howItWorksHeader}
+          onPress={() => setShowHowItWorks(!showHowItWorks)}
+        >
+          <View style={styles.howItWorksLeft}>
+            <Ionicons name="help-circle-outline" size={20} color={COLORS.white} />
+            <Text style={styles.howItWorksTitle}>Where do my funds go?</Text>
+          </View>
+          <Ionicons
+            name={showHowItWorks ? 'chevron-up' : 'chevron-down'}
+            size={20}
+            color={COLORS.grey}
+          />
         </TouchableOpacity>
 
-        {/* Info Footer */}
-        <View style={styles.footerSection}>
-          <View style={styles.footerRow}>
-            <Text style={styles.footerIcon}>✓</Text>
-            <Text style={styles.footerText}>No transaction fees</Text>
+        {showHowItWorks && (
+          <View style={styles.howItWorksContent}>
+            <Text style={styles.howItWorksText}>
+              Your funds are deposited into regulated DeFi lending protocols where they earn yield from borrowers.
+              You maintain full ownership at all times.
+            </Text>
+
+            <View style={styles.protocolsList}>
+              <Text style={styles.protocolsLabel}>Current allocation:</Text>
+              {positions.map((position) => {
+                const vaultApy = getVaultApy(position.vaultAddress);
+                const positionValue = parseFloat(position.usdValue);
+                if (positionValue <= 0) return null;
+                return (
+                  <View key={position.vaultId} style={styles.protocolRow}>
+                    <Text style={styles.protocolName}>{position.vaultName}</Text>
+                    <View style={styles.protocolRight}>
+                      <Text style={styles.protocolValue}>${positionValue.toFixed(2)}</Text>
+                      {vaultApy && (
+                        <Text style={styles.protocolApy}>{vaultApy}%</Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
           </View>
-          <View style={styles.footerRow}>
-            <Text style={styles.footerIcon}>✓</Text>
-            <Text style={styles.footerText}>Withdraw anytime</Text>
+        )}
+
+        {/* Fee Transparency */}
+        <View style={styles.feeSection}>
+          <Text style={styles.feeSectionTitle}>Fee Structure</Text>
+
+          <View style={styles.feeRow}>
+            <View style={styles.feeLeft}>
+              <Ionicons name="checkmark-circle" size={18} color={COLORS.white} />
+              <Text style={styles.feeLabel}>Deposit & Withdraw</Text>
+            </View>
+            <Text style={styles.feeValue}>Free</Text>
           </View>
-          <View style={styles.footerRow}>
-            <Text style={styles.footerIcon}>✓</Text>
-            <Text style={styles.footerText}>15% fee on earnings only</Text>
+
+          <View style={styles.feeRow}>
+            <View style={styles.feeLeft}>
+              <Ionicons name="checkmark-circle" size={18} color={COLORS.white} />
+              <Text style={styles.feeLabel}>Gas fees</Text>
+            </View>
+            <Text style={styles.feeValue}>Covered</Text>
+          </View>
+
+          <View style={styles.feeRow}>
+            <View style={styles.feeLeft}>
+              <Ionicons name="information-circle" size={18} color={COLORS.white} />
+              <Text style={styles.feeLabel}>Performance fee</Text>
+            </View>
+            <Text style={styles.feeValue}>15% of earnings</Text>
+          </View>
+
+          <Text style={styles.feeNote}>
+            You only pay fees on profits. No profit = no fee.
+          </Text>
+        </View>
+
+        {/* Trust Indicators */}
+        <View style={styles.trustSection}>
+          <View style={styles.trustRow}>
+            <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.white} />
+            <Text style={styles.trustText}>Non-custodial - you control your funds</Text>
+          </View>
+          <View style={styles.trustRow}>
+            <Ionicons name="time-outline" size={18} color={COLORS.white} />
+            <Text style={styles.trustText}>Exit anytime - no lock-up period</Text>
+          </View>
+          <View style={styles.trustRow}>
+            <Ionicons name="eye-outline" size={18} color={COLORS.white} />
+            <Text style={styles.trustText}>Fully transparent - all transactions on-chain</Text>
           </View>
         </View>
       </ScrollView>
@@ -456,7 +622,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: COLORS.black,
   },
   scrollView: {
     flex: 1,
@@ -466,6 +632,7 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 40,
   },
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -473,328 +640,387 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#1a1a1f',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backButtonText: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  // Savings Section
-  savingsSection: {
-    backgroundColor: '#141419',
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  savingsLoading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 20,
-  },
-  savingsLoadingText: {
-    marginLeft: 8,
-    color: '#71717a',
-    fontSize: 14,
-  },
-  savingsError: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  savingsErrorText: {
-    color: '#ef4444',
-    fontSize: 14,
-    marginBottom: 12,
-  },
-  retryButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: '#27272a',
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  noSavings: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  noSavingsTitle: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  noSavingsSubtext: {
-    color: '#71717a',
-    fontSize: 14,
-  },
-  savingsContent: {},
-  savingsMain: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  savingsLabel: {
-    fontSize: 14,
-    color: '#71717a',
-    marginBottom: 8,
-  },
-  savingsAmount: {
-    fontSize: 42,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 4,
-  },
-  savingsApy: {
-    fontSize: 16,
-    color: '#22c55e',
-    fontWeight: '500',
-  },
-  detailsToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#27272a',
-  },
-  diversifiedText: {
-    fontSize: 13,
-    color: '#71717a',
-    marginRight: 6,
-  },
-  detailsArrow: {
-    fontSize: 10,
-    color: '#71717a',
-  },
-  detailsSection: {
-    backgroundColor: '#1a1a1f',
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  detailRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
-  },
-  detailLeft: {
-    flex: 1,
-  },
-  detailName: {
-    fontSize: 13,
-    color: '#a1a1aa',
-  },
-  detailApy: {
-    fontSize: 11,
-    color: '#22c55e',
-    marginTop: 2,
-  },
-  detailValue: {
-    fontSize: 13,
-    color: '#ffffff',
-    fontWeight: '500',
-  },
-  withdrawButton: {
-    marginTop: 16,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#52525b',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-  },
-  withdrawButtonDisabled: {
-    borderColor: '#3f3f46',
-  },
-  withdrawButtonText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  // Balance Card
-  balanceCard: {
-    backgroundColor: '#141419',
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  balanceLabel: {
-    fontSize: 14,
-    color: '#71717a',
-    marginBottom: 4,
-  },
-  balanceValue: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  // Info Card
-  infoCard: {
-    backgroundColor: '#1a2e1a',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#22c55e30',
-  },
-  infoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  infoIcon: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#22c55e20',
+    backgroundColor: 'rgba(72, 72, 72, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
   },
-  infoIconText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#22c55e',
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoTitle: {
-    fontSize: 17,
+  headerTitle: {
+    fontSize: 18,
     fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 2,
+    color: COLORS.white,
   },
-  infoApy: {
-    fontSize: 15,
-    color: '#22c55e',
-    fontWeight: '600',
+  headerSpacer: {
+    width: 44,
   },
-  infoDescription: {
+  // Summary Card
+  summaryCard: {
+    backgroundColor: 'rgba(32, 1, 145, 0.08)',
+    borderRadius: 20,
+    padding: 24,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(32, 1, 145, 0.2)',
+    alignItems: 'center',
+  },
+  summaryLabel: {
     fontSize: 14,
-    color: '#a1a1aa',
-    lineHeight: 20,
+    color: COLORS.grey,
+    marginBottom: 8,
   },
-  // Input Section
-  inputSection: {
-    marginBottom: 20,
+  summaryValue: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: COLORS.white,
+    fontVariant: ['tabular-nums'],
+  },
+  earningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  earningDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.secondary,
+  },
+  earningText: {
+    fontSize: 14,
+    color: COLORS.secondary,
+    fontWeight: '500',
+  },
+  earningsDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(32, 1, 145, 0.15)',
+    borderRadius: 8,
+    gap: 8,
+  },
+  earningsLabel: {
+    fontSize: 13,
+    color: COLORS.grey,
+  },
+  earningsValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.secondary,
+  },
+  loadingState: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    gap: 10,
+  },
+  loadingText: {
+    color: COLORS.grey,
+    fontSize: 15,
+  },
+  errorState: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    gap: 12,
+  },
+  errorText: {
+    color: COLORS.grey,
+    fontSize: 15,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(72, 72, 72, 0.15)',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  // Available Card
+  availableCard: {
+    backgroundColor: 'rgba(72, 72, 72, 0.08)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(72, 72, 72, 0.15)',
+  },
+  availableLabel: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  availableValue: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  // Tab Selector
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(72, 72, 72, 0.1)',
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 24,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  tabActive: {
+    backgroundColor: COLORS.secondary,
+  },
+  tabText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.grey,
+  },
+  tabTextActive: {
+    color: COLORS.white,
+  },
+  // Action Area
+  actionArea: {
+    backgroundColor: 'rgba(32, 1, 145, 0.08)',
+    borderRadius: 20,
+    padding: 24,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(32, 1, 145, 0.2)',
   },
   inputLabel: {
     fontSize: 14,
-    color: '#71717a',
-    marginBottom: 8,
+    color: COLORS.grey,
+    marginBottom: 12,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 20,
   },
   currencyPrefix: {
-    backgroundColor: '#141419',
+    backgroundColor: 'rgba(32, 1, 145, 0.08)',
     borderRadius: 12,
     borderTopRightRadius: 0,
     borderBottomRightRadius: 0,
-    padding: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: 'rgba(32, 1, 145, 0.2)',
     borderRightWidth: 0,
   },
   currencyText: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '600',
-    color: '#71717a',
+    color: COLORS.grey,
   },
   input: {
     flex: 1,
-    backgroundColor: '#141419',
+    backgroundColor: 'rgba(32, 1, 145, 0.08)',
     borderRadius: 12,
     borderTopLeftRadius: 0,
     borderBottomLeftRadius: 0,
-    padding: 18,
-    paddingLeft: 4,
-    fontSize: 24,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    fontSize: 22,
     fontWeight: '600',
-    color: '#ffffff',
+    color: COLORS.white,
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: 'rgba(32, 1, 145, 0.2)',
     borderLeftWidth: 0,
   },
   maxButton: {
-    backgroundColor: '#22c55e',
-    paddingHorizontal: 20,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 18,
     paddingVertical: 16,
     borderRadius: 12,
     marginLeft: 12,
   },
   maxButtonText: {
-    color: '#ffffff',
+    color: COLORS.white,
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
   },
-  // Deposit Button
-  depositButton: {
-    backgroundColor: '#22c55e',
-    borderRadius: 16,
-    padding: 20,
+  actionButton: {
+    backgroundColor: COLORS.secondary,
+    borderRadius: 14,
+    paddingVertical: 18,
     alignItems: 'center',
-    marginBottom: 24,
   },
-  depositButtonDisabled: {
-    backgroundColor: '#27272a',
-  },
-  depositButtonText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  // Footer Section
-  footerSection: {
-    backgroundColor: '#141419',
-    borderRadius: 12,
-    padding: 16,
+  withdrawButton: {
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: COLORS.grey,
   },
-  footerRow: {
+  actionButtonDisabled: {
+    backgroundColor: 'rgba(72, 72, 72, 0.2)',
+  },
+  actionButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  withdrawInfo: {
+    fontSize: 15,
+    color: COLORS.white,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  withdrawNote: {
+    fontSize: 13,
+    color: COLORS.grey,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  noFundsState: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    gap: 8,
+  },
+  noFundsText: {
+    fontSize: 16,
+    color: COLORS.white,
+    fontWeight: '500',
+    marginTop: 8,
+  },
+  noFundsSubtext: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  // How It Works
+  howItWorksHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(72, 72, 72, 0.15)',
   },
-  footerIcon: {
+  howItWorksLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  howItWorksTitle: {
+    fontSize: 15,
+    color: COLORS.grey,
+  },
+  howItWorksContent: {
+    backgroundColor: 'rgba(32, 1, 145, 0.05)',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 12,
+    marginBottom: 24,
+  },
+  howItWorksText: {
     fontSize: 14,
-    color: '#22c55e',
-    marginRight: 10,
+    color: COLORS.grey,
+    lineHeight: 22,
+    marginBottom: 16,
   },
-  footerText: {
+  protocolsList: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(32, 1, 145, 0.15)',
+    paddingTop: 16,
+  },
+  protocolsLabel: {
     fontSize: 13,
-    color: '#71717a',
+    color: COLORS.grey,
+    marginBottom: 12,
+  },
+  protocolRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  protocolName: {
+    fontSize: 14,
+    color: COLORS.white,
     flex: 1,
+  },
+  protocolRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  protocolValue: {
+    fontSize: 14,
+    color: COLORS.white,
+    fontWeight: '500',
+  },
+  protocolApy: {
+    fontSize: 12,
+    color: COLORS.secondary,
+    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  // Fee Section
+  feeSection: {
+    backgroundColor: 'rgba(32, 1, 145, 0.05)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+  },
+  feeSectionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.white,
+    marginBottom: 16,
+  },
+  feeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  feeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  feeLabel: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  feeValue: {
+    fontSize: 14,
+    color: COLORS.white,
+    fontWeight: '500',
+  },
+  feeNote: {
+    fontSize: 13,
+    color: COLORS.grey,
+    marginTop: 12,
+    fontStyle: 'italic',
+  },
+  // Trust Section
+  trustSection: {
+    gap: 14,
+    paddingBottom: 20,
+  },
+  trustRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  trustText: {
+    fontSize: 13,
+    color: COLORS.grey,
   },
 });
