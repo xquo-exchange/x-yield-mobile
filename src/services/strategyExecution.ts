@@ -413,6 +413,115 @@ export function buildWithdrawBatch(
 }
 
 /**
+ * Build a partial withdraw batch
+ * Withdraws a specific USD amount across vaults proportionally
+ */
+export function buildPartialWithdrawBatch(
+  positions: VaultPosition[],
+  walletAddress: Address,
+  withdrawAmountUsd: number,
+  totalDeposited: number
+): WithdrawBatch {
+  const calls: TransactionCall[] = [];
+  const positionsToWithdraw: VaultPosition[] = [];
+
+  // Calculate the total current value
+  const totalCurrentValue = positions.reduce(
+    (sum, p) => sum + parseFloat(p.usdValue),
+    0
+  );
+
+  // If withdrawing everything or more, use full withdraw
+  if (withdrawAmountUsd >= totalCurrentValue * 0.99) {
+    return buildWithdrawBatch(positions, walletAddress, totalDeposited);
+  }
+
+  // Calculate the proportion to withdraw
+  const withdrawRatio = withdrawAmountUsd / totalCurrentValue;
+
+  let totalAssetsToWithdraw = BigInt(0);
+
+  // Withdraw proportionally from each vault
+  for (const position of positions) {
+    if (position.shares <= BigInt(0)) continue;
+
+    // Calculate shares to redeem (proportional)
+    const sharesToRedeem = (position.shares * BigInt(Math.floor(withdrawRatio * 10000))) / BigInt(10000);
+
+    if (sharesToRedeem > BigInt(0)) {
+      calls.push(
+        buildVaultRedeemCall(
+          position.vaultAddress as Address,
+          sharesToRedeem,
+          walletAddress,
+          walletAddress
+        )
+      );
+
+      // Estimate assets to receive
+      const assetsFromPosition = (position.assets * BigInt(Math.floor(withdrawRatio * 10000))) / BigInt(10000);
+      totalAssetsToWithdraw += assetsFromPosition;
+
+      positionsToWithdraw.push({
+        ...position,
+        shares: sharesToRedeem,
+        assets: assetsFromPosition,
+        usdValue: (parseFloat(position.usdValue) * withdrawRatio).toFixed(6),
+        assetsFormatted: ((Number(assetsFromPosition) / 1_000_000)).toFixed(6),
+      });
+    }
+  }
+
+  const withdrawValue = Number(totalAssetsToWithdraw) / 1_000_000;
+
+  // Calculate proportional yield
+  const totalYield = Math.max(0, totalCurrentValue - totalDeposited);
+  const proportionalYield = totalYield * withdrawRatio;
+
+  // Fee on proportional profit
+  const hasProfits = proportionalYield > 0;
+  const feeAmount = hasProfits ? proportionalYield * (XYIELD_FEE_PERCENT / 100) : 0;
+  const feeAmountRaw = BigInt(Math.floor(feeAmount * 1_000_000));
+
+  // Add fee transfer if applicable
+  if (feeAmount >= XYIELD_MIN_FEE_USDC) {
+    calls.push(
+      buildTransferCall(
+        TOKENS.USDC as Address,
+        XYIELD_TREASURY_ADDRESS as Address,
+        feeAmountRaw
+      )
+    );
+    console.log(`[PartialWithdraw] Fee transfer: $${feeAmount.toFixed(6)} to treasury`);
+  }
+
+  const userReceives = withdrawValue - feeAmount;
+  const depositPortion = totalDeposited * withdrawRatio;
+
+  console.log('[PartialWithdraw] ══════════════════════════════════════════════════════');
+  console.log('[PartialWithdraw] Withdraw ratio:', (withdrawRatio * 100).toFixed(2) + '%');
+  console.log('[PartialWithdraw] Withdraw amount:', withdrawValue.toFixed(6));
+  console.log('[PartialWithdraw] Proportional yield:', proportionalYield.toFixed(6));
+  console.log('[PartialWithdraw] Fee (15% of yield):', feeAmount.toFixed(6));
+  console.log('[PartialWithdraw] User receives:', userReceives.toFixed(6));
+  console.log('[PartialWithdraw] ══════════════════════════════════════════════════════');
+
+  return {
+    calls,
+    positions: positionsToWithdraw,
+    totalDeposited: depositPortion.toFixed(6),
+    currentValue: withdrawValue.toFixed(6),
+    yieldAmount: proportionalYield.toFixed(6),
+    yieldPercent: depositPortion > 0 ? ((proportionalYield / depositPortion) * 100).toFixed(1) : '0.0',
+    feeAmount: feeAmount.toFixed(6),
+    feeAmountRaw: feeAmount >= XYIELD_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
+    userReceives: userReceives.toFixed(6),
+    feePercent: XYIELD_FEE_PERCENT,
+    hasProfits,
+  };
+}
+
+/**
  * Execute a withdraw batch (redeem from all vaults)
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

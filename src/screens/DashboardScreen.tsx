@@ -30,13 +30,16 @@ import { useVaultApy } from '../hooks/useVaultApy';
 import { getTotalDeposited } from '../services/depositTracker';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 
-// Brand Color Palette - unflat (ONLY these 5 colors)
+// Color Palette - PayPal/Revolut Style
 const COLORS = {
-  primary: '#200191',    // Deep violet - card backgrounds, badges
-  secondary: '#6198FF',  // Light blue - CTAs, earnings, APY numbers
-  white: '#F5F6FF',      // Main text, titles, balances
-  grey: '#484848',       // Labels, subtitles, secondary borders
-  black: '#00041B',      // Screen backgrounds
+  primary: '#200191',
+  secondary: '#6198FF',
+  white: '#F5F6FF',
+  grey: '#484848',
+  black: '#00041B',
+  pureWhite: '#FFFFFF',
+  border: '#E8E8E8',
+  success: '#22C55E',
 };
 
 // AnimatedBalance Component - Real-time yield accumulation with USDC precision
@@ -102,7 +105,7 @@ function AnimatedBalance({ balance, apy, isEarning, size = 'large' }: AnimatedBa
 const animatedBalanceStyles = StyleSheet.create({
   balance: {
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.black,
     fontVariant: ['tabular-nums'],
     letterSpacing: -0.5,
   },
@@ -172,7 +175,7 @@ const animatedEarnedStyles = StyleSheet.create({
   earned: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.secondary,
+    color: COLORS.success,
     fontVariant: ['tabular-nums'],
   },
 });
@@ -335,20 +338,20 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.secondary} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
         }
       >
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.logoContainer}>
             <View style={styles.logoIcon}>
-              <Ionicons name="arrow-up" size={16} color={COLORS.white} />
+              <Ionicons name="arrow-up" size={16} color={COLORS.pureWhite} />
             </View>
             <Text style={styles.logoText}>unflat</Text>
           </View>
@@ -361,7 +364,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         <View style={styles.balanceSection}>
           <Text style={styles.balanceLabel}>Total Balance</Text>
           {isLoading ? (
-            <ActivityIndicator size="small" color={COLORS.secondary} style={{ marginVertical: 20 }} />
+            <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 20 }} />
           ) : (
             <>
               <AnimatedBalance
@@ -379,7 +382,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           <View style={styles.cashCard}>
             <View style={styles.cardHeader}>
               <View style={styles.cardIconContainer}>
-                <Ionicons name="wallet-outline" size={20} color={COLORS.white} />
+                <Ionicons name="wallet-outline" size={20} color={COLORS.primary} />
               </View>
               <View style={styles.cardTitleContainer}>
                 <Text style={styles.cardTitle}>Cash</Text>
@@ -391,7 +394,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
               style={styles.addFundsButton}
               onPress={() => setShowFundingModal(true)}
             >
-              <Ionicons name="add" size={18} color={COLORS.white} />
+              <Ionicons name="add" size={18} color={COLORS.pureWhite} />
               <Text style={styles.addFundsButtonText}>Add Funds</Text>
             </TouchableOpacity>
           </View>
@@ -400,89 +403,92 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         {/* Savings Account Card */}
         {!isLoading && (
           <View style={styles.savingsCard}>
-            <View style={styles.cardHeader}>
-              <View style={styles.savingsIconContainer}>
-                <Ionicons name="trending-up" size={20} color={COLORS.white} />
-              </View>
-              <View style={styles.cardTitleContainer}>
-                <Text style={styles.cardTitle}>Savings</Text>
-                <View style={styles.apyBadge}>
-                  <Animated.View style={[styles.apyDot, { transform: [{ scale: pulseAnim }] }]} />
-                  <Text style={styles.apyBadgeText}>
-                    <Text style={styles.apyNumber}>{displayApy}%</Text> APY
-                  </Text>
+            <View style={styles.savingsAccent} />
+            <View style={styles.savingsContent}>
+              <View style={styles.cardHeader}>
+                <View style={styles.savingsIconContainer}>
+                  <Ionicons name="trending-up" size={20} color={COLORS.secondary} />
+                </View>
+                <View style={styles.cardTitleContainer}>
+                  <Text style={styles.cardTitle}>Savings</Text>
+                  <View style={styles.apyBadge}>
+                    <Animated.View style={[styles.apyDot, { transform: [{ scale: pulseAnim }] }]} />
+                    <Text style={styles.apyBadgeText}>
+                      <Text style={styles.apyNumber}>{displayApy}%</Text> APY
+                    </Text>
+                  </View>
                 </View>
               </View>
-            </View>
 
-            {savingsBalance > 0 ? (
-              <>
-                <AnimatedBalance
-                  balance={savingsBalance}
-                  apy={parseFloat(displayApy)}
-                  isEarning={true}
-                  size="medium"
-                />
-                <View style={styles.savingsBreakdown}>
-                  <View style={styles.breakdownRow}>
-                    <Text style={styles.breakdownLabel}>Deposited</Text>
-                    <Text style={styles.breakdownValue}>${totalDeposited.toFixed(2)}</Text>
+              {savingsBalance > 0 ? (
+                <>
+                  <AnimatedBalance
+                    balance={savingsBalance}
+                    apy={parseFloat(displayApy)}
+                    isEarning={true}
+                    size="medium"
+                  />
+                  <View style={styles.savingsBreakdown}>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownLabel}>Deposited</Text>
+                      <Text style={styles.breakdownValue}>${totalDeposited.toFixed(2)}</Text>
+                    </View>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownLabel}>Earned</Text>
+                      <AnimatedEarned
+                        currentBalance={savingsBalance}
+                        depositedAmount={totalDeposited}
+                        apy={parseFloat(displayApy)}
+                      />
+                    </View>
                   </View>
-                  <View style={styles.breakdownRow}>
-                    <Text style={styles.breakdownLabel}>Earned</Text>
-                    <AnimatedEarned
-                      currentBalance={savingsBalance}
-                      depositedAmount={totalDeposited}
-                      apy={parseFloat(displayApy)}
-                    />
+                  <View style={styles.savingsButtons}>
+                    <TouchableOpacity
+                      style={styles.startEarningButton}
+                      onPress={() => navigation.navigate('Strategies')}
+                    >
+                      <Text style={styles.startEarningButtonText}>Add More</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.withdrawButton}
+                      onPress={() => navigation.navigate('Strategies')}
+                    >
+                      <Text style={styles.withdrawButtonText}>Withdraw</Text>
+                    </TouchableOpacity>
                   </View>
-                </View>
-                <View style={styles.savingsButtons}>
+                </>
+              ) : (
+                <>
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyStateTitle}>Start earning today</Text>
+                    <Text style={styles.emptyStateText}>
+                      Your money grows while you sleep. Withdraw anytime.
+                    </Text>
+                  </View>
                   <TouchableOpacity
                     style={styles.startEarningButton}
                     onPress={() => navigation.navigate('Strategies')}
                   >
-                    <Text style={styles.startEarningButtonText}>Add More</Text>
+                    <Text style={styles.startEarningButtonText}>Start Earning</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.withdrawButton}
-                    onPress={() => navigation.navigate('Strategies')}
-                  >
-                    <Text style={styles.withdrawButtonText}>Withdraw</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <>
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyStateTitle}>Start earning today</Text>
-                  <Text style={styles.emptyStateText}>
-                    Your money grows while you sleep. Withdraw anytime.
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.startEarningButton}
-                  onPress={() => navigation.navigate('Strategies')}
-                >
-                  <Text style={styles.startEarningButtonText}>Start Earning</Text>
-                </TouchableOpacity>
-              </>
-            )}
+                </>
+              )}
+            </View>
           </View>
         )}
 
         {/* Trust Indicators */}
         <View style={styles.trustSection}>
           <View style={styles.trustItem}>
-            <Ionicons name="lock-closed-outline" size={16} color={COLORS.white} />
+            <Ionicons name="lock-closed-outline" size={16} color={COLORS.primary} />
             <Text style={styles.trustText}>Non-custodial</Text>
           </View>
           <View style={styles.trustItem}>
-            <Ionicons name="flash-outline" size={16} color={COLORS.white} />
+            <Ionicons name="flash-outline" size={16} color={COLORS.primary} />
             <Text style={styles.trustText}>No gas fees</Text>
           </View>
           <View style={styles.trustItem}>
-            <Ionicons name="arrow-undo-outline" size={16} color={COLORS.white} />
+            <Ionicons name="arrow-undo-outline" size={16} color={COLORS.primary} />
             <Text style={styles.trustText}>Exit anytime</Text>
           </View>
         </View>
@@ -521,7 +527,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       {/* Loading Overlays */}
       {(isBuyingUsdc || isCheckingFunds) && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color={COLORS.secondary} />
+          <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loadingText}>
             {isBuyingUsdc ? 'Opening payment...' : 'Updating balance...'}
           </Text>
@@ -540,10 +546,10 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
             <View style={styles.modalHeader}>
               {fundingView === 'receive' ? (
                 <TouchableOpacity style={styles.modalHeaderButton} onPress={() => setFundingView('options')}>
-                  <Ionicons name="chevron-back" size={20} color={COLORS.white} />
+                  <Ionicons name="chevron-back" size={20} color={COLORS.black} />
                 </TouchableOpacity>
               ) : (
-                <View style={styles.modalHeaderButton} />
+                <View style={{ width: 40 }} />
               )}
               <Text style={styles.modalTitle}>Add Funds</Text>
               <TouchableOpacity style={styles.modalHeaderButton} onPress={closeFundingModal}>
@@ -555,7 +561,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
               <View style={styles.optionsContainer}>
                 <TouchableOpacity style={styles.fundingOption} onPress={() => setFundingView('receive')}>
                   <View style={styles.fundingOptionIcon}>
-                    <Ionicons name="arrow-down" size={24} color={COLORS.white} />
+                    <Ionicons name="arrow-down" size={24} color={COLORS.primary} />
                   </View>
                   <View style={styles.fundingOptionContent}>
                     <Text style={styles.fundingOptionTitle}>Transfer USDC</Text>
@@ -566,7 +572,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
                 <TouchableOpacity style={styles.fundingOption} onPress={handleBuyWithCard}>
                   <View style={styles.fundingOptionIcon}>
-                    <Ionicons name="card-outline" size={24} color={COLORS.white} />
+                    <Ionicons name="card-outline" size={24} color={COLORS.primary} />
                   </View>
                   <View style={styles.fundingOptionContent}>
                     <Text style={styles.fundingOptionTitle}>Buy with Card</Text>
@@ -579,7 +585,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
               <View style={styles.receiveContainer}>
                 <View style={styles.qrContainer}>
                   {displayAddress ? (
-                    <QRCode value={displayAddress} size={160} backgroundColor="#ffffff" color="#000000" />
+                    <QRCode value={displayAddress} size={160} backgroundColor="#ffffff" color={COLORS.primary} />
                   ) : (
                     <View style={styles.qrPlaceholder}><Text style={styles.qrPlaceholderText}>No wallet</Text></View>
                   )}
@@ -597,8 +603,8 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                   style={[styles.copyButton, copied && styles.copyButtonCopied]}
                   onPress={handleCopyAddress}
                 >
-                  <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? COLORS.secondary : COLORS.white} />
-                  <Text style={[styles.copyButtonText, copied && styles.copyButtonTextCopied]}>
+                  <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={COLORS.pureWhite} />
+                  <Text style={styles.copyButtonText}>
                     {copied ? 'Copied!' : 'Copy Address'}
                   </Text>
                 </TouchableOpacity>
@@ -619,7 +625,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.black,
+    backgroundColor: COLORS.white,
   },
   scrollView: {
     flex: 1,
@@ -645,22 +651,27 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 8,
-    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   logoText: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.primary,
   },
   settingsButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(72, 72, 72, 0.15)',
+    backgroundColor: COLORS.pureWhite,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   // Balance Section
   balanceSection: {
@@ -679,12 +690,17 @@ const styles = StyleSheet.create({
   },
   // Cash Card
   cashCard: {
-    backgroundColor: 'rgba(72, 72, 72, 0.08)',
-    borderRadius: 20,
+    backgroundColor: COLORS.pureWhite,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(72, 72, 72, 0.15)',
+    borderColor: COLORS.border,
     padding: 20,
     marginBottom: 16,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -695,7 +711,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(72, 72, 72, 0.2)',
+    backgroundColor: `${COLORS.primary}10`,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -704,7 +720,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    backgroundColor: `${COLORS.secondary}15`,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -715,7 +731,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.black,
   },
   cardSubtitle: {
     fontSize: 13,
@@ -725,14 +741,14 @@ const styles = StyleSheet.create({
   cashBalance: {
     fontSize: 32,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.black,
     marginBottom: 16,
     fontVariant: ['tabular-nums'],
   },
   addFundsButton: {
     flexDirection: 'row',
-    backgroundColor: COLORS.secondary,
-    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -741,16 +757,30 @@ const styles = StyleSheet.create({
   addFundsButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.pureWhite,
   },
   // Savings Card
   savingsCard: {
-    backgroundColor: 'rgba(32, 1, 145, 0.08)',
-    borderRadius: 20,
+    backgroundColor: COLORS.pureWhite,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(32, 1, 145, 0.2)',
-    padding: 20,
+    borderColor: COLORS.border,
     marginBottom: 24,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  savingsAccent: {
+    width: 4,
+    backgroundColor: COLORS.secondary,
+  },
+  savingsContent: {
+    flex: 1,
+    padding: 20,
   },
   apyBadge: {
     flexDirection: 'row',
@@ -758,7 +788,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    backgroundColor: `${COLORS.secondary}15`,
     borderRadius: 12,
     alignSelf: 'flex-start',
     gap: 6,
@@ -767,11 +797,11 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.secondary,
+    backgroundColor: COLORS.success,
   },
   apyBadgeText: {
     fontSize: 12,
-    color: COLORS.white,
+    color: COLORS.grey,
     fontWeight: '500',
   },
   apyNumber: {
@@ -784,7 +814,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(32, 1, 145, 0.15)',
+    borderTopColor: COLORS.border,
   },
   breakdownRow: {
     flexDirection: 'row',
@@ -797,14 +827,8 @@ const styles = StyleSheet.create({
   },
   breakdownValue: {
     fontSize: 14,
-    color: COLORS.white,
+    color: COLORS.black,
     fontWeight: '500',
-    fontVariant: ['tabular-nums'],
-  },
-  breakdownValueAccent: {
-    fontSize: 14,
-    color: COLORS.secondary,
-    fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
   savingsButtons: {
@@ -813,29 +837,29 @@ const styles = StyleSheet.create({
   },
   startEarningButton: {
     flex: 1,
-    backgroundColor: COLORS.secondary,
-    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
   },
   startEarningButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.pureWhite,
   },
   withdrawButton: {
     flex: 1,
     backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: COLORS.grey,
-    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
   },
   withdrawButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.primary,
   },
   emptyState: {
     alignItems: 'center',
@@ -845,7 +869,7 @@ const styles = StyleSheet.create({
   emptyStateTitle: {
     fontSize: 17,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.black,
     marginBottom: 6,
   },
   emptyStateText: {
@@ -882,10 +906,15 @@ const styles = StyleSheet.create({
     color: COLORS.grey,
   },
   howItWorksContent: {
-    backgroundColor: 'rgba(32, 1, 145, 0.05)',
+    backgroundColor: COLORS.pureWhite,
     borderRadius: 16,
     padding: 20,
     gap: 16,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   stepItem: {
     flexDirection: 'row',
@@ -896,14 +925,14 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   stepNumberText: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.pureWhite,
   },
   stepText: {
     fontSize: 14,
@@ -917,29 +946,27 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 4, 27, 0.95)',
+    backgroundColor: 'rgba(0, 4, 27, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingText: {
     fontSize: 16,
-    color: COLORS.white,
+    color: COLORS.pureWhite,
     marginTop: 16,
   },
   // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    backgroundColor: 'rgba(0, 4, 27, 0.5)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: COLORS.black,
+    backgroundColor: COLORS.pureWhite,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 24,
     paddingBottom: Platform.OS === 'ios' ? 44 : 24,
-    borderTopWidth: 1,
-    borderColor: 'rgba(72, 72, 72, 0.2)',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -951,14 +978,14 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(72, 72, 72, 0.2)',
+    backgroundColor: COLORS.white,
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.black,
   },
   optionsContainer: {
     gap: 12,
@@ -966,17 +993,17 @@ const styles = StyleSheet.create({
   fundingOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(32, 1, 145, 0.08)',
+    backgroundColor: COLORS.white,
     borderRadius: 16,
     padding: 18,
     borderWidth: 1,
-    borderColor: 'rgba(32, 1, 145, 0.2)',
+    borderColor: COLORS.border,
   },
   fundingOptionIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    backgroundColor: `${COLORS.primary}10`,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
@@ -987,7 +1014,7 @@ const styles = StyleSheet.create({
   fundingOptionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.black,
     marginBottom: 4,
   },
   fundingOptionSubtitle: {
@@ -999,10 +1026,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   qrContainer: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.pureWhite,
     padding: 16,
     borderRadius: 16,
     marginBottom: 24,
+    borderWidth: 2,
+    borderColor: COLORS.primary,
   },
   qrPlaceholder: {
     width: 160,
@@ -1019,43 +1048,46 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   addressBox: {
-    backgroundColor: 'rgba(72, 72, 72, 0.15)',
+    backgroundColor: COLORS.white,
     borderRadius: 12,
     padding: 14,
     width: '100%',
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   addressText: {
     fontSize: 13,
-    color: COLORS.white,
+    color: COLORS.black,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     textAlign: 'center',
   },
   copyButton: {
     flexDirection: 'row',
-    backgroundColor: COLORS.secondary,
+    backgroundColor: COLORS.primary,
     paddingVertical: 14,
     paddingHorizontal: 24,
-    borderRadius: 14,
+    borderRadius: 12,
     alignItems: 'center',
     gap: 8,
     marginBottom: 20,
   },
   copyButtonCopied: {
-    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    backgroundColor: COLORS.success,
   },
   copyButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.white,
-  },
-  copyButtonTextCopied: {
-    color: COLORS.secondary,
+    color: COLORS.pureWhite,
   },
   networkInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    backgroundColor: `${COLORS.secondary}15`,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
   networkDot: {
     width: 8,
@@ -1065,6 +1097,7 @@ const styles = StyleSheet.create({
   },
   networkText: {
     fontSize: 13,
-    color: COLORS.grey,
+    color: COLORS.secondary,
+    fontWeight: '500',
   },
 });

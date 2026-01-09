@@ -14,6 +14,16 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, AppState, AppStateStatus } from 'react-native';
 
+// Color Palette - PayPal/Revolut Style
+const COLORS = {
+  primary: '#200191',
+  secondary: '#6198FF',
+  white: '#F5F6FF',
+  grey: '#484848',
+  black: '#00041B',
+  success: '#22C55E',
+};
+
 // Seconds in a year (365.25 days for accuracy)
 const SECONDS_PER_YEAR = 31_557_600;
 
@@ -29,7 +39,7 @@ interface AnimatedBalanceProps {
   isAnimating?: boolean;
   /** Font size for the balance */
   fontSize?: number;
-  /** Color for the balance (default white) */
+  /** Color for the balance (default black) */
   color?: string;
   /** Custom style for the container */
   style?: object;
@@ -59,14 +69,14 @@ export default function AnimatedBalance({
   apy,
   isAnimating = true,
   fontSize = 42,
-  color = '#ffffff',
+  color = COLORS.black,
   style,
   label,
   labelStyle,
   totalDeposited = 0,
   showYieldEstimate = true,
   showTotalEarned = false,
-  accentColor = '#22c55e',
+  accentColor = COLORS.success,
   earningBalance,
 }: AnimatedBalanceProps) {
   // The balance portion that earns yield
@@ -220,7 +230,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    color: '#71717a',
+    color: COLORS.grey,
     marginBottom: 8,
   },
   balance: {
@@ -230,7 +240,7 @@ const styles = StyleSheet.create({
   },
   yieldEstimate: {
     fontSize: 13,
-    color: '#71717a',
+    color: COLORS.grey,
     marginTop: 6,
     letterSpacing: 0.2,
   },
@@ -245,7 +255,7 @@ const styles = StyleSheet.create({
   },
   totalEarnedLabel: {
     fontSize: 13,
-    color: '#71717a',
+    color: COLORS.grey,
   },
   totalEarnedValue: {
     fontSize: 14,

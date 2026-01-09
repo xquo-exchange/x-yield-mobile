@@ -32,6 +32,7 @@ import {
   buildStrategyBatch,
   executeStrategyBatch,
   buildWithdrawBatch,
+  buildPartialWithdrawBatch,
   executeWithdrawBatch,
 } from '../services/strategyExecution';
 import {
@@ -41,13 +42,17 @@ import {
   recoverMissingDeposit,
 } from '../services/depositTracker';
 
-// Brand Color Palette - unflat (ONLY these 5 colors)
+// Color Palette - PayPal/Revolut Style
 const COLORS = {
-  primary: '#200191',    // Deep violet - card backgrounds, badges, MAX button
-  secondary: '#6198FF',  // Light blue - CTAs only, APY numbers, earnings
-  white: '#F5F6FF',      // Main text, titles, balances, icons
-  grey: '#484848',       // Labels, subtitles, secondary borders
-  black: '#00041B',      // Screen backgrounds
+  primary: '#200191',
+  secondary: '#6198FF',
+  white: '#F5F6FF',
+  grey: '#484848',
+  black: '#00041B',
+  pureWhite: '#FFFFFF',
+  border: '#E5E5E5',
+  success: '#22C55E',
+  disabled: '#A0A0A0',
 };
 
 // AnimatedEarned Component - Real-time earnings with USDC precision
@@ -114,7 +119,7 @@ const animatedEarnedStyles = StyleSheet.create({
   earned: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.secondary,
+    color: COLORS.success,
     fontVariant: ['tabular-nums'],
   },
 });
@@ -140,15 +145,46 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const { apy: displayApy, refetch: refetchApy, getVaultApy } = useVaultApy();
   const [refreshing, setRefreshing] = useState(false);
   const [amount, setAmount] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [totalDeposited, setTotalDeposited] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>('add');
+  const [isInputFocused, setIsInputFocused] = useState(false);
+  const [isWithdrawInputFocused, setIsWithdrawInputFocused] = useState(false);
 
   const hasPositions = positions.some(p => p.shares > BigInt(0));
   const savingsAmount = parseFloat(positionsTotal) || 0;
   const availableBalance = usdc ? parseFloat(usdc.balance) : 0;
+
+  // Calculate partial withdraw fee in real-time
+  const calculatePartialWithdrawFee = (withdrawAmountValue: number): { fee: number; youReceive: number } => {
+    if (withdrawAmountValue <= 0 || savingsAmount <= 0 || totalDeposited <= 0) {
+      return { fee: 0, youReceive: withdrawAmountValue };
+    }
+
+    // Proportion of withdrawal relative to total
+    const withdrawRatio = withdrawAmountValue / savingsAmount;
+
+    // Total yield
+    const totalYield = Math.max(0, savingsAmount - totalDeposited);
+
+    // Proportional yield for this withdrawal
+    const proportionalYield = totalYield * withdrawRatio;
+
+    // Fee on proportional profit (15%)
+    const fee = proportionalYield * 0.15;
+
+    return {
+      fee: fee,
+      youReceive: withdrawAmountValue - fee,
+    };
+  };
+
+  // Calculate fee for preview
+  const withdrawAmountNum = parseFloat(withdrawAmount) || 0;
+  const { fee: calculatedFee, youReceive } = calculatePartialWithdrawFee(withdrawAmountNum);
 
   React.useEffect(() => {
     const loadDeposited = async () => {
@@ -184,6 +220,20 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     } else if (activeTab === 'withdraw' && savingsAmount > 0) {
       setAmount(savingsAmount.toFixed(2));
     }
+  };
+
+  const handleWithdrawAmountChange = (value: string) => {
+    const sanitized = value.replace(/[^0-9.]/g, '');
+    // Don't allow more than available balance
+    if (sanitized && parseFloat(sanitized) > savingsAmount) {
+      setWithdrawAmount(savingsAmount.toFixed(2));
+    } else {
+      setWithdrawAmount(sanitized);
+    }
+  };
+
+  const handleSetMaxWithdraw = () => {
+    setWithdrawAmount(savingsAmount.toFixed(2));
   };
 
   const handleDeposit = async () => {
@@ -337,24 +387,114 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     );
   };
 
+  const handlePartialWithdraw = async () => {
+    const amountToWithdraw = parseFloat(withdrawAmount);
+
+    if (!amountToWithdraw || amountToWithdraw <= 0) {
+      Alert.alert('Enter Amount', 'Please enter an amount to withdraw');
+      return;
+    }
+
+    if (amountToWithdraw > savingsAmount) {
+      Alert.alert('Insufficient Balance', `You only have $${savingsAmount.toFixed(2)} in savings`);
+      return;
+    }
+
+    if (!smartWalletClient || !displayAddress) {
+      Alert.alert('Error', 'Please log in first.');
+      return;
+    }
+
+    // If withdrawing all (or nearly all), use full withdraw
+    if (amountToWithdraw >= savingsAmount * 0.99) {
+      handleWithdraw();
+      return;
+    }
+
+    const batch = buildPartialWithdrawBatch(
+      positions,
+      displayAddress as `0x${string}`,
+      amountToWithdraw,
+      totalDeposited
+    );
+
+    let confirmMessage: string;
+    if (batch.hasProfits && parseFloat(batch.feeAmount) > 0) {
+      confirmMessage = [
+        `Withdrawing: $${parseFloat(batch.currentValue).toFixed(2)}`,
+        ``,
+        `Performance fee (15% of profit): $${parseFloat(batch.feeAmount).toFixed(2)}`,
+        ``,
+        `You'll receive: $${parseFloat(batch.userReceives).toFixed(2)}`,
+      ].join('\n');
+    } else {
+      confirmMessage = `Withdraw $${parseFloat(batch.currentValue).toFixed(2)}?\n\nNo fee applies.`;
+    }
+
+    Alert.alert(
+      'Confirm Withdrawal',
+      confirmMessage,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            setIsWithdrawing(true);
+
+            try {
+              const txHash = await executeWithdrawBatch(smartWalletClient, batch);
+
+              // Update deposit tracker proportionally
+              await recordWithdrawal(displayAddress, amountToWithdraw, savingsAmount);
+
+              setWithdrawAmount('');
+              refetchBalances();
+              refetchPositions();
+
+              // Reload deposited amount
+              const newDeposited = await getTotalDeposited(displayAddress);
+              setTotalDeposited(newDeposited);
+
+              Alert.alert(
+                'Success',
+                `Withdrew $${parseFloat(batch.userReceives).toFixed(2)}`,
+                [
+                  { text: 'OK' },
+                  {
+                    text: 'View Details',
+                    onPress: () => Linking.openURL(`https://basescan.org/tx/${txHash}`),
+                  },
+                ]
+              );
+            } catch (error) {
+              Alert.alert('Failed', (error as Error)?.message || 'Please try again');
+            } finally {
+              setIsWithdrawing(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // Calculate earnings
   const totalEarned = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
 
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.secondary} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
         }
       >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Ionicons name="chevron-back" size={24} color={COLORS.white} />
+            <Ionicons name="chevron-back" size={24} color={COLORS.black} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Manage Funds</Text>
           <View style={styles.headerSpacer} />
@@ -364,7 +504,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         <View style={styles.summaryCard}>
           {positionsLoading ? (
             <View style={styles.loadingState}>
-              <ActivityIndicator size="small" color={COLORS.secondary} />
+              <ActivityIndicator size="small" color={COLORS.primary} />
               <Text style={styles.loadingText}>Loading...</Text>
             </View>
           ) : positionsError ? (
@@ -413,12 +553,12 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         <View style={styles.tabContainer}>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'add' && styles.tabActive]}
-            onPress={() => { setActiveTab('add'); setAmount(''); }}
+            onPress={() => { setActiveTab('add'); setAmount(''); setWithdrawAmount(''); }}
           >
             <Ionicons
               name="add-circle-outline"
               size={20}
-              color={activeTab === 'add' ? COLORS.white : COLORS.grey}
+              color={activeTab === 'add' ? COLORS.pureWhite : COLORS.grey}
             />
             <Text style={[styles.tabText, activeTab === 'add' && styles.tabTextActive]}>
               Add Funds
@@ -426,12 +566,12 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
-            onPress={() => { setActiveTab('withdraw'); setAmount(''); }}
+            onPress={() => { setActiveTab('withdraw'); setAmount(''); setWithdrawAmount(''); }}
           >
             <Ionicons
               name="arrow-down-circle-outline"
               size={20}
-              color={activeTab === 'withdraw' ? COLORS.white : COLORS.grey}
+              color={activeTab === 'withdraw' ? COLORS.pureWhite : COLORS.grey}
             />
             <Text style={[styles.tabText, activeTab === 'withdraw' && styles.tabTextActive]}>
               Withdraw
@@ -446,16 +586,18 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             <>
               <Text style={styles.inputLabel}>Amount to add</Text>
               <View style={styles.inputRow}>
-                <View style={styles.currencyPrefix}>
+                <View style={[styles.currencyPrefix, isInputFocused && styles.inputFocused]}>
                   <Text style={styles.currencyText}>$</Text>
                 </View>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, isInputFocused && styles.inputFocused]}
                   value={amount}
                   onChangeText={handleAmountChange}
                   placeholder="0.00"
                   placeholderTextColor={COLORS.grey}
                   keyboardType="decimal-pad"
+                  onFocus={() => setIsInputFocused(true)}
+                  onBlur={() => setIsInputFocused(false)}
                 />
                 <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
                   <Text style={styles.maxButtonText}>MAX</Text>
@@ -471,7 +613,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                 disabled={!amount || parseFloat(amount) <= 0 || isDepositing}
               >
                 {isDepositing ? (
-                  <ActivityIndicator color={COLORS.white} />
+                  <ActivityIndicator color={COLORS.pureWhite} />
                 ) : (
                   <Text style={styles.actionButtonText}>
                     {amount && parseFloat(amount) > 0 ? `Add $${parseFloat(amount).toFixed(2)}` : 'Add Funds'}
@@ -484,7 +626,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             <>
               {!hasPositions ? (
                 <View style={styles.noFundsState}>
-                  <Ionicons name="wallet-outline" size={40} color={COLORS.white} />
+                  <Ionicons name="wallet-outline" size={40} color={COLORS.primary} />
                   <Text style={styles.noFundsText}>No funds to withdraw</Text>
                   <Text style={styles.noFundsSubtext}>
                     Add funds first to start earning yield
@@ -492,28 +634,65 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                 </View>
               ) : (
                 <>
-                  <Text style={styles.withdrawInfo}>
-                    Withdraw your full balance of ${savingsAmount.toFixed(2)}
-                  </Text>
+                  <Text style={styles.inputLabel}>Amount to withdraw</Text>
+                  <View style={styles.inputRow}>
+                    <View style={[styles.currencyPrefix, isWithdrawInputFocused && styles.inputFocused]}>
+                      <Text style={styles.currencyText}>$</Text>
+                    </View>
+                    <TextInput
+                      style={[styles.input, isWithdrawInputFocused && styles.inputFocused]}
+                      value={withdrawAmount}
+                      onChangeText={handleWithdrawAmountChange}
+                      placeholder="0.00"
+                      placeholderTextColor={COLORS.grey}
+                      keyboardType="decimal-pad"
+                      onFocus={() => setIsWithdrawInputFocused(true)}
+                      onBlur={() => setIsWithdrawInputFocused(false)}
+                    />
+                    <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxWithdraw}>
+                      <Text style={styles.maxButtonText}>MAX</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Withdraw Preview */}
+                  {withdrawAmountNum > 0 && (
+                    <View style={styles.withdrawPreview}>
+                      <View style={styles.previewRow}>
+                        <Text style={styles.previewLabel}>Withdrawing</Text>
+                        <Text style={styles.previewValue}>${withdrawAmountNum.toFixed(2)}</Text>
+                      </View>
+                      {calculatedFee > 0.001 && (
+                        <View style={styles.previewRow}>
+                          <Text style={styles.previewLabel}>Performance fee (15% of profit)</Text>
+                          <Text style={styles.previewValue}>-${calculatedFee.toFixed(2)}</Text>
+                        </View>
+                      )}
+                      <View style={[styles.previewRow, styles.previewRowTotal]}>
+                        <Text style={styles.previewLabelBold}>You receive</Text>
+                        <Text style={styles.previewValueBold}>${youReceive.toFixed(2)}</Text>
+                      </View>
+                    </View>
+                  )}
 
                   <TouchableOpacity
                     style={[
                       styles.actionButton,
-                      styles.withdrawButton,
-                      isWithdrawing && styles.actionButtonDisabled,
+                      (!withdrawAmount || withdrawAmountNum <= 0 || isWithdrawing) && styles.actionButtonDisabled,
                     ]}
-                    onPress={handleWithdraw}
-                    disabled={isWithdrawing}
+                    onPress={handlePartialWithdraw}
+                    disabled={!withdrawAmount || withdrawAmountNum <= 0 || isWithdrawing}
                   >
                     {isWithdrawing ? (
-                      <ActivityIndicator color={COLORS.white} />
+                      <ActivityIndicator color={COLORS.pureWhite} />
                     ) : (
-                      <Text style={styles.actionButtonText}>Withdraw All</Text>
+                      <Text style={styles.actionButtonText}>
+                        {withdrawAmountNum > 0 ? `Withdraw $${withdrawAmountNum.toFixed(2)}` : 'Withdraw'}
+                      </Text>
                     )}
                   </TouchableOpacity>
 
                   <Text style={styles.withdrawNote}>
-                    You'll receive funds instantly with no withdrawal fees
+                    Funds arrive instantly. No withdrawal fees.
                   </Text>
                 </>
               )}
@@ -527,7 +706,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           onPress={() => setShowHowItWorks(!showHowItWorks)}
         >
           <View style={styles.howItWorksLeft}>
-            <Ionicons name="help-circle-outline" size={20} color={COLORS.white} />
+            <Ionicons name="help-circle-outline" size={20} color={COLORS.secondary} />
             <Text style={styles.howItWorksTitle}>Where do my funds go?</Text>
           </View>
           <Ionicons
@@ -572,7 +751,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
           <View style={styles.feeRow}>
             <View style={styles.feeLeft}>
-              <Ionicons name="checkmark-circle" size={18} color={COLORS.white} />
+              <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
               <Text style={styles.feeLabel}>Deposit & Withdraw</Text>
             </View>
             <Text style={styles.feeValue}>Free</Text>
@@ -580,7 +759,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
           <View style={styles.feeRow}>
             <View style={styles.feeLeft}>
-              <Ionicons name="checkmark-circle" size={18} color={COLORS.white} />
+              <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
               <Text style={styles.feeLabel}>Gas fees</Text>
             </View>
             <Text style={styles.feeValue}>Covered</Text>
@@ -588,7 +767,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
           <View style={styles.feeRow}>
             <View style={styles.feeLeft}>
-              <Ionicons name="information-circle" size={18} color={COLORS.white} />
+              <Ionicons name="information-circle" size={18} color={COLORS.secondary} />
               <Text style={styles.feeLabel}>Performance fee</Text>
             </View>
             <Text style={styles.feeValue}>15% of earnings</Text>
@@ -602,15 +781,15 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         {/* Trust Indicators */}
         <View style={styles.trustSection}>
           <View style={styles.trustRow}>
-            <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.white} />
+            <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.primary} />
             <Text style={styles.trustText}>Non-custodial - you control your funds</Text>
           </View>
           <View style={styles.trustRow}>
-            <Ionicons name="time-outline" size={18} color={COLORS.white} />
+            <Ionicons name="time-outline" size={18} color={COLORS.primary} />
             <Text style={styles.trustText}>Exit anytime - no lock-up period</Text>
           </View>
           <View style={styles.trustRow}>
-            <Ionicons name="eye-outline" size={18} color={COLORS.white} />
+            <Ionicons name="eye-outline" size={18} color={COLORS.primary} />
             <Text style={styles.trustText}>Fully transparent - all transactions on-chain</Text>
           </View>
         </View>
@@ -622,7 +801,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.black,
+    backgroundColor: COLORS.white,
   },
   scrollView: {
     flex: 1,
@@ -643,27 +822,37 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(72, 72, 72, 0.15)',
+    backgroundColor: COLORS.pureWhite,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.black,
   },
   headerSpacer: {
     width: 44,
   },
   // Summary Card
   summaryCard: {
-    backgroundColor: 'rgba(32, 1, 145, 0.08)',
-    borderRadius: 20,
+    backgroundColor: COLORS.pureWhite,
+    borderRadius: 16,
     padding: 24,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(32, 1, 145, 0.2)',
+    borderColor: COLORS.border,
     alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   summaryLabel: {
     fontSize: 14,
@@ -673,7 +862,7 @@ const styles = StyleSheet.create({
   summaryValue: {
     fontSize: 36,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.black,
     fontVariant: ['tabular-nums'],
   },
   earningRow: {
@@ -686,7 +875,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: COLORS.secondary,
+    backgroundColor: COLORS.success,
   },
   earningText: {
     fontSize: 14,
@@ -699,18 +888,13 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    backgroundColor: 'rgba(32, 1, 145, 0.15)',
+    backgroundColor: `${COLORS.success}15`,
     borderRadius: 8,
     gap: 8,
   },
   earningsLabel: {
     fontSize: 13,
     color: COLORS.grey,
-  },
-  earningsValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.secondary,
   },
   loadingState: {
     flexDirection: 'row',
@@ -735,17 +919,19 @@ const styles = StyleSheet.create({
   retryButton: {
     paddingHorizontal: 24,
     paddingVertical: 10,
-    backgroundColor: 'rgba(72, 72, 72, 0.15)',
+    backgroundColor: COLORS.white,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   retryButtonText: {
-    color: COLORS.white,
+    color: COLORS.black,
     fontSize: 14,
     fontWeight: '500',
   },
   // Available Card
   availableCard: {
-    backgroundColor: 'rgba(72, 72, 72, 0.08)',
+    backgroundColor: COLORS.pureWhite,
     borderRadius: 16,
     padding: 20,
     marginBottom: 24,
@@ -753,7 +939,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(72, 72, 72, 0.15)',
+    borderColor: COLORS.border,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   availableLabel: {
     fontSize: 14,
@@ -762,15 +953,17 @@ const styles = StyleSheet.create({
   availableValue: {
     fontSize: 20,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.black,
   },
   // Tab Selector
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(72, 72, 72, 0.1)',
+    backgroundColor: COLORS.pureWhite,
     borderRadius: 14,
     padding: 4,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   tab: {
     flex: 1,
@@ -782,7 +975,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tabActive: {
-    backgroundColor: COLORS.secondary,
+    backgroundColor: COLORS.primary,
   },
   tabText: {
     fontSize: 15,
@@ -790,16 +983,21 @@ const styles = StyleSheet.create({
     color: COLORS.grey,
   },
   tabTextActive: {
-    color: COLORS.white,
+    color: COLORS.pureWhite,
   },
   // Action Area
   actionArea: {
-    backgroundColor: 'rgba(32, 1, 145, 0.08)',
-    borderRadius: 20,
+    backgroundColor: COLORS.pureWhite,
+    borderRadius: 16,
     padding: 24,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: 'rgba(32, 1, 145, 0.2)',
+    borderColor: COLORS.border,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   inputLabel: {
     fontSize: 14,
@@ -812,14 +1010,14 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   currencyPrefix: {
-    backgroundColor: 'rgba(32, 1, 145, 0.08)',
+    backgroundColor: COLORS.pureWhite,
     borderRadius: 12,
     borderTopRightRadius: 0,
     borderBottomRightRadius: 0,
     paddingVertical: 16,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: 'rgba(32, 1, 145, 0.2)',
+    borderColor: COLORS.border,
     borderRightWidth: 0,
   },
   currencyText: {
@@ -829,7 +1027,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    backgroundColor: 'rgba(32, 1, 145, 0.08)',
+    backgroundColor: COLORS.pureWhite,
     borderRadius: 12,
     borderTopLeftRadius: 0,
     borderBottomLeftRadius: 0,
@@ -837,45 +1035,57 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     fontSize: 22,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.black,
     borderWidth: 1,
-    borderColor: 'rgba(32, 1, 145, 0.2)',
+    borderColor: COLORS.border,
     borderLeftWidth: 0,
   },
+  inputFocused: {
+    borderColor: COLORS.secondary,
+  },
   maxButton: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.secondary,
     paddingHorizontal: 18,
     paddingVertical: 16,
     borderRadius: 12,
     marginLeft: 12,
   },
   maxButtonText: {
-    color: COLORS.white,
+    color: COLORS.pureWhite,
     fontWeight: '700',
     fontSize: 13,
   },
   actionButton: {
-    backgroundColor: COLORS.secondary,
-    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
     paddingVertical: 18,
     alignItems: 'center',
   },
   withdrawButton: {
     backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: COLORS.grey,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    borderRadius: 12,
+    paddingVertical: 18,
+    alignItems: 'center',
   },
   actionButtonDisabled: {
-    backgroundColor: 'rgba(72, 72, 72, 0.2)',
+    backgroundColor: COLORS.border,
+    borderColor: COLORS.border,
   },
   actionButtonText: {
     fontSize: 17,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.pureWhite,
+  },
+  withdrawButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   withdrawInfo: {
     fontSize: 15,
-    color: COLORS.white,
+    color: COLORS.black,
     textAlign: 'center',
     marginBottom: 20,
   },
@@ -885,6 +1095,43 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
   },
+  withdrawPreview: {
+    backgroundColor: 'rgba(32, 1, 145, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    gap: 10,
+  },
+  previewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  previewRowTotal: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(32, 1, 145, 0.1)',
+    paddingTop: 10,
+    marginTop: 4,
+  },
+  previewLabel: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  previewValue: {
+    fontSize: 14,
+    color: COLORS.black,
+    fontWeight: '500',
+  },
+  previewLabelBold: {
+    fontSize: 15,
+    color: COLORS.black,
+    fontWeight: '600',
+  },
+  previewValueBold: {
+    fontSize: 15,
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
   noFundsState: {
     alignItems: 'center',
     paddingVertical: 24,
@@ -892,7 +1139,7 @@ const styles = StyleSheet.create({
   },
   noFundsText: {
     fontSize: 16,
-    color: COLORS.white,
+    color: COLORS.black,
     fontWeight: '500',
     marginTop: 8,
   },
@@ -907,7 +1154,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(72, 72, 72, 0.15)',
+    borderBottomColor: COLORS.border,
   },
   howItWorksLeft: {
     flexDirection: 'row',
@@ -919,11 +1166,13 @@ const styles = StyleSheet.create({
     color: COLORS.grey,
   },
   howItWorksContent: {
-    backgroundColor: 'rgba(32, 1, 145, 0.05)',
+    backgroundColor: COLORS.pureWhite,
     borderRadius: 16,
     padding: 20,
     marginTop: 12,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   howItWorksText: {
     fontSize: 14,
@@ -933,7 +1182,7 @@ const styles = StyleSheet.create({
   },
   protocolsList: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(32, 1, 145, 0.15)',
+    borderTopColor: COLORS.border,
     paddingTop: 16,
   },
   protocolsLabel: {
@@ -949,7 +1198,7 @@ const styles = StyleSheet.create({
   },
   protocolName: {
     fontSize: 14,
-    color: COLORS.white,
+    color: COLORS.black,
     flex: 1,
   },
   protocolRight: {
@@ -959,28 +1208,30 @@ const styles = StyleSheet.create({
   },
   protocolValue: {
     fontSize: 14,
-    color: COLORS.white,
+    color: COLORS.black,
     fontWeight: '500',
   },
   protocolApy: {
     fontSize: 12,
     color: COLORS.secondary,
-    backgroundColor: 'rgba(32, 1, 145, 0.2)',
+    backgroundColor: `${COLORS.secondary}15`,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 4,
   },
   // Fee Section
   feeSection: {
-    backgroundColor: 'rgba(32, 1, 145, 0.05)',
+    backgroundColor: COLORS.pureWhite,
     borderRadius: 16,
     padding: 20,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   feeSectionTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.black,
     marginBottom: 16,
   },
   feeRow: {
@@ -1000,7 +1251,7 @@ const styles = StyleSheet.create({
   },
   feeValue: {
     fontSize: 14,
-    color: COLORS.white,
+    color: COLORS.black,
     fontWeight: '500',
   },
   feeNote: {

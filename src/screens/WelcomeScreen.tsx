@@ -17,13 +17,14 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 
 const { width } = Dimensions.get('window');
 
-// Color Palette
+// Color Palette - PayPal/Revolut Style
 const COLORS = {
   primary: '#200191',
   secondary: '#6198FF',
   white: '#F5F6FF',
   grey: '#484848',
   black: '#00041B',
+  pureWhite: '#FFFFFF',
 };
 
 type WelcomeScreenProps = {
@@ -108,7 +109,7 @@ const GlowingIconWrapper = ({ children }: { children: React.ReactNode }) => {
 const GlowingOrb = () => {
   return (
     <GlowingIconWrapper>
-      <Ionicons name="wallet-outline" size={56} color={COLORS.white} />
+      <Ionicons name="wallet-outline" size={56} color={COLORS.pureWhite} />
     </GlowingIconWrapper>
   );
 };
@@ -117,7 +118,7 @@ const GlowingOrb = () => {
 const GlowingLock = () => {
   return (
     <GlowingIconWrapper>
-      <Ionicons name="lock-closed-outline" size={56} color={COLORS.white} />
+      <Ionicons name="lock-closed-outline" size={56} color={COLORS.pureWhite} />
     </GlowingIconWrapper>
   );
 };
@@ -126,7 +127,7 @@ const GlowingLock = () => {
 const GlowingClock = () => {
   return (
     <GlowingIconWrapper>
-      <Ionicons name="time-outline" size={56} color={COLORS.white} />
+      <Ionicons name="time-outline" size={56} color={COLORS.pureWhite} />
     </GlowingIconWrapper>
   );
 };
@@ -202,11 +203,11 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
 
   return (
     <LinearGradient
-      colors={[COLORS.primary, COLORS.black]}
+      colors={[COLORS.white, COLORS.pureWhite]}
       locations={[0, 0.6]}
       style={styles.container}
     >
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
 
       {/* Carousel */}
       <FlatList
@@ -292,10 +293,10 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    shadowColor: COLORS.secondary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 30,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
     elevation: 20,
   },
   iconInner: {
@@ -313,7 +314,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.black,
     textAlign: 'center',
     lineHeight: 36,
     marginBottom: 16,
@@ -341,11 +342,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 6,
   },
   paginationDotActive: {
-    backgroundColor: COLORS.secondary,
+    backgroundColor: COLORS.primary,
     width: 24,
   },
   paginationDotInactive: {
     backgroundColor: COLORS.grey,
+    opacity: 0.4,
   },
   // Bottom Section
   bottomContainer: {
@@ -356,12 +358,12 @@ const styles = StyleSheet.create({
   getStartedButton: {
     width: '100%',
     height: 56,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.primary,
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: COLORS.secondary,
+    shadowColor: COLORS.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
@@ -370,7 +372,7 @@ const styles = StyleSheet.create({
   getStartedButtonText: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.black,
+    color: COLORS.white,
   },
   termsText: {
     fontSize: 13,
@@ -380,6 +382,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   termsLink: {
+    color: COLORS.secondary,
     textDecorationLine: 'underline',
   },
 });

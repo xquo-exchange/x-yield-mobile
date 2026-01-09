@@ -16,13 +16,15 @@ import { usePrivy, useLoginWithEmail } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
-// Color Palette
+// Color Palette - PayPal/Revolut Style
 const COLORS = {
   primary: '#200191',
   secondary: '#6198FF',
   white: '#F5F6FF',
   grey: '#484848',
   black: '#00041B',
+  pureWhite: '#FFFFFF',
+  border: '#E5E5E5',
 };
 
 type LoginScreenProps = {
@@ -34,6 +36,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [showCodeInput, setShowCodeInput] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -93,16 +96,16 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
 
       {/* Header with Back and Help buttons */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.headerButton} onPress={handleBack}>
-          <Ionicons name="chevron-back" size={24} color={COLORS.white} />
+          <Ionicons name="chevron-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.headerButton} onPress={handleHelp}>
-          <Ionicons name="help" size={20} color={COLORS.white} />
+          <Ionicons name="help" size={20} color={COLORS.black} />
         </TouchableOpacity>
       </View>
 
@@ -115,7 +118,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
             <View style={styles.inputContainer}>
               <TextInput
-                style={styles.input}
+                style={[styles.input, isInputFocused && styles.inputFocused]}
                 placeholder="Email Address"
                 placeholderTextColor={COLORS.grey}
                 value={email}
@@ -125,6 +128,8 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 autoCorrect={false}
                 autoComplete="email"
                 editable={!isLoading}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
               />
             </View>
 
@@ -151,7 +156,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
             <View style={styles.inputContainer}>
               <TextInput
-                style={styles.input}
+                style={[styles.input, isInputFocused && styles.inputFocused]}
                 placeholder="6-digit code"
                 placeholderTextColor={COLORS.grey}
                 value={code}
@@ -160,6 +165,8 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 maxLength={6}
                 editable={!isLoading}
                 autoFocus
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
               />
             </View>
 
@@ -198,7 +205,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.black,
+    backgroundColor: COLORS.white,
   },
   header: {
     flexDirection: 'row',
@@ -212,9 +219,14 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(72, 72, 72, 0.2)',
+    backgroundColor: COLORS.pureWhite,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   content: {
     flex: 1,
@@ -224,7 +236,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.black,
     marginBottom: 12,
   },
   subtitle: {
@@ -238,18 +250,29 @@ const styles = StyleSheet.create({
   },
   input: {
     height: 56,
-    backgroundColor: 'rgba(72, 72, 72, 0.15)',
+    backgroundColor: COLORS.pureWhite,
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 17,
-    color: COLORS.white,
+    color: COLORS.black,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  inputFocused: {
+    borderColor: COLORS.secondary,
+    borderWidth: 2,
   },
   continueButton: {
     height: 56,
-    backgroundColor: COLORS.secondary,
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   continueButtonDisabled: {
     opacity: 0.6,
