@@ -14,7 +14,9 @@ import {
   AppState,
   AppStateStatus,
   Animated,
+  TextInput,
 } from 'react-native';
+import { encodeFunctionData } from 'viem';
 import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -29,6 +31,7 @@ import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
 import { getTotalDeposited } from '../services/depositTracker';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
+import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
 
 // Color Palette - PayPal/Revolut Style
 const COLORS = {
@@ -199,6 +202,14 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const [showHowItWorks, setShowHowItWorks] = React.useState(false);
   const [totalDeposited, setTotalDeposited] = React.useState(0);
 
+  // Withdraw Cash Modal state
+  const [showWithdrawModal, setShowWithdrawModal] = React.useState(false);
+  const [withdrawMethod, setWithdrawMethod] = React.useState<'select' | 'wallet' | 'bank'>('select');
+  const [withdrawAddress, setWithdrawAddress] = React.useState('');
+  const [withdrawAmount, setWithdrawAmount] = React.useState('');
+  const [isWithdrawingCash, setIsWithdrawingCash] = React.useState(false);
+  const [isCashingOut, setIsCashingOut] = React.useState(false);
+
   // Pulse animation for earning indicator
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
 
@@ -336,6 +347,152 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     setFundingView('options');
   };
 
+  const closeWithdrawModal = () => {
+    setShowWithdrawModal(false);
+    setWithdrawAddress('');
+    setWithdrawAmount('');
+    setWithdrawMethod('select');
+  };
+
+  const handleWithdrawCashReview = () => {
+    // Address validation
+    if (!withdrawAddress.startsWith('0x') || withdrawAddress.length !== 42) {
+      Alert.alert('Invalid Address', 'Please enter a valid Ethereum address (0x...)');
+      return;
+    }
+
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount');
+      return;
+    }
+
+    if (amount > cashBalance) {
+      Alert.alert('Insufficient Balance', `You only have $${cashBalance.toFixed(2)} available`);
+      return;
+    }
+
+    // Show confirmation
+    Alert.alert(
+      'Confirm Withdrawal',
+      `Send: $${amount.toFixed(2)} USDC\nTo: ${withdrawAddress.slice(0, 6)}...${withdrawAddress.slice(-4)}\nNetwork: Base\n\nThis action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm & Send',
+          onPress: executeWithdrawCash,
+        },
+      ]
+    );
+  };
+
+  const executeWithdrawCash = async () => {
+    if (!smartWalletClient || !displayAddress) {
+      Alert.alert('Error', 'Wallet not connected');
+      return;
+    }
+
+    setIsWithdrawingCash(true);
+
+    try {
+      const amount = parseFloat(withdrawAmount);
+      const amountRaw = BigInt(Math.floor(amount * 1_000_000)); // USDC has 6 decimals
+
+      // Build transfer call
+      const transferData = encodeFunctionData({
+        abi: [
+          {
+            name: 'transfer',
+            type: 'function',
+            stateMutability: 'nonpayable',
+            inputs: [
+              { name: 'to', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+            outputs: [{ name: '', type: 'bool' }],
+          },
+        ],
+        functionName: 'transfer',
+        args: [withdrawAddress as `0x${string}`, amountRaw],
+      });
+
+      const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // USDC on Base
+
+      const hash = await smartWalletClient.sendTransaction({
+        to: USDC_ADDRESS as `0x${string}`,
+        data: transferData,
+        value: BigInt(0),
+      });
+
+      // Close modal and reset
+      closeWithdrawModal();
+
+      // Refresh balances
+      refetchBalances();
+
+      Alert.alert(
+        'Sent Successfully!',
+        `$${amount.toFixed(2)} USDC sent to ${withdrawAddress.slice(0, 6)}...${withdrawAddress.slice(-4)}`,
+        [
+          { text: 'OK' },
+          {
+            text: 'View on BaseScan',
+            onPress: () => Linking.openURL(`https://basescan.org/tx/${hash}`),
+          },
+        ]
+      );
+    } catch (error) {
+      Alert.alert('Failed', (error as Error)?.message || 'Transaction failed. Please try again.');
+    } finally {
+      setIsWithdrawingCash(false);
+    }
+  };
+
+  const handleCashOutToBank = async () => {
+    const amount = parseFloat(withdrawAmount);
+
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount');
+      return;
+    }
+
+    if (amount > cashBalance) {
+      Alert.alert('Insufficient Balance', `You only have $${cashBalance.toFixed(2)} available`);
+      return;
+    }
+
+    if (!displayAddress) {
+      Alert.alert('Error', 'Wallet not connected');
+      return;
+    }
+
+    setIsCashingOut(true);
+
+    try {
+      const result = await openCoinbaseOfframp(displayAddress, withdrawAmount);
+
+      if (!result.success) {
+        Alert.alert(
+          'Unable to Connect',
+          result.error || 'Could not connect to Coinbase. Please try again later.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        // Close modal after opening Coinbase
+        closeWithdrawModal();
+
+        // Refresh balances after returning from Coinbase
+        setTimeout(() => {
+          refetchBalances();
+        }, 2000);
+      }
+    } catch (error) {
+      Alert.alert('Error', (error as Error)?.message || 'Something went wrong');
+    } finally {
+      setIsCashingOut(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
@@ -390,13 +547,25 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
               </View>
             </View>
             <Text style={styles.cashBalance}>${cashBalance.toFixed(2)}</Text>
-            <TouchableOpacity
-              style={styles.addFundsButton}
-              onPress={() => setShowFundingModal(true)}
-            >
-              <Ionicons name="add" size={18} color={COLORS.pureWhite} />
-              <Text style={styles.addFundsButtonText}>Add Funds</Text>
-            </TouchableOpacity>
+            <View style={styles.cashButtonsRow}>
+              <TouchableOpacity
+                style={[styles.cashButton, styles.addFundsButtonStyle]}
+                onPress={() => setShowFundingModal(true)}
+              >
+                <Ionicons name="add" size={18} color={COLORS.pureWhite} />
+                <Text style={styles.cashButtonText}>Add Funds</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.cashButton, styles.withdrawCashButton, cashBalance <= 0 && styles.withdrawCashButtonDisabled]}
+                onPress={() => setShowWithdrawModal(true)}
+                disabled={cashBalance <= 0}
+              >
+                <Ionicons name="arrow-up-outline" size={18} color={cashBalance > 0 ? COLORS.primary : COLORS.grey} />
+                <Text style={[styles.withdrawCashButtonText, cashBalance <= 0 && styles.buttonTextDisabled]}>
+                  Withdraw
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -618,6 +787,242 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           </View>
         </View>
       </Modal>
+
+      {/* Withdraw Cash Modal */}
+      <Modal
+        visible={showWithdrawModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={closeWithdrawModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              {withdrawMethod !== 'select' ? (
+                <TouchableOpacity
+                  style={styles.modalHeaderButton}
+                  onPress={() => {
+                    setWithdrawMethod('select');
+                    setWithdrawAmount('');
+                  }}
+                >
+                  <Ionicons name="chevron-back" size={20} color={COLORS.black} />
+                </TouchableOpacity>
+              ) : (
+                <View style={{ width: 40 }} />
+              )}
+              <Text style={styles.modalTitle}>
+                {withdrawMethod === 'select' && 'Withdraw'}
+                {withdrawMethod === 'wallet' && 'Send to Wallet'}
+                {withdrawMethod === 'bank' && 'Cash Out to Bank'}
+              </Text>
+              <TouchableOpacity style={styles.modalHeaderButton} onPress={closeWithdrawModal}>
+                <Ionicons name="close" size={20} color={COLORS.grey} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Method Selection */}
+            {withdrawMethod === 'select' && (
+              <View style={styles.withdrawMethodsContainer}>
+                <Text style={styles.withdrawMethodsSubtitle}>
+                  Available: ${cashBalance.toFixed(2)} USDC
+                </Text>
+
+                {/* Send to Wallet Option */}
+                <TouchableOpacity
+                  style={styles.withdrawMethodOption}
+                  onPress={() => setWithdrawMethod('wallet')}
+                >
+                  <View style={styles.withdrawMethodIcon}>
+                    <Ionicons name="wallet-outline" size={24} color={COLORS.secondary} />
+                  </View>
+                  <View style={styles.withdrawMethodContent}>
+                    <Text style={styles.withdrawMethodTitle}>Send to Wallet</Text>
+                    <Text style={styles.withdrawMethodSubtitle}>USDC on Base network</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
+                </TouchableOpacity>
+
+                {/* Cash Out to Bank Option */}
+                <TouchableOpacity
+                  style={styles.withdrawMethodOption}
+                  onPress={() => setWithdrawMethod('bank')}
+                >
+                  <View style={[styles.withdrawMethodIcon, { backgroundColor: `${COLORS.success}15` }]}>
+                    <Ionicons name="business-outline" size={24} color={COLORS.success} />
+                  </View>
+                  <View style={styles.withdrawMethodContent}>
+                    <Text style={styles.withdrawMethodTitle}>Cash Out to Bank</Text>
+                    <Text style={styles.withdrawMethodSubtitle}>Via Coinbase • EUR to bank account</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
+                </TouchableOpacity>
+
+                {/* Info */}
+                <View style={styles.withdrawInfoBanner}>
+                  <Ionicons name="information-circle-outline" size={16} color={COLORS.grey} />
+                  <Text style={styles.withdrawInfoText}>
+                    Cash out requires a Coinbase account with linked EU bank (SEPA).
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Wallet Withdrawal */}
+            {withdrawMethod === 'wallet' && (
+              <>
+                {/* Send To Field */}
+                <View style={styles.withdrawInputSection}>
+                  <Text style={styles.withdrawInputLabel}>Send to</Text>
+                  <View style={styles.addressInputRow}>
+                    <View style={styles.addressInputIcon}>
+                      <Ionicons name="wallet-outline" size={20} color={COLORS.secondary} />
+                    </View>
+                    <TextInput
+                      style={styles.addressInput}
+                      value={withdrawAddress}
+                      onChangeText={setWithdrawAddress}
+                      placeholder="0x... wallet address"
+                      placeholderTextColor={COLORS.grey}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity
+                      style={styles.qrScanButton}
+                      onPress={() => Alert.alert('Coming Soon', 'QR scanner coming in a future update')}
+                    >
+                      <Ionicons name="qr-code-outline" size={22} color={COLORS.grey} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Amount Field */}
+                <View style={styles.withdrawInputSection}>
+                  <Text style={styles.withdrawInputLabel}>Amount</Text>
+                  <View style={styles.amountInputRow}>
+                    <Text style={styles.currencySymbol}>$</Text>
+                    <TextInput
+                      style={styles.amountInput}
+                      value={withdrawAmount}
+                      onChangeText={(val) => {
+                        const sanitized = val.replace(/[^0-9.]/g, '');
+                        if (parseFloat(sanitized) > cashBalance) {
+                          setWithdrawAmount(cashBalance.toFixed(2));
+                        } else {
+                          setWithdrawAmount(sanitized);
+                        }
+                      }}
+                      placeholder="0.00"
+                      placeholderTextColor={COLORS.grey}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={styles.availableRow}>
+                    <Text style={styles.availableText}>Available</Text>
+                    <Text style={styles.availableAmount}>${cashBalance.toFixed(6)}</Text>
+                    <TouchableOpacity
+                      style={styles.maxButtonSmall}
+                      onPress={() => setWithdrawAmount(cashBalance.toFixed(2))}
+                    >
+                      <Text style={styles.maxButtonSmallText}>Max</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Network Info */}
+                <View style={styles.networkInfoRow}>
+                  <Ionicons name="information-circle-outline" size={16} color={COLORS.grey} />
+                  <Text style={styles.networkInfoText}>
+                    Sending USDC on Base network. Make sure the recipient address supports Base.
+                  </Text>
+                </View>
+
+                {/* Review Button */}
+                <TouchableOpacity
+                  style={[
+                    styles.reviewButton,
+                    (!withdrawAddress || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || isWithdrawingCash) && styles.reviewButtonDisabled
+                  ]}
+                  onPress={handleWithdrawCashReview}
+                  disabled={!withdrawAddress || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || isWithdrawingCash}
+                >
+                  {isWithdrawingCash ? (
+                    <ActivityIndicator color={COLORS.pureWhite} />
+                  ) : (
+                    <Text style={styles.reviewButtonText}>Review</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* Bank Cash Out */}
+            {withdrawMethod === 'bank' && (
+              <View style={styles.bankCashoutContainer}>
+                {/* Amount Input */}
+                <View style={styles.withdrawInputSection}>
+                  <Text style={styles.withdrawInputLabel}>Amount to cash out</Text>
+                  <View style={styles.amountInputRow}>
+                    <Text style={styles.currencySymbol}>$</Text>
+                    <TextInput
+                      style={styles.amountInput}
+                      value={withdrawAmount}
+                      onChangeText={(val) => {
+                        const sanitized = val.replace(/[^0-9.]/g, '');
+                        if (parseFloat(sanitized) > cashBalance) {
+                          setWithdrawAmount(cashBalance.toFixed(2));
+                        } else {
+                          setWithdrawAmount(sanitized);
+                        }
+                      }}
+                      placeholder="0.00"
+                      placeholderTextColor={COLORS.grey}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={styles.availableRow}>
+                    <Text style={styles.availableText}>Available</Text>
+                    <Text style={styles.availableAmount}>${cashBalance.toFixed(2)}</Text>
+                    <TouchableOpacity
+                      style={styles.maxButtonSmall}
+                      onPress={() => setWithdrawAmount(cashBalance.toFixed(2))}
+                    >
+                      <Text style={styles.maxButtonSmallText}>Max</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Compact Info */}
+                <View style={styles.compactInfoRow}>
+                  <Ionicons name="information-circle-outline" size={16} color={COLORS.grey} />
+                  <Text style={styles.compactInfoText}>
+                    EUR via SEPA • Requires Coinbase account
+                  </Text>
+                </View>
+
+                {/* Continue Button */}
+                <TouchableOpacity
+                  style={[
+                    styles.reviewButton,
+                    (!withdrawAmount || parseFloat(withdrawAmount) <= 0 || isCashingOut) && styles.reviewButtonDisabled
+                  ]}
+                  onPress={handleCashOutToBank}
+                  disabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0 || isCashingOut}
+                >
+                  {isCashingOut ? (
+                    <ActivityIndicator color={COLORS.pureWhite} />
+                  ) : (
+                    <View style={styles.reviewButtonContent}>
+                      <Ionicons name="open-outline" size={18} color={COLORS.pureWhite} />
+                      <Text style={styles.reviewButtonText}>Continue to Coinbase</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -745,19 +1150,43 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     fontVariant: ['tabular-nums'],
   },
-  addFundsButton: {
+  // Cash button row styles
+  cashButtonsRow: {
     flexDirection: 'row',
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
+    gap: 12,
+  },
+  cashButton: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
     gap: 6,
   },
-  addFundsButtonText: {
+  addFundsButtonStyle: {
+    backgroundColor: COLORS.primary,
+  },
+  cashButtonText: {
     fontSize: 15,
     fontWeight: '600',
     color: COLORS.pureWhite,
+  },
+  withdrawCashButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+  },
+  withdrawCashButtonDisabled: {
+    borderColor: COLORS.grey,
+  },
+  withdrawCashButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  buttonTextDisabled: {
+    color: COLORS.grey,
   },
   // Savings Card
   savingsCard: {
@@ -967,6 +1396,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     padding: 24,
     paddingBottom: Platform.OS === 'ios' ? 44 : 24,
+    minHeight: 480,
+    maxHeight: '85%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1099,5 +1530,241 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.secondary,
     fontWeight: '500',
+  },
+  // Withdraw Modal styles
+  modalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  withdrawInputSection: {
+    marginBottom: 20,
+  },
+  withdrawInputLabel: {
+    fontSize: 14,
+    color: COLORS.grey,
+    marginBottom: 8,
+  },
+  addressInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+  },
+  addressInputIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: `${COLORS.secondary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  addressInput: {
+    flex: 1,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: COLORS.black,
+  },
+  qrScanButton: {
+    padding: 8,
+  },
+  amountInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 16,
+  },
+  currencySymbol: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: COLORS.grey,
+    marginRight: 4,
+  },
+  amountInput: {
+    flex: 1,
+    paddingVertical: 14,
+    fontSize: 22,
+    fontWeight: '600',
+    color: COLORS.black,
+  },
+  availableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+    gap: 8,
+  },
+  availableText: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  availableAmount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.black,
+  },
+  maxButtonSmall: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  maxButtonSmallText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.pureWhite,
+  },
+  networkInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: `${COLORS.secondary}10`,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 20,
+    gap: 8,
+  },
+  networkInfoText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.grey,
+    lineHeight: 18,
+  },
+  reviewButton: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  reviewButtonDisabled: {
+    backgroundColor: COLORS.grey,
+    opacity: 0.5,
+  },
+  reviewButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.pureWhite,
+  },
+  reviewButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  // Withdraw method selection styles
+  withdrawMethodsContainer: {
+    paddingTop: 8,
+  },
+  withdrawMethodsSubtitle: {
+    fontSize: 15,
+    color: COLORS.grey,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  withdrawMethodOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  withdrawMethodIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: `${COLORS.secondary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  withdrawMethodContent: {
+    flex: 1,
+  },
+  withdrawMethodTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.black,
+    marginBottom: 2,
+  },
+  withdrawMethodSubtitle: {
+    fontSize: 13,
+    color: COLORS.grey,
+  },
+  withdrawInfoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.grey}10`,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 12,
+    gap: 8,
+  },
+  withdrawInfoText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.grey,
+    lineHeight: 18,
+  },
+  // Bank cashout styles
+  bankCashoutContainer: {
+    marginTop: 8,
+  },
+  compactInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    gap: 8,
+    marginBottom: 16,
+  },
+  compactInfoText: {
+    fontSize: 14,
+    color: COLORS.grey,
+  },
+  coinbaseInfoCard: {
+    backgroundColor: `${COLORS.success}10`,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  coinbaseInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  coinbaseInfoTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.black,
+  },
+  coinbaseInfoStep: {
+    fontSize: 14,
+    color: COLORS.grey,
+    marginBottom: 6,
+    paddingLeft: 4,
+  },
+  requirementsNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(234, 179, 8, 0.1)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 20,
+    gap: 8,
+  },
+  requirementsText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#EAB308',
+    lineHeight: 18,
   },
 });
