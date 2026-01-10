@@ -13,7 +13,7 @@
  * 6. USD sent to user's linked bank account (1-3 days)
  */
 
-import * as WebBrowser from 'expo-web-browser';
+import { Linking } from 'react-native';
 
 const API_BASE_URL = 'https://x-yield-api.vercel.app';
 
@@ -115,10 +115,7 @@ export async function openCoinbaseOfframp(
     if (result?.url) {
       console.log('[Coinbase Offramp] Opening URL in browser');
 
-      await WebBrowser.openBrowserAsync(result.url, {
-        dismissButtonStyle: 'close',
-        presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
-      });
+      await Linking.openURL(result.url);
 
       return { success: true };
     }
