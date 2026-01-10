@@ -150,7 +150,7 @@ const SlideItem = ({ item }: { item: SlideData }) => {
         <Text style={styles.title}>
           {item.title}
           <Text style={styles.titleHighlight}>{item.highlightText}</Text>
-          {' on your cash with X-Yield.'}
+          {' on your cash with unflat.'}
         </Text>
       );
     }
@@ -238,7 +238,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
         </TouchableOpacity>
 
         <Text style={styles.termsText}>
-          By using X-Yield, you agree to accept our{' '}
+          By using unflat, you agree to accept our{' '}
           <Text style={styles.termsLink}>Terms of Use</Text> and{' '}
           <Text style={styles.termsLink}>Privacy Policy</Text>
         </Text>

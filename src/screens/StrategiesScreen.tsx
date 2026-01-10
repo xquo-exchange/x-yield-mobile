@@ -162,10 +162,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   React.useEffect(() => {
     const loadDeposited = async () => {
       if (displayAddress && savingsAmount > 0) {
-        const recovered = await recoverMissingDeposit(displayAddress, savingsAmount);
-        if (recovered) {
-          console.log('[ManageFunds] Deposit data was recovered from current value');
-        }
+        await recoverMissingDeposit(displayAddress, savingsAmount);
         const deposited = await getTotalDeposited(displayAddress);
         setTotalDeposited(deposited);
       } else if (displayAddress) {

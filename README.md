@@ -1,6 +1,18 @@
-# X-Yield Mobile
+# unflat
 
-A DeFi yield optimization mobile app built with React Native, Expo, and Privy authentication. Deposit USDC into curated Morpho vault strategies on Base chain with gasless transactions powered by Account Abstraction.
+A non-custodial yield account mobile app built with React Native, Expo, and Privy authentication.
+
+## Brand Color Palette
+
+| Color | Hex | Usage |
+|-------|-----|-------|
+| Primary | `#200191` | Buttons, logos, key accents |
+| Secondary | `#6198FF` | APY badges, links, highlights |
+| White | `#F5F6FF` | Background |
+| Grey | `#484848` | Secondary text, icons |
+| Black | `#00041B` | Primary text, headers |
+
+Deposit USDC into curated Morpho vault strategies on Base chain with gasless transactions powered by Account Abstraction.
 
 ## Features
 
@@ -20,7 +32,7 @@ A DeFi yield optimization mobile app built with React Native, Expo, and Privy au
 
 ## Fee Structure
 
-X-Yield uses a **performance fee model** - we only take a cut of your profits, never your principal.
+unflat uses a **performance fee model** - we only take a cut of your profits, never your principal.
 
 ### How It Works
 
@@ -51,7 +63,7 @@ You receive:     $108.50
 
 ### Treasury
 
-Performance fees are sent to the X-Yield treasury:
+Performance fees are sent to the unflat treasury:
 `0xC33F9253E59eaC5713bb6e8C2Cb8Ecb9567FF31d`
 
 ## Verified On-Chain Transactions
@@ -67,7 +79,7 @@ The app has been tested end-to-end on Base mainnet:
 
 ## Tech Stack
 
-- **React Native** + **Expo** (SDK 52)
+- **React Native** + **Expo** (SDK 54)
 - **TypeScript**
 - **Privy** - Authentication & embedded wallets
 - **Account Abstraction** - ERC-4337 smart wallets
@@ -80,28 +92,30 @@ The app has been tested end-to-end on Base mainnet:
 ## Project Structure
 
 ```
-x-yield-mobile/
-├── App.tsx                 # App entry point with Privy providers
+unflat-mobile/
+├── App.tsx                     # App entry point with Privy providers
 ├── src/
 │   ├── constants/
-│   │   ├── contracts.ts    # Contract addresses, ABIs, fee config
-│   │   └── strategies.ts   # Morpho vault configurations
+│   │   ├── contracts.ts        # Contract addresses, ABIs, fee config
+│   │   └── strategies.ts       # Morpho vault configurations
 │   ├── hooks/
-│   │   ├── useWalletBalance.ts  # Balance fetching hook
-│   │   ├── usePositions.ts      # Vault positions hook
-│   │   └── useVaultApy.ts       # Real APY from Morpho API
+│   │   ├── useWalletBalance.ts # Balance fetching hook
+│   │   ├── usePositions.ts     # Vault positions hook
+│   │   └── useVaultApy.ts      # Real APY from Morpho API
 │   ├── navigation/
-│   │   └── AppNavigator.tsx     # React Navigation setup
+│   │   └── AppNavigator.tsx    # React Navigation setup
 │   ├── screens/
-│   │   ├── WelcomeScreen.tsx    # Login screen
-│   │   ├── DashboardScreen.tsx  # Main dashboard
-│   │   └── StrategiesScreen.tsx # Deposit/Withdraw UI
+│   │   ├── WelcomeScreen.tsx   # Onboarding carousel
+│   │   ├── LoginScreen.tsx     # Email login screen
+│   │   ├── DashboardScreen.tsx # Main dashboard with Cash & Savings
+│   │   └── StrategiesScreen.tsx # Manage Funds (Deposit/Withdraw)
 │   └── services/
-│       ├── blockchain.ts        # RPC calls for balances & positions
-│       ├── depositTracker.ts    # Deposit history & yield calculation
-│       ├── morphoApi.ts         # Morpho API for real APY data
+│       ├── blockchain.ts       # RPC calls for balances & positions
+│       ├── coinbaseOnramp.ts   # Coinbase Onramp integration
+│       ├── depositTracker.ts   # Deposit history & yield calculation
+│       ├── morphoApi.ts        # Morpho API for real APY data
 │       └── strategyExecution.ts # Transaction building & execution
-├── app.json                # Expo config
+├── app.json                    # Expo config
 └── package.json
 ```
 
@@ -118,8 +132,8 @@ x-yield-mobile/
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/xquo-exchange/x-yield-mobile.git
-cd x-yield-mobile
+git clone https://github.com/your-org/unflat-mobile.git
+cd unflat-mobile
 npm install
 ```
 
