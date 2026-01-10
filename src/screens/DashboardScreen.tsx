@@ -34,7 +34,7 @@ import { useVaultApy } from '../hooks/useVaultApy';
 import { getTotalDeposited } from '../services/depositTracker';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
-import { useOfframpDeepLink } from '../hooks/useOfframpDeepLink';
+import { useDeepLink } from '../contexts/DeepLinkContext';
 
 // Color Palette - PayPal/Revolut Style
 const COLORS = {
@@ -272,25 +272,31 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     loadDeposited();
   }, [displayAddress, savingsBalance]);
 
-  // Handle offramp deep link
-  useOfframpDeepLink((params) => {
-    console.log('[Dashboard] Offramp callback received:', params);
+  // Handle offramp deep link from context
+  const { pendingOfframp, clearPendingOfframp } = useDeepLink();
 
-    // Check if expired
-    if (params.expiresAt && new Date(params.expiresAt) < new Date()) {
-      console.log('[Dashboard] Offramp expired');
-      Alert.alert('Expired', 'The cash out window has expired (30 min). Please try again.');
-      return;
+  React.useEffect(() => {
+    if (pendingOfframp) {
+      console.log('[Dashboard] Pending offramp detected:', pendingOfframp);
+
+      // Check if expired
+      if (pendingOfframp.expiresAt && new Date(pendingOfframp.expiresAt) < new Date()) {
+        console.log('[Dashboard] Offramp expired');
+        Alert.alert('Expired', 'The cash out window has expired (30 min). Please try again.');
+        clearPendingOfframp();
+        return;
+      }
+
+      console.log('[Dashboard] Setting offramp params and showing modal');
+      setOfframpParams({
+        toAddress: pendingOfframp.toAddress,
+        amount: pendingOfframp.amount,
+        expiresAt: pendingOfframp.expiresAt,
+      });
+      setShowOfframpTransfer(true);
+      clearPendingOfframp();
     }
-
-    console.log('[Dashboard] Setting offramp params and showing modal');
-    setOfframpParams({
-      toAddress: params.toAddress,
-      amount: params.amount,
-      expiresAt: params.expiresAt,
-    });
-    setShowOfframpTransfer(true);
-  });
+  }, [pendingOfframp, clearPendingOfframp]);
 
   // Handle offramp USDC transfer
   const handleOfframpTransfer = async () => {

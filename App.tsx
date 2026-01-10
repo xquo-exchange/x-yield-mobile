@@ -5,6 +5,7 @@ import { PrivyProvider } from '@privy-io/expo';
 import { SmartWalletsProvider } from '@privy-io/expo/smart-wallets';
 import { PrivyElements } from '@privy-io/expo/ui';
 import AppNavigator from './src/navigation/AppNavigator';
+import { DeepLinkProvider } from './src/contexts/DeepLinkContext';
 
 // Define Base chain for Privy (matches viem Chain type)
 const base = {
@@ -44,23 +45,25 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <PrivyProvider
-        appId="cmk1awjuj002ri60dlbm7ot7y"
-        clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
-        supportedChains={[base]}
-        config={{
-          embedded: {
-            ethereum: {
-              createOnLogin: 'users-without-wallets',
+      <DeepLinkProvider>
+        <PrivyProvider
+          appId="cmk1awjuj002ri60dlbm7ot7y"
+          clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
+          supportedChains={[base]}
+          config={{
+            embedded: {
+              ethereum: {
+                createOnLogin: 'users-without-wallets',
+              },
             },
-          },
-        }}
-      >
-        <SmartWalletsProvider>
-          <AppNavigator />
-          <PrivyElements />
-        </SmartWalletsProvider>
-      </PrivyProvider>
+          }}
+        >
+          <SmartWalletsProvider>
+            <AppNavigator />
+            <PrivyElements />
+          </SmartWalletsProvider>
+        </PrivyProvider>
+      </DeepLinkProvider>
     </SafeAreaProvider>
   );
 }
