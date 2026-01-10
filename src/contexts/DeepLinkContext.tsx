@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import * as Linking from 'expo-linking';
-import { Alert } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 
 interface OfframpParams {
   toAddress: string;
@@ -43,7 +43,26 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
       console.log('[DeepLinkContext] isOfframpComplete:', isOfframpComplete);
 
       if (isOfframpComplete) {
-        const { toAddress, amount, currency, network, expiresAt } = parsed.queryParams || {};
+        // Try parsed.queryParams first
+        let queryParams = parsed.queryParams || {};
+        
+        // Fallback: manually parse query string if Linking.parse didn't get them
+        if (!queryParams.toAddress && url.includes('?')) {
+          const queryString = url.split('?')[1];
+          if (queryString) {
+            const params = new URLSearchParams(queryString);
+            queryParams = {
+              toAddress: params.get('toAddress') || '',
+              amount: params.get('amount') || '',
+              currency: params.get('currency') || 'USDC',
+              network: params.get('network') || 'base',
+              expiresAt: params.get('expiresAt') || '',
+            };
+            console.log('[DeepLinkContext] Fallback parsed params:', queryParams);
+          }
+        }
+
+        const { toAddress, amount, currency, network, expiresAt } = queryParams;
 
         if (toAddress && amount) {
           console.log('[DeepLinkContext] Valid offramp params found');
@@ -67,12 +86,22 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
   const handleDeepLink = useCallback((url: string) => {
     console.log('[DeepLinkContext] Handling deep link:', url);
 
-    Alert.alert('Deep Link Received', `URL: ${url.substring(0, 50)}...`);
+    // IMPORTANT: Close the WebBrowser first so the modal can show
+    try {
+      WebBrowser.dismissBrowser();
+      console.log('[DeepLinkContext] WebBrowser dismissed');
+    } catch (e) {
+      console.log('[DeepLinkContext] No browser to dismiss or error:', e);
+    }
 
     const params = parseOfframpUrl(url);
     if (params) {
       console.log('[DeepLinkContext] Setting pending offramp:', params);
-      setPendingOfframp(params);
+      
+      // Small delay to ensure browser is fully closed before showing modal
+      setTimeout(() => {
+        setPendingOfframp(params);
+      }, 150);
     }
   }, [parseOfframpUrl]);
 
