@@ -36,7 +36,6 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
       const parsed = Linking.parse(url);
       console.log('[DeepLinkContext] Parsed:', JSON.stringify(parsed, null, 2));
 
-      // Check various path formats
       const isOfframpComplete =
         (parsed.hostname === 'offramp' && (parsed.path === 'complete' || parsed.path === '/complete')) ||
         (parsed.path === 'offramp/complete' || parsed.path === '/offramp/complete');
@@ -68,7 +67,6 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
   const handleDeepLink = useCallback((url: string) => {
     console.log('[DeepLinkContext] Handling deep link:', url);
 
-    // Show alert for debugging
     Alert.alert('Deep Link Received', `URL: ${url.substring(0, 50)}...`);
 
     const params = parseOfframpUrl(url);
@@ -81,13 +79,11 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     console.log('[DeepLinkContext] Setting up deep link listeners...');
 
-    // Handle deep link when app is already open
     const subscription = Linking.addEventListener('url', ({ url }) => {
       console.log('[DeepLinkContext] URL event received (foreground)');
       handleDeepLink(url);
     });
 
-    // Handle initial URL (app opened from deep link)
     if (!hasProcessedInitialUrl.current) {
       hasProcessedInitialUrl.current = true;
       Linking.getInitialURL().then((url) => {
