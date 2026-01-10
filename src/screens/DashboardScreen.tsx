@@ -15,8 +15,10 @@ import {
   AppStateStatus,
   Animated,
   TextInput,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
-import { encodeFunctionData } from 'viem';
+import { encodeFunctionData, parseUnits } from 'viem';
 import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -32,6 +34,7 @@ import { useVaultApy } from '../hooks/useVaultApy';
 import { getTotalDeposited } from '../services/depositTracker';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
+import { useOfframpDeepLink } from '../hooks/useOfframpDeepLink';
 
 // Color Palette - PayPal/Revolut Style
 const COLORS = {
@@ -210,6 +213,15 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const [isWithdrawingCash, setIsWithdrawingCash] = React.useState(false);
   const [isCashingOut, setIsCashingOut] = React.useState(false);
 
+  // Offramp deep link state
+  const [showOfframpTransfer, setShowOfframpTransfer] = React.useState(false);
+  const [offrampParams, setOfframpParams] = React.useState<{
+    toAddress: string;
+    amount: string;
+    expiresAt: string;
+  } | null>(null);
+  const [isOfframpProcessing, setIsOfframpProcessing] = React.useState(false);
+
   // Pulse animation for earning indicator
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
 
@@ -259,6 +271,67 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     };
     loadDeposited();
   }, [displayAddress, savingsBalance]);
+
+  // Handle offramp deep link
+  useOfframpDeepLink((params) => {
+    // Check if expired
+    if (params.expiresAt && new Date(params.expiresAt) < new Date()) {
+      Alert.alert('Expired', 'The cash out window has expired (30 min). Please try again.');
+      return;
+    }
+
+    setOfframpParams({
+      toAddress: params.toAddress,
+      amount: params.amount,
+      expiresAt: params.expiresAt,
+    });
+    setShowOfframpTransfer(true);
+  });
+
+  // Handle offramp USDC transfer
+  const handleOfframpTransfer = async () => {
+    if (!offrampParams || !smartWalletClient) return;
+
+    setIsOfframpProcessing(true);
+
+    try {
+      const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+      const amountInUnits = parseUnits(offrampParams.amount, 6); // USDC has 6 decimals
+
+      const data = encodeFunctionData({
+        abi: [{
+          name: 'transfer',
+          type: 'function',
+          inputs: [
+            { name: 'to', type: 'address' },
+            { name: 'amount', type: 'uint256' }
+          ],
+          outputs: [{ type: 'bool' }],
+        }],
+        functionName: 'transfer',
+        args: [offrampParams.toAddress as `0x${string}`, amountInUnits],
+      });
+
+      await smartWalletClient.sendTransaction({
+        to: USDC_ADDRESS as `0x${string}`,
+        data,
+      });
+
+      Alert.alert(
+        'Transfer Complete!',
+        'Your USDC has been sent to Coinbase. EUR will arrive in your bank in 1-2 business days.',
+        [{ text: 'OK', onPress: () => setShowOfframpTransfer(false) }]
+      );
+
+      refetchBalances();
+
+    } catch (error) {
+      console.error('[Offramp Transfer] Error:', error);
+      Alert.alert('Transfer Failed', (error as Error)?.message || 'Something went wrong');
+    } finally {
+      setIsOfframpProcessing(false);
+    }
+  };
 
   React.useEffect(() => {
     if (showFundingModal && displayAddress) {
@@ -958,68 +1031,138 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
             {/* Bank Cash Out */}
             {withdrawMethod === 'bank' && (
-              <View style={styles.bankCashoutContainer}>
-                {/* Amount Input */}
-                <View style={styles.withdrawInputSection}>
-                  <Text style={styles.withdrawInputLabel}>Amount to cash out</Text>
-                  <View style={styles.amountInputRow}>
-                    <Text style={styles.currencySymbol}>$</Text>
-                    <TextInput
-                      style={styles.amountInput}
-                      value={withdrawAmount}
-                      onChangeText={(val) => {
-                        const sanitized = val.replace(/[^0-9.]/g, '');
-                        if (parseFloat(sanitized) > cashBalance) {
-                          setWithdrawAmount(cashBalance.toFixed(2));
-                        } else {
-                          setWithdrawAmount(sanitized);
-                        }
-                      }}
-                      placeholder="0.00"
-                      placeholderTextColor={COLORS.grey}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-                  <View style={styles.availableRow}>
-                    <Text style={styles.availableText}>Available</Text>
-                    <Text style={styles.availableAmount}>${cashBalance.toFixed(2)}</Text>
-                    <TouchableOpacity
-                      style={styles.maxButtonSmall}
-                      onPress={() => setWithdrawAmount(cashBalance.toFixed(2))}
-                    >
-                      <Text style={styles.maxButtonSmallText}>Max</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Compact Info */}
-                <View style={styles.compactInfoRow}>
-                  <Ionicons name="information-circle-outline" size={16} color={COLORS.grey} />
-                  <Text style={styles.compactInfoText}>
-                    EUR via SEPA • Requires Coinbase account
-                  </Text>
-                </View>
-
-                {/* Continue Button */}
-                <TouchableOpacity
-                  style={[
-                    styles.reviewButton,
-                    (!withdrawAmount || parseFloat(withdrawAmount) <= 0 || isCashingOut) && styles.reviewButtonDisabled
-                  ]}
-                  onPress={handleCashOutToBank}
-                  disabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0 || isCashingOut}
-                >
-                  {isCashingOut ? (
-                    <ActivityIndicator color={COLORS.pureWhite} />
-                  ) : (
-                    <View style={styles.reviewButtonContent}>
-                      <Ionicons name="open-outline" size={18} color={COLORS.pureWhite} />
-                      <Text style={styles.reviewButtonText}>Continue to Coinbase</Text>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View style={styles.bankCashoutContainer}>
+                  {/* Amount Input */}
+                  <View style={styles.withdrawInputSection}>
+                    <Text style={styles.withdrawInputLabel}>Amount to cash out</Text>
+                    <View style={styles.amountInputRow}>
+                      <Text style={styles.currencySymbol}>$</Text>
+                      <TextInput
+                        style={styles.amountInput}
+                        value={withdrawAmount}
+                        onChangeText={(val) => {
+                          const sanitized = val.replace(/[^0-9.]/g, '');
+                          if (parseFloat(sanitized) > cashBalance) {
+                            setWithdrawAmount(cashBalance.toFixed(2));
+                          } else {
+                            setWithdrawAmount(sanitized);
+                          }
+                        }}
+                        placeholder="0.00"
+                        placeholderTextColor={COLORS.grey}
+                        keyboardType="decimal-pad"
+                        returnKeyType="done"
+                        onSubmitEditing={() => Keyboard.dismiss()}
+                        blurOnSubmit={true}
+                      />
                     </View>
-                  )}
-                </TouchableOpacity>
-              </View>
+                    <View style={styles.availableRow}>
+                      <Text style={styles.availableText}>Available</Text>
+                      <Text style={styles.availableAmount}>${cashBalance.toFixed(2)}</Text>
+                      <TouchableOpacity
+                        style={styles.maxButtonSmall}
+                        onPress={() => setWithdrawAmount(cashBalance.toFixed(2))}
+                      >
+                        <Text style={styles.maxButtonSmallText}>Max</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Compact Info */}
+                  <View style={styles.compactInfoRow}>
+                    <Ionicons name="information-circle-outline" size={16} color={COLORS.grey} />
+                    <Text style={styles.compactInfoText}>
+                      EUR via SEPA • Requires Coinbase account
+                    </Text>
+                  </View>
+
+                  {/* Continue Button */}
+                  <TouchableOpacity
+                    style={[
+                      styles.reviewButton,
+                      (!withdrawAmount || parseFloat(withdrawAmount) <= 0 || isCashingOut) && styles.reviewButtonDisabled
+                    ]}
+                    onPress={handleCashOutToBank}
+                    disabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0 || isCashingOut}
+                  >
+                    {isCashingOut ? (
+                      <ActivityIndicator color={COLORS.pureWhite} />
+                    ) : (
+                      <View style={styles.reviewButtonContent}>
+                        <Ionicons name="open-outline" size={18} color={COLORS.pureWhite} />
+                        <Text style={styles.reviewButtonText}>Continue to Coinbase</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </TouchableWithoutFeedback>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Offramp Transfer Confirmation Modal */}
+      <Modal
+        visible={showOfframpTransfer}
+        animationType="slide"
+        transparent={true}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <View style={{ width: 40 }} />
+              <Text style={styles.modalTitle}>Complete Cash Out</Text>
+              <TouchableOpacity
+                style={styles.modalHeaderButton}
+                onPress={() => setShowOfframpTransfer(false)}
+              >
+                <Ionicons name="close" size={20} color={COLORS.grey} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+              <View style={{
+                width: 72,
+                height: 72,
+                borderRadius: 36,
+                backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 16,
+              }}>
+                <Ionicons name="business-outline" size={36} color="#22C55E" />
+              </View>
+
+              <Text style={{ color: COLORS.black, fontSize: 24, fontWeight: '600' }}>
+                ${offrampParams?.amount} USDC
+              </Text>
+              <Text style={{ color: COLORS.grey, fontSize: 15, marginTop: 8, textAlign: 'center' }}>
+                Will be sent to Coinbase for{'\n'}conversion to EUR
+              </Text>
+            </View>
+
+            <View style={styles.compactInfoRow}>
+              <Ionicons name="flash-outline" size={16} color="#22C55E" />
+              <Text style={{ color: COLORS.grey, fontSize: 14 }}>
+                Gasless transaction • No fees
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.reviewButton,
+                isOfframpProcessing && styles.reviewButtonDisabled
+              ]}
+              onPress={handleOfframpTransfer}
+              disabled={isOfframpProcessing}
+            >
+              {isOfframpProcessing ? (
+                <ActivityIndicator color={COLORS.pureWhite} />
+              ) : (
+                <Text style={styles.reviewButtonText}>Confirm & Send</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
