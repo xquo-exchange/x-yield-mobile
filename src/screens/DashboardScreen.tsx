@@ -274,12 +274,16 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
   // Handle offramp deep link
   useOfframpDeepLink((params) => {
+    console.log('[Dashboard] Offramp callback received:', params);
+
     // Check if expired
     if (params.expiresAt && new Date(params.expiresAt) < new Date()) {
+      console.log('[Dashboard] Offramp expired');
       Alert.alert('Expired', 'The cash out window has expired (30 min). Please try again.');
       return;
     }
 
+    console.log('[Dashboard] Setting offramp params and showing modal');
     setOfframpParams({
       toAddress: params.toAddress,
       amount: params.amount,
