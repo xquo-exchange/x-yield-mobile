@@ -32,7 +32,6 @@ import {
   buildStrategyBatch,
   executeStrategyBatch,
   buildWithdrawBatch,
-  buildPartialWithdrawBatch,
   executeWithdrawBatch,
 } from '../services/strategyExecution';
 import {
@@ -145,46 +144,20 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const { apy: displayApy, refetch: refetchApy, getVaultApy } = useVaultApy();
   const [refreshing, setRefreshing] = useState(false);
   const [amount, setAmount] = useState('');
-  const [withdrawAmount, setWithdrawAmount] = useState('');
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [totalDeposited, setTotalDeposited] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>('add');
   const [isInputFocused, setIsInputFocused] = useState(false);
-  const [isWithdrawInputFocused, setIsWithdrawInputFocused] = useState(false);
 
   const hasPositions = positions.some(p => p.shares > BigInt(0));
   const savingsAmount = parseFloat(positionsTotal) || 0;
   const availableBalance = usdc ? parseFloat(usdc.balance) : 0;
 
-  // Calculate partial withdraw fee in real-time
-  const calculatePartialWithdrawFee = (withdrawAmountValue: number): { fee: number; youReceive: number } => {
-    if (withdrawAmountValue <= 0 || savingsAmount <= 0 || totalDeposited <= 0) {
-      return { fee: 0, youReceive: withdrawAmountValue };
-    }
-
-    // Proportion of withdrawal relative to total
-    const withdrawRatio = withdrawAmountValue / savingsAmount;
-
-    // Total yield
-    const totalYield = Math.max(0, savingsAmount - totalDeposited);
-
-    // Proportional yield for this withdrawal
-    const proportionalYield = totalYield * withdrawRatio;
-
-    // Fee on proportional profit (15%)
-    const fee = proportionalYield * 0.15;
-
-    return {
-      fee: fee,
-      youReceive: withdrawAmountValue - fee,
-    };
-  };
-
-  // Calculate fee for preview
-  const withdrawAmountNum = parseFloat(withdrawAmount) || 0;
-  const { fee: calculatedFee, youReceive } = calculatePartialWithdrawFee(withdrawAmountNum);
+  // Calculate earnings for display (fee is handled in handleWithdraw)
+  const totalYield = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
+  const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
 
   React.useEffect(() => {
     const loadDeposited = async () => {
@@ -215,25 +188,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   };
 
   const handleSetMaxAmount = () => {
-    if (activeTab === 'add' && usdc) {
+    if (usdc) {
       setAmount(usdc.balance);
-    } else if (activeTab === 'withdraw' && savingsAmount > 0) {
-      setAmount(savingsAmount.toFixed(2));
     }
-  };
-
-  const handleWithdrawAmountChange = (value: string) => {
-    const sanitized = value.replace(/[^0-9.]/g, '');
-    // Don't allow more than available balance
-    if (sanitized && parseFloat(sanitized) > savingsAmount) {
-      setWithdrawAmount(savingsAmount.toFixed(2));
-    } else {
-      setWithdrawAmount(sanitized);
-    }
-  };
-
-  const handleSetMaxWithdraw = () => {
-    setWithdrawAmount(savingsAmount.toFixed(2));
   };
 
   const handleDeposit = async () => {
@@ -387,96 +344,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     );
   };
 
-  const handlePartialWithdraw = async () => {
-    const amountToWithdraw = parseFloat(withdrawAmount);
-
-    if (!amountToWithdraw || amountToWithdraw <= 0) {
-      Alert.alert('Enter Amount', 'Please enter an amount to withdraw');
-      return;
-    }
-
-    if (amountToWithdraw > savingsAmount) {
-      Alert.alert('Insufficient Balance', `You only have $${savingsAmount.toFixed(2)} in savings`);
-      return;
-    }
-
-    if (!smartWalletClient || !displayAddress) {
-      Alert.alert('Error', 'Please log in first.');
-      return;
-    }
-
-    // If withdrawing all (or nearly all), use full withdraw
-    if (amountToWithdraw >= savingsAmount * 0.99) {
-      handleWithdraw();
-      return;
-    }
-
-    const batch = buildPartialWithdrawBatch(
-      positions,
-      displayAddress as `0x${string}`,
-      amountToWithdraw,
-      totalDeposited
-    );
-
-    let confirmMessage: string;
-    if (batch.hasProfits && parseFloat(batch.feeAmount) > 0) {
-      confirmMessage = [
-        `Withdrawing: $${parseFloat(batch.currentValue).toFixed(2)}`,
-        ``,
-        `Performance fee (15% of profit): $${parseFloat(batch.feeAmount).toFixed(2)}`,
-        ``,
-        `You'll receive: $${parseFloat(batch.userReceives).toFixed(2)}`,
-      ].join('\n');
-    } else {
-      confirmMessage = `Withdraw $${parseFloat(batch.currentValue).toFixed(2)}?\n\nNo fee applies.`;
-    }
-
-    Alert.alert(
-      'Confirm Withdrawal',
-      confirmMessage,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm',
-          onPress: async () => {
-            setIsWithdrawing(true);
-
-            try {
-              const txHash = await executeWithdrawBatch(smartWalletClient, batch);
-
-              // Update deposit tracker proportionally
-              await recordWithdrawal(displayAddress, amountToWithdraw, savingsAmount);
-
-              setWithdrawAmount('');
-              refetchBalances();
-              refetchPositions();
-
-              // Reload deposited amount
-              const newDeposited = await getTotalDeposited(displayAddress);
-              setTotalDeposited(newDeposited);
-
-              Alert.alert(
-                'Success',
-                `Withdrew $${parseFloat(batch.userReceives).toFixed(2)}`,
-                [
-                  { text: 'OK' },
-                  {
-                    text: 'View Details',
-                    onPress: () => Linking.openURL(`https://basescan.org/tx/${txHash}`),
-                  },
-                ]
-              );
-            } catch (error) {
-              Alert.alert('Failed', (error as Error)?.message || 'Please try again');
-            } finally {
-              setIsWithdrawing(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
   // Calculate earnings
   const totalEarned = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
 
@@ -553,7 +420,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         <View style={styles.tabContainer}>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'add' && styles.tabActive]}
-            onPress={() => { setActiveTab('add'); setAmount(''); setWithdrawAmount(''); }}
+            onPress={() => { setActiveTab('add'); setAmount(''); }}
           >
             <Ionicons
               name="add-circle-outline"
@@ -566,7 +433,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
-            onPress={() => { setActiveTab('withdraw'); setAmount(''); setWithdrawAmount(''); }}
+            onPress={() => { setActiveTab('withdraw'); setAmount(''); }}
           >
             <Ionicons
               name="arrow-down-circle-outline"
@@ -622,7 +489,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
               </TouchableOpacity>
             </>
           ) : (
-            // Withdraw Tab
+            // Withdraw Tab - Full withdrawal only
             <>
               {!hasPositions ? (
                 <View style={styles.noFundsState}>
@@ -634,65 +501,49 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                 </View>
               ) : (
                 <>
-                  <Text style={styles.inputLabel}>Amount to withdraw</Text>
-                  <View style={styles.inputRow}>
-                    <View style={[styles.currencyPrefix, isWithdrawInputFocused && styles.inputFocused]}>
-                      <Text style={styles.currencyText}>$</Text>
-                    </View>
-                    <TextInput
-                      style={[styles.input, isWithdrawInputFocused && styles.inputFocused]}
-                      value={withdrawAmount}
-                      onChangeText={handleWithdrawAmountChange}
-                      placeholder="0.00"
-                      placeholderTextColor={COLORS.grey}
-                      keyboardType="decimal-pad"
-                      onFocus={() => setIsWithdrawInputFocused(true)}
-                      onBlur={() => setIsWithdrawInputFocused(false)}
-                    />
-                    <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxWithdraw}>
-                      <Text style={styles.maxButtonText}>MAX</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <Text style={styles.withdrawTitle}>Withdraw all funds</Text>
 
-                  {/* Withdraw Preview */}
-                  {withdrawAmountNum > 0 && (
-                    <View style={styles.withdrawPreview}>
-                      <View style={styles.previewRow}>
-                        <Text style={styles.previewLabel}>Withdrawing</Text>
-                        <Text style={styles.previewValue}>${withdrawAmountNum.toFixed(2)}</Text>
-                      </View>
-                      {calculatedFee > 0.001 && (
-                        <View style={styles.previewRow}>
-                          <Text style={styles.previewLabel}>Performance fee (15% of profit)</Text>
-                          <Text style={styles.previewValue}>-${calculatedFee.toFixed(2)}</Text>
-                        </View>
-                      )}
-                      <View style={[styles.previewRow, styles.previewRowTotal]}>
-                        <Text style={styles.previewLabelBold}>You receive</Text>
-                        <Text style={styles.previewValueBold}>${youReceive.toFixed(2)}</Text>
-                      </View>
+                  {/* Withdrawal Summary */}
+                  <View style={styles.withdrawPreview}>
+                    <View style={styles.previewRow}>
+                      <Text style={styles.previewLabel}>Account balance</Text>
+                      <Text style={styles.previewValue}>${savingsAmount.toFixed(2)}</Text>
                     </View>
-                  )}
+                    {totalYield > 0.001 && (
+                      <>
+                        <View style={styles.previewRow}>
+                          <Text style={styles.previewLabel}>Total deposited</Text>
+                          <Text style={styles.previewValue}>${totalDeposited.toFixed(2)}</Text>
+                        </View>
+                        <View style={styles.previewRow}>
+                          <Text style={styles.previewLabel}>Earnings</Text>
+                          <Text style={[styles.previewValue, { color: COLORS.success }]}>+${totalYield.toFixed(2)}</Text>
+                        </View>
+                      </>
+                    )}
+                    <View style={[styles.previewRow, styles.previewRowTotal]}>
+                      <Text style={styles.previewLabelBold}>You receive</Text>
+                      <Text style={styles.previewValueBold}>${youReceive.toFixed(2)}</Text>
+                    </View>
+                  </View>
 
                   <TouchableOpacity
                     style={[
                       styles.actionButton,
-                      (!withdrawAmount || withdrawAmountNum <= 0 || isWithdrawing) && styles.actionButtonDisabled,
+                      isWithdrawing && styles.actionButtonDisabled,
                     ]}
-                    onPress={handlePartialWithdraw}
-                    disabled={!withdrawAmount || withdrawAmountNum <= 0 || isWithdrawing}
+                    onPress={handleWithdraw}
+                    disabled={isWithdrawing}
                   >
                     {isWithdrawing ? (
                       <ActivityIndicator color={COLORS.pureWhite} />
                     ) : (
-                      <Text style={styles.actionButtonText}>
-                        {withdrawAmountNum > 0 ? `Withdraw $${withdrawAmountNum.toFixed(2)}` : 'Withdraw'}
-                      </Text>
+                      <Text style={styles.actionButtonText}>Withdraw All</Text>
                     )}
                   </TouchableOpacity>
 
                   <Text style={styles.withdrawNote}>
-                    Funds arrive instantly. No withdrawal fees.
+                    Funds arrive instantly in your Cash account.
                   </Text>
                 </>
               )}
@@ -1085,6 +936,13 @@ const styles = StyleSheet.create({
   },
   withdrawInfo: {
     fontSize: 15,
+    color: COLORS.black,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  withdrawTitle: {
+    fontSize: 18,
+    fontWeight: '600',
     color: COLORS.black,
     textAlign: 'center',
     marginBottom: 20,
