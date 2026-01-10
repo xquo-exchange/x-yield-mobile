@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, View, Text, StyleSheet } from 'react-native';
+import { Platform, View, Text, StyleSheet, Image } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PrivyProvider } from '@privy-io/expo';
 import { SmartWalletsProvider } from '@privy-io/expo/smart-wallets';
@@ -27,9 +27,11 @@ const base = {
 function WebNotSupported() {
   return (
     <View style={styles.container}>
-      <View style={styles.logoCircle}>
-        <Text style={styles.logoText}>X</Text>
-      </View>
+      <Image
+        source={require('./assets/logo_full.png')}
+        style={styles.logo}
+        resizeMode="contain"
+      />
       <Text style={styles.title}>X-Yield Mobile</Text>
       <Text style={styles.subtitle}>
         This app requires a native mobile environment.
@@ -76,21 +78,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  logoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#1a1a2e',
-    borderWidth: 2,
-    borderColor: '#6366f1',
-    justifyContent: 'center',
-    alignItems: 'center',
+  logo: {
+    width: 150,
+    height: 50,
     marginBottom: 24,
-  },
-  logoText: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#6366f1',
   },
   title: {
     fontSize: 28,

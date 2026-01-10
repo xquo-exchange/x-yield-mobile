@@ -7,6 +7,7 @@ import {
   Dimensions,
   FlatList,
   Animated,
+  Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -105,12 +106,16 @@ const GlowingIconWrapper = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-// Slide 1: Glowing Orb (Dollar/Savings icon)
+// Slide 1: Logo Image
 const GlowingOrb = () => {
   return (
-    <GlowingIconWrapper>
-      <Ionicons name="wallet-outline" size={56} color={COLORS.pureWhite} />
-    </GlowingIconWrapper>
+    <View style={styles.logoImageContainer}>
+      <Image
+        source={require('../../assets/logo_full.png')}
+        style={styles.logoImage}
+        resizeMode="contain"
+      />
+    </View>
   );
 };
 
@@ -250,6 +255,16 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  logoImageContainer: {
+    width: 160,
+    height: 160,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoImage: {
+    width: 150,
+    height: 50,
   },
   flatList: {
     flex: 1,

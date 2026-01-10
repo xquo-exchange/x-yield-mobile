@@ -17,6 +17,7 @@ import {
   TextInput,
   Keyboard,
   TouchableWithoutFeedback,
+  Image,
 } from 'react-native';
 import { encodeFunctionData, parseUnits } from 'viem';
 import { StatusBar } from 'expo-status-bar';
@@ -589,12 +590,11 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.logoContainer}>
-            <View style={styles.logoIcon}>
-              <Ionicons name="arrow-up" size={16} color={COLORS.pureWhite} />
-            </View>
-            <Text style={styles.logoText}>unflat</Text>
-          </View>
+          <Image
+            source={require('../../assets/logo_full.png')}
+            style={styles.headerLogo}
+            resizeMode="contain"
+          />
           <TouchableOpacity style={styles.settingsButton} onPress={handleSettings}>
             <Ionicons name="settings-outline" size={22} color={COLORS.grey} />
           </TouchableOpacity>
@@ -1200,23 +1200,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 40,
   },
-  logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  logoIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.primary,
+  headerLogo: {
+    width: 100,
+    height: 32,
   },
   settingsButton: {
     width: 40,

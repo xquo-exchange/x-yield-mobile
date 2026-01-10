@@ -22,6 +22,7 @@
     "expo-application": "~7.0.8",
     "expo-clipboard": "^8.0.8",
     "expo-crypto": "~15.0.8",
+    "expo-dev-client": "~6.0.20",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.11",
     "expo-secure-store": "~15.0.8",
