@@ -94,13 +94,14 @@ async function fetchFromBackend(walletAddress: string): Promise<DepositRecord | 
 
 /**
  * Record deposit to backend
+ * @param txHash - Transaction hash for idempotency (prevents duplicate deposits)
  */
-async function recordDepositToBackend(walletAddress: string, amount: number): Promise<boolean> {
+async function recordDepositToBackend(walletAddress: string, amount: number, txHash?: string): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/deposits/${walletAddress.toLowerCase()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount }),
+      body: JSON.stringify({ amount, txHash }),
     });
     if (!response.ok) {
       console.error('[DepositTracker] Backend deposit failed:', response.status);
@@ -202,10 +203,12 @@ export async function getTotalDeposited(walletAddress: string): Promise<number> 
  * Record a new deposit
  * Adds to the user's total deposited amount
  * Syncs to backend and local storage
+ * @param txHash - Transaction hash for idempotency (prevents duplicate deposits)
  */
 export async function recordDeposit(
   walletAddress: string,
-  amount: number
+  amount: number,
+  txHash?: string
 ): Promise<void> {
   const deposits = await getAllDeposits();
   const address = walletAddress.toLowerCase();
@@ -216,6 +219,7 @@ export async function recordDeposit(
 
   debugLog('[DepositTracker] ══════════════════════════════════════════════════════');
   debugLog('[DepositTracker] Recording deposit:', amount);
+  debugLog('[DepositTracker] Transaction hash:', txHash || 'N/A');
   debugLog('[DepositTracker] Previous total:', previousTotal);
   debugLog('[DepositTracker] New total:', newTotal);
   debugLog('[DepositTracker] ══════════════════════════════════════════════════════');
@@ -228,7 +232,7 @@ export async function recordDeposit(
   await saveDeposits(deposits);
 
   // Sync to backend (fire and forget, but log result)
-  recordDepositToBackend(address, amount).then((success) => {
+  recordDepositToBackend(address, amount, txHash).then((success) => {
     if (success) {
       debugLog('[DepositTracker] Backend sync complete');
     } else {

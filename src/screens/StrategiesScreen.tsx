@@ -239,7 +239,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       const txHash = await executeStrategyBatch(smartWalletClient, batch);
       const duration = timer.stop();
 
-      await recordDeposit(displayAddress, depositAmount);
+      await recordDeposit(displayAddress, depositAmount, txHash);
 
       const newTotalDeposited = await getTotalDeposited(displayAddress);
       setTotalDeposited(newTotalDeposited);
