@@ -29,6 +29,8 @@ function debugLog(message: string, ...args: unknown[]): void {
 let mixpanel: Mixpanel | null = null;
 let isInitialized = false;
 let uxcamInitialized = false;
+let initializationError: string | null = null;
+let initializationAttempted = false;
 
 // Session tracking
 let sessionId: string = '';
@@ -50,12 +52,29 @@ function generateSessionId(): string {
  * Initialize Mixpanel and UXCam
  */
 export async function initializeAnalytics(): Promise<void> {
-  if (isInitialized) return;
+  if (isInitialized) {
+    // Production log: already initialized
+    console.log('[Analytics] Already initialized, skipping');
+    return;
+  }
+
+  if (initializationAttempted) {
+    // Production log: initialization already attempted but failed
+    console.warn('[Analytics] Init already attempted, error was:', initializationError);
+    return;
+  }
+
+  initializationAttempted = true;
+  console.log('[Analytics] Starting initialization...'); // Production log
 
   try {
     // Initialize Mixpanel
+    console.log('[Analytics] Creating Mixpanel instance with token:', MIXPANEL_TOKEN.substring(0, 8) + '...');
     mixpanel = new Mixpanel(MIXPANEL_TOKEN, true);
+
+    console.log('[Analytics] Calling mixpanel.init()...');
     await mixpanel.init();
+    console.log('[Analytics] mixpanel.init() completed');
 
     isInitialized = true;
     sessionId = generateSessionId();
@@ -72,15 +91,19 @@ export async function initializeAnalytics(): Promise<void> {
       current_balance: 0,
     });
 
-    debugLog('[Analytics] Mixpanel initialized');
+    console.log('[Analytics] Mixpanel initialized successfully, session:', sessionId); // Production log
 
     // Initialize UXCam
     await initializeUXCam();
 
     // Track session start
     trackSessionStarted();
+
+    console.log('[Analytics] Full initialization complete'); // Production log
   } catch (error) {
-    console.error('[Analytics] Failed to initialize Mixpanel:', error);
+    initializationError = (error as Error)?.message || 'Unknown error';
+    console.error('[Analytics] FAILED to initialize Mixpanel:', error);
+    console.error('[Analytics] Error details:', JSON.stringify(error, null, 2));
   }
 }
 
@@ -159,7 +182,11 @@ const UXCAM_KEY_EVENTS = [
  * Track any event with properties
  */
 export function track(eventName: string, properties?: Record<string, unknown>): void {
-  if (!isAnalyticsReady()) return;
+  if (!isAnalyticsReady()) {
+    // Production warning: analytics not ready
+    console.warn(`[Analytics] DROPPED event "${eventName}" - not ready. initialized=${isInitialized}, mixpanel=${mixpanel !== null}, error=${initializationError}`);
+    return;
+  }
 
   actionsCount++;
   lastActiveTime = Date.now();
@@ -169,7 +196,15 @@ export function track(eventName: string, properties?: Record<string, unknown>): 
     timestamp: new Date().toISOString(),
   };
 
-  mixpanel!.track(eventName, eventProps);
+  try {
+    mixpanel!.track(eventName, eventProps);
+    // Production log for important events
+    if (UXCAM_KEY_EVENTS.includes(eventName)) {
+      console.log(`[Analytics] Tracked key event: ${eventName}`);
+    }
+  } catch (error) {
+    console.error(`[Analytics] Failed to track "${eventName}":`, error);
+  }
 
   // Also log key events to UXCam for session context
   if (uxcamInitialized && UXCAM_KEY_EVENTS.includes(eventName)) {
