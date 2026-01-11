@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "unflat",
-    "slug": "unflat-mobile",
+    "slug": "x-yield-mobile",
     "version": "1.0.0",
     "scheme": "unflat",
     "orientation": "portrait",
@@ -15,11 +15,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.unflat.mobile",
+      "bundleIdentifier": "com.xyield.mobile",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "25"
+      "buildNumber": "26"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,7 +28,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.unflat.mobile",
+      "package": "com.xyield.mobile",
       "versionCode": 5
     },
     "web": {
