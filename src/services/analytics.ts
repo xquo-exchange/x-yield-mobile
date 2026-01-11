@@ -15,6 +15,9 @@ const DEBUG = __DEV__ ?? false;
 // Mixpanel Project Token
 const MIXPANEL_TOKEN = 'b8d711cabf77f254b965383fa15f7302';
 
+// Mixpanel EU Server (project is configured for EU data residency)
+const MIXPANEL_SERVER_URL = 'https://api-eu.mixpanel.com';
+
 // UXCam App Key (EU region)
 const UXCAM_APP_KEY = 'ls3gxyg4a8lzkdj-eu';
 
@@ -65,16 +68,16 @@ export async function initializeAnalytics(): Promise<void> {
   }
 
   initializationAttempted = true;
-  console.log('[Analytics] Starting initialization...'); // Production log
+  console.log('[Analytics] Starting initialization...');
 
   try {
-    // Initialize Mixpanel
-    console.log('[Analytics] Creating Mixpanel instance with token:', MIXPANEL_TOKEN.substring(0, 8) + '...');
+    // Initialize Mixpanel with EU server
+    console.log('[Analytics] Creating Mixpanel instance...');
     mixpanel = new Mixpanel(MIXPANEL_TOKEN, true);
 
-    console.log('[Analytics] Calling mixpanel.init()...');
-    await mixpanel.init();
-    console.log('[Analytics] mixpanel.init() completed');
+    console.log('[Analytics] Calling mixpanel.init() with EU server...');
+    await mixpanel.init(false, {}, MIXPANEL_SERVER_URL);
+    console.log('[Analytics] Mixpanel initialized with EU server');
 
     isInitialized = true;
     sessionId = generateSessionId();
@@ -183,8 +186,7 @@ const UXCAM_KEY_EVENTS = [
  */
 export function track(eventName: string, properties?: Record<string, unknown>): void {
   if (!isAnalyticsReady()) {
-    // Production warning: analytics not ready
-    console.warn(`[Analytics] DROPPED event "${eventName}" - not ready. initialized=${isInitialized}, mixpanel=${mixpanel !== null}, error=${initializationError}`);
+    console.warn(`[Analytics] DROPPED event "${eventName}" - not ready`);
     return;
   }
 
@@ -198,9 +200,10 @@ export function track(eventName: string, properties?: Record<string, unknown>): 
 
   try {
     mixpanel!.track(eventName, eventProps);
-    // Production log for important events
+
+    // Log key events for debugging
     if (UXCAM_KEY_EVENTS.includes(eventName)) {
-      console.log(`[Analytics] Tracked key event: ${eventName}`);
+      console.log(`[Analytics] Tracked: ${eventName}`);
     }
   } catch (error) {
     console.error(`[Analytics] Failed to track "${eventName}":`, error);
