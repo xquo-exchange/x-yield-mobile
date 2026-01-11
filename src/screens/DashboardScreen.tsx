@@ -36,6 +36,8 @@ import { getTotalDeposited } from '../services/depositTracker';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
 import { useDeepLink } from '../contexts/DeepLinkContext';
+import * as Analytics from '../services/analytics';
+import SensitiveView from '../components/SensitiveView';
 
 // Color Palette - PayPal/Revolut Style
 const COLORS = {
@@ -226,6 +228,12 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   // Pulse animation for earning indicator
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
 
+  // Analytics: Track screen view on mount
+  React.useEffect(() => {
+    Analytics.trackScreenView('Dashboard');
+    return () => Analytics.trackScreenExit('Dashboard');
+  }, []);
+
   React.useEffect(() => {
     const pulse = Animated.loop(
       Animated.sequence([
@@ -278,17 +286,13 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
   React.useEffect(() => {
     if (pendingOfframp) {
-      console.log('[Dashboard] Pending offramp detected:', pendingOfframp);
-
       // Check if expired
       if (pendingOfframp.expiresAt && new Date(pendingOfframp.expiresAt) < new Date()) {
-        console.log('[Dashboard] Offramp expired');
         Alert.alert('Expired', 'The cash out window has expired (30 min). Please try again.');
         clearPendingOfframp();
         return;
       }
 
-      console.log('[Dashboard] Setting offramp params and showing modal');
       setOfframpParams({
         toAddress: pendingOfframp.toAddress,
         amount: pendingOfframp.amount,
@@ -337,8 +341,9 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       refetchBalances();
 
     } catch (error) {
-      console.error('[Offramp Transfer] Error:', error);
-      Alert.alert('Transfer Failed', (error as Error)?.message || 'Something went wrong');
+      const errorMessage = (error as Error)?.message || 'Unknown error';
+      Analytics.trackErrorDisplayed('offramp_transfer', errorMessage, 'Dashboard');
+      Alert.alert('Transfer Failed', errorMessage || 'Something went wrong');
     } finally {
       setIsOfframpProcessing(false);
     }
@@ -370,11 +375,15 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
+    const timer = Analytics.createTimer();
     await Promise.all([refetchBalances(), refetchPositions(), refetchApy()]);
+    Analytics.trackBalanceFetchDuration(timer.stop());
+    Analytics.trackBalanceRefreshed(cashBalance, savingsBalance, totalEarned);
     setRefreshing(false);
-  }, [refetchBalances, refetchPositions, refetchApy]);
+  }, [refetchBalances, refetchPositions, refetchApy, cashBalance, savingsBalance, totalEarned]);
 
   const handleSettings = () => {
+    Analytics.trackButtonTap('Settings', 'Dashboard');
     Alert.alert(
       'Settings',
       'What would you like to do?',
@@ -384,6 +393,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
+            Analytics.trackLogout();
             await logout();
             navigation.replace('Welcome');
           },
@@ -395,6 +405,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const handleCopyAddress = async () => {
     if (displayAddress) {
       await Clipboard.setStringAsync(displayAddress);
+      Analytics.trackAddressCopied('Dashboard');
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -404,8 +415,12 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     if (isBuyingUsdc) return;
     if (!displayAddress) {
       Alert.alert('Error', 'No wallet address available');
+      Analytics.trackOnrampError('No wallet address');
       return;
     }
+
+    Analytics.trackOnrampButtonTapped();
+    Analytics.trackOnrampProviderOpened('Coinbase');
 
     const urlToOpen = prefetchedOnrampUrl;
     setShowFundingModal(false);
@@ -420,6 +435,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         await openCoinbaseOnramp(displayAddress);
       }
     } catch (error) {
+      Analytics.trackOnrampError((error as Error)?.message || 'Unknown error');
       Alert.alert('Error', 'Could not open payment provider');
     } finally {
       setIsBuyingUsdc(false);
@@ -427,11 +443,13 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   };
 
   const closeFundingModal = () => {
+    Analytics.trackModalClosed('AddFunds', 'button');
     setShowFundingModal(false);
     setFundingView('options');
   };
 
   const closeWithdrawModal = () => {
+    Analytics.trackModalClosed('Withdraw', 'button');
     setShowWithdrawModal(false);
     setWithdrawAddress('');
     setWithdrawAmount('');
@@ -550,12 +568,17 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       return;
     }
 
+    Analytics.trackOfframpButtonTapped();
+    Analytics.trackOfframpAmountEntered(withdrawAmount);
+    Analytics.trackOfframpProviderOpened('Coinbase');
+
     setIsCashingOut(true);
 
     try {
       const result = await openCoinbaseOfframp(displayAddress, withdrawAmount);
 
       if (!result.success) {
+        Analytics.trackOfframpError(result.error || 'Unknown error');
         Alert.alert(
           'Unable to Connect',
           result.error || 'Could not connect to Coinbase. Please try again later.',
@@ -571,6 +594,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         }, 2000);
       }
     } catch (error) {
+      Analytics.trackOfframpError((error as Error)?.message || 'Unknown error');
       Alert.alert('Error', (error as Error)?.message || 'Something went wrong');
     } finally {
       setIsCashingOut(false);
@@ -607,11 +631,13 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
             <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 20 }} />
           ) : (
             <>
-              <AnimatedBalance
-                balance={totalBalance}
-                apy={parseFloat(displayApy)}
-                isEarning={savingsBalance > 0}
-              />
+              <SensitiveView>
+                <AnimatedBalance
+                  balance={totalBalance}
+                  apy={parseFloat(displayApy)}
+                  isEarning={savingsBalance > 0}
+                />
+              </SensitiveView>
               <Text style={styles.balanceSubtext}>Across 2 accounts</Text>
             </>
           )}
@@ -629,7 +655,9 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                 <Text style={styles.cardSubtitle}>Available to use or invest</Text>
               </View>
             </View>
-            <Text style={styles.cashBalance}>${cashBalance.toFixed(2)}</Text>
+            <SensitiveView>
+              <Text style={styles.cashBalance}>${cashBalance.toFixed(2)}</Text>
+            </SensitiveView>
             <View style={styles.cashButtonsRow}>
               <TouchableOpacity
                 style={[styles.cashButton, styles.addFundsButtonStyle]}
@@ -674,26 +702,30 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
               {savingsBalance > 0 ? (
                 <>
-                  <AnimatedBalance
-                    balance={savingsBalance}
-                    apy={parseFloat(displayApy)}
-                    isEarning={true}
-                    size="medium"
-                  />
-                  <View style={styles.savingsBreakdown}>
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownLabel}>Deposited</Text>
-                      <Text style={styles.breakdownValue}>${totalDeposited.toFixed(2)}</Text>
+                  <SensitiveView>
+                    <AnimatedBalance
+                      balance={savingsBalance}
+                      apy={parseFloat(displayApy)}
+                      isEarning={true}
+                      size="medium"
+                    />
+                  </SensitiveView>
+                  <SensitiveView>
+                    <View style={styles.savingsBreakdown}>
+                      <View style={styles.breakdownRow}>
+                        <Text style={styles.breakdownLabel}>Deposited</Text>
+                        <Text style={styles.breakdownValue}>${totalDeposited.toFixed(2)}</Text>
+                      </View>
+                      <View style={styles.breakdownRow}>
+                        <Text style={styles.breakdownLabel}>Earned</Text>
+                        <AnimatedEarned
+                          currentBalance={savingsBalance}
+                          depositedAmount={totalDeposited}
+                          apy={parseFloat(displayApy)}
+                        />
+                      </View>
                     </View>
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownLabel}>Earned</Text>
-                      <AnimatedEarned
-                        currentBalance={savingsBalance}
-                        depositedAmount={totalDeposited}
-                        apy={parseFloat(displayApy)}
-                      />
-                    </View>
-                  </View>
+                  </SensitiveView>
                   <View style={styles.savingsButtons}>
                     <TouchableOpacity
                       style={styles.startEarningButton}
@@ -845,11 +877,13 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
                 <Text style={styles.receiveInstructions}>Send USDC on Base network</Text>
 
-                <View style={styles.addressBox}>
-                  <Text style={styles.addressText} numberOfLines={1} ellipsizeMode="middle">
-                    {displayAddress || 'No address'}
-                  </Text>
-                </View>
+                <SensitiveView>
+                  <View style={styles.addressBox}>
+                    <Text style={styles.addressText} numberOfLines={1} ellipsizeMode="middle">
+                      {displayAddress || 'No address'}
+                    </Text>
+                  </View>
+                </SensitiveView>
 
                 <TouchableOpacity
                   style={[styles.copyButton, copied && styles.copyButtonCopied]}

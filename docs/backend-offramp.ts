@@ -6,7 +6,7 @@
  * Uses same CDP API keys as onramp.
  *
  * This file documents the backend endpoint that needs to be created
- * in x-yield-api for the offramp feature to work.
+ * in the backend API for the offramp feature to work.
  */
 
 // =============================================================================
@@ -164,7 +164,7 @@ export async function POST(request: Request) {
 // =============================================================================
 
 /**
- * Required in x-yield-api .env:
+ * Required in backend API .env:
  *
  * CDP_API_KEY_NAME=your_cdp_api_key_name
  * CDP_API_KEY_PRIVATE_KEY="-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----"

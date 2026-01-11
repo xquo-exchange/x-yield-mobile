@@ -1,5 +1,5 @@
 {
-  "name": "x-yield-mobile",
+  "name": "unflat-mobile",
   "version": "1.0.0",
   "main": "entrypoint.js",
   "scripts": {
@@ -29,6 +29,7 @@
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~15.0.10",
     "fast-text-encoding": "^1.0.6",
+    "mixpanel-react-native": "^3.1.3",
     "permissionless": "^0.2.57",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -41,6 +42,7 @@
     "react-native-safe-area-context": "^5.6.2",
     "react-native-screens": "^4.16.0",
     "react-native-svg": "^15.12.1",
+    "react-native-ux-cam": "^6.0.9",
     "react-native-web": "^0.21.0",
     "react-native-webview": "13.15.0",
     "stream-browserify": "^3.0.0",

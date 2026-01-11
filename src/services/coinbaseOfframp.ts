@@ -15,6 +15,12 @@
 
 import { Linking } from 'react-native';
 
+// Debug mode - controlled by __DEV__
+const DEBUG = __DEV__ ?? false;
+const debugLog = (message: string, ...args: unknown[]) => {
+  if (DEBUG) console.log(message, ...args);
+};
+
 const API_BASE_URL = 'https://x-yield-api.vercel.app';
 
 interface OfframpQuote {
@@ -44,7 +50,7 @@ export async function getOfframpSessionUrl(
 ): Promise<OfframpSessionResponse | null> {
   try {
     const startTime = Date.now();
-    console.log('[Coinbase Offramp] Requesting session for:', walletAddress, 'amount:', amount);
+    debugLog('[Coinbase Offramp] Requesting session for:', walletAddress, 'amount:', amount);
 
     const response = await fetch(`${API_BASE_URL}/api/offramp/session`, {
       method: 'POST',
@@ -59,7 +65,7 @@ export async function getOfframpSessionUrl(
     });
 
     const fetchTime = Date.now() - startTime;
-    console.log(`[Coinbase Offramp] API response received in ${fetchTime}ms`);
+    debugLog(`[Coinbase Offramp] API response received in ${fetchTime}ms`);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -69,10 +75,10 @@ export async function getOfframpSessionUrl(
 
     const data: OfframpSessionResponse = await response.json();
     const totalTime = Date.now() - startTime;
-    console.log(`[Coinbase Offramp] Total time: ${totalTime}ms`);
+    debugLog(`[Coinbase Offramp] Total time: ${totalTime}ms`);
 
     if (data.url) {
-      console.log('[Coinbase Offramp] Got offramp URL');
+      debugLog('[Coinbase Offramp] Got offramp URL');
       return data;
     }
 
@@ -104,7 +110,7 @@ export async function openCoinbaseOfframp(
   country: string = 'IT'
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log('[Coinbase Offramp] Opening offramp flow');
+    debugLog('[Coinbase Offramp] Opening offramp flow');
 
     const result = await getOfframpSessionUrl(walletAddress, amount, country);
 
@@ -113,7 +119,7 @@ export async function openCoinbaseOfframp(
     }
 
     if (result?.url) {
-      console.log('[Coinbase Offramp] Opening URL in browser');
+      debugLog('[Coinbase Offramp] Opening URL in browser');
 
       await Linking.openURL(result.url);
 

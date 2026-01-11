@@ -6,6 +6,7 @@ import { SmartWalletsProvider } from '@privy-io/expo/smart-wallets';
 import { PrivyElements } from '@privy-io/expo/ui';
 import AppNavigator from './src/navigation/AppNavigator';
 import { DeepLinkProvider } from './src/contexts/DeepLinkContext';
+import { AnalyticsProvider } from './src/contexts/AnalyticsContext';
 
 // Define Base chain for Privy (matches viem Chain type)
 const base = {
@@ -32,7 +33,7 @@ function WebNotSupported() {
         style={styles.logo}
         resizeMode="contain"
       />
-      <Text style={styles.title}>X-Yield Mobile</Text>
+      <Text style={styles.title}>Unflat</Text>
       <Text style={styles.subtitle}>
         This app requires a native mobile environment.
       </Text>
@@ -47,25 +48,27 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <DeepLinkProvider>
-        <PrivyProvider
-          appId="cmk1awjuj002ri60dlbm7ot7y"
-          clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
-          supportedChains={[base]}
-          config={{
-            embedded: {
-              ethereum: {
-                createOnLogin: 'users-without-wallets',
+      <AnalyticsProvider>
+        <DeepLinkProvider>
+          <PrivyProvider
+            appId="cmk1awjuj002ri60dlbm7ot7y"
+            clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
+            supportedChains={[base]}
+            config={{
+              embedded: {
+                ethereum: {
+                  createOnLogin: 'users-without-wallets',
+                },
               },
-            },
-          }}
-        >
-          <SmartWalletsProvider>
-            <AppNavigator />
-            <PrivyElements />
-          </SmartWalletsProvider>
-        </PrivyProvider>
-      </DeepLinkProvider>
+            }}
+          >
+            <SmartWalletsProvider>
+              <AppNavigator />
+              <PrivyElements />
+            </SmartWalletsProvider>
+          </PrivyProvider>
+        </DeepLinkProvider>
+      </AnalyticsProvider>
     </SafeAreaProvider>
   );
 }

@@ -1,10 +1,10 @@
 // Base Chain Configuration
 export const BASE_CHAIN_ID = 8453;
 
-// X-Yield Fee Configuration
-export const XYIELD_FEE_PERCENT = 15; // 15% fee on yield only
-export const XYIELD_TREASURY_ADDRESS = '0xC33F9253E59eaC5713bb6e8C2Cb8Ecb9567FF31d' as const;
-export const XYIELD_MIN_FEE_USDC = 0.000001; // Minimum 1 raw USDC unit (gas is sponsored)
+// Unflat Fee Configuration
+export const UNFLAT_FEE_PERCENT = 15; // 15% fee on yield only
+export const UNFLAT_TREASURY_ADDRESS = '0xC33F9253E59eaC5713bb6e8C2Cb8Ecb9567FF31d' as const;
+export const UNFLAT_MIN_FEE_USDC = 0.000001; // Minimum 1 raw USDC unit (gas is sponsored)
 
 // Public RPCs for reading blockchain data (balances, positions, etc.)
 // Privy handles transaction submission via Pimlico paymaster separately

@@ -3,6 +3,12 @@
  * Fetches real-time APY data from Morpho vaults via their GraphQL API
  */
 
+// Debug mode - controlled by __DEV__
+const DEBUG = __DEV__ ?? false;
+const debugLog = (message: string, ...args: unknown[]) => {
+  if (DEBUG) console.log(message, ...args);
+};
+
 const MORPHO_API_URL = 'https://api.morpho.org/graphql';
 const BASE_CHAIN_ID = 8453;
 
@@ -136,7 +142,7 @@ export async function fetchVaultApys(): Promise<ApyResult> {
 
     // If no results from our specific vaults, get market rates
     if (vaultItems.length === 0) {
-      console.log('[MorphoAPI] Our vaults not indexed, fetching USDC market rates...');
+      debugLog('[MorphoAPI] Our vaults not indexed, fetching USDC market rates...');
       const marketResponse = await fetch(MORPHO_API_URL, {
         method: 'POST',
         headers: {
@@ -157,7 +163,7 @@ export async function fetchVaultApys(): Promise<ApyResult> {
           return apy > 0.01; // More than 1% APY
         });
 
-        console.log('[MorphoAPI] Found', vaultItems.length, 'active USDC vaults');
+        debugLog('[MorphoAPI] Found', vaultItems.length, 'active USDC vaults');
       }
     }
 
@@ -196,7 +202,7 @@ export async function fetchVaultApys(): Promise<ApyResult> {
       weightedApy = avgApy;
       weightedNetApy = avgNetApy;
 
-      console.log('[MorphoAPI] Using market average from top 5 vaults:', {
+      debugLog('[MorphoAPI] Using market average from top 5 vaults:', {
         avgApy: avgApy.toFixed(2),
         topVaults: topVaults.map(v => `${v.name}: ${v.avgApy.toFixed(1)}%`),
       });
@@ -205,7 +211,7 @@ export async function fetchVaultApys(): Promise<ApyResult> {
       weightedNetApy = weightedNetApy / totalWeight;
     }
 
-    console.log('[MorphoAPI] Final APY:', {
+    debugLog('[MorphoAPI] Final APY:', {
       vaultsFound: vaults.length,
       weightedApy: weightedApy.toFixed(2),
       weightedNetApy: weightedNetApy.toFixed(2),

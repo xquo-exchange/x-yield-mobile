@@ -7,6 +7,12 @@ import { formatEther, formatUnits, type Address, encodeFunctionData } from 'viem
 import { BASE_RPC_URL, BASE_RPC_FALLBACK, TOKENS } from '../constants/contracts';
 import { MORPHO_VAULTS, MORPHO_VAULT_ABI } from '../constants/strategies';
 
+// Debug mode - controlled by __DEV__
+const DEBUG = __DEV__ ?? false;
+const debugLog = (message: string, ...args: unknown[]) => {
+  if (DEBUG) console.log(message, ...args);
+};
+
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function hexToBigInt(hex: string): bigint {
@@ -72,7 +78,7 @@ async function rpcCall(method: string, params: unknown[] = []): Promise<unknown>
 
       if (data.error) {
         if (data.error.message?.includes('rate') || data.error.code === -32005) {
-          console.log(`[RPC] Rate limited on ${rpcUrl}, retrying...`);
+          debugLog(`[RPC] Rate limited on ${rpcUrl}, retrying...`);
         }
         if (attempt < 2) {
           await delay(1000 * (attempt + 1)); // Exponential backoff
@@ -84,7 +90,7 @@ async function rpcCall(method: string, params: unknown[] = []): Promise<unknown>
       return data.result;
     } catch (error) {
       if (attempt < 2) {
-        console.log(`[RPC] Attempt ${attempt + 1} failed, retrying...`);
+        debugLog(`[RPC] Attempt ${attempt + 1} failed, retrying...`);
         await delay(1000 * (attempt + 1));
         continue;
       }
@@ -189,7 +195,7 @@ async function getVaultShares(vaultAddress: string, userAddress: Address): Promi
 
     return hexToBigInt(result as string);
   } catch (error) {
-    console.log(`[Positions] Failed to get shares for vault ${vaultAddress}:`, error);
+    debugLog(`[Positions] Failed to get shares for vault ${vaultAddress}:`, error);
     return BigInt(0);
   }
 }
@@ -214,7 +220,7 @@ async function convertSharesToAssets(vaultAddress: string, shares: bigint): Prom
 
     return hexToBigInt(result as string);
   } catch (error) {
-    console.log(`[Positions] Failed to convert shares for vault ${vaultAddress}:`, error);
+    debugLog(`[Positions] Failed to convert shares for vault ${vaultAddress}:`, error);
     return BigInt(0);
   }
 }
@@ -224,7 +230,7 @@ async function convertSharesToAssets(vaultAddress: string, shares: bigint): Prom
  * Returns positions in USDC vaults only (Conservative strategy)
  */
 export async function getVaultPositions(userAddress: Address): Promise<PositionsResult> {
-  console.log(`[Positions] Fetching positions for ${userAddress}`);
+  debugLog(`[Positions] Fetching positions for ${userAddress}`);
 
   try {
     // Get USDC vaults from strategy (matches strategies.ts allocations)
@@ -263,13 +269,13 @@ export async function getVaultPositions(userAddress: Address): Promise<Positions
       totalUsd += usdValue;
 
       if (shares > BigInt(0)) {
-        console.log(`[Positions] ${vault.name}: ${usdValue.toFixed(2)} USDC`);
+        debugLog(`[Positions] ${vault.name}: ${usdValue.toFixed(2)} USDC`);
       } else {
-        console.log(`[Positions] ${vault.name}: 0 USDC (no position)`);
+        debugLog(`[Positions] ${vault.name}: 0 USDC (no position)`);
       }
     }
 
-    console.log(`[Positions] Total: $${totalUsd.toFixed(2)} across ${positions.length} vaults`);
+    debugLog(`[Positions] Total: $${totalUsd.toFixed(2)} across ${positions.length} vaults`);
 
     return {
       positions,

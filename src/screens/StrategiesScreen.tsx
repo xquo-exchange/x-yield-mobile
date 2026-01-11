@@ -5,7 +5,7 @@
  * Hides crypto complexity, emphasizes trust and simplicity.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,8 @@ import {
   Alert,
   Linking,
 } from 'react-native';
+import * as Analytics from '../services/analytics';
+import SensitiveView from '../components/SensitiveView';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useSmartWallets } from '@privy-io/expo/smart-wallets';
@@ -155,6 +157,12 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const savingsAmount = parseFloat(positionsTotal) || 0;
   const availableBalance = usdc ? parseFloat(usdc.balance) : 0;
 
+  // Analytics: Track screen view on mount
+  useEffect(() => {
+    Analytics.trackScreenView('ManageFunds');
+    return () => Analytics.trackScreenExit('ManageFunds');
+  }, []);
+
   // Calculate earnings for display (fee is handled in handleWithdraw)
   const totalYield = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
   const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
@@ -174,9 +182,12 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   }, [displayAddress, positions, savingsAmount]);
 
   const onRefresh = useCallback(async () => {
+    Analytics.trackButtonTap('Pull to Refresh', 'ManageFunds');
+    const timer = Analytics.createTimer();
     setRefreshing(true);
     await Promise.all([refetchBalances(), refetchPositions(), refetchApy()]);
     setRefreshing(false);
+    Analytics.trackBalanceFetchDuration(timer.stop());
   }, [refetchBalances, refetchPositions, refetchApy]);
 
   const handleAmountChange = (value: string) => {
@@ -185,28 +196,38 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   };
 
   const handleSetMaxAmount = () => {
+    Analytics.trackButtonTap('MAX', 'ManageFunds', { tab: 'add' });
     if (usdc) {
       setAmount(usdc.balance);
+      Analytics.track('Deposit Max Set', { amount: parseFloat(usdc.balance) });
     }
   };
 
   const handleDeposit = async () => {
-    if (!amount || parseFloat(amount) <= 0) {
+    const depositAmount = parseFloat(amount);
+    Analytics.trackButtonTap('Add Funds', 'ManageFunds', { amount: depositAmount });
+    Analytics.trackDepositStarted(depositAmount, STRATEGY.name);
+
+    if (!amount || depositAmount <= 0) {
+      Analytics.trackDepositFailed(depositAmount, STRATEGY.name, 'Invalid amount');
       Alert.alert('Enter Amount', 'Please enter an amount to add');
       return;
     }
 
     if (!smartWalletClient || !displayAddress) {
+      Analytics.trackDepositFailed(depositAmount, STRATEGY.name, 'Not logged in');
       Alert.alert('Error', 'Please log in first.');
       return;
     }
 
-    if (usdc && parseFloat(amount) > parseFloat(usdc.balance)) {
+    if (usdc && depositAmount > parseFloat(usdc.balance)) {
+      Analytics.trackDepositFailed(depositAmount, STRATEGY.name, 'Insufficient balance');
       Alert.alert('Insufficient Balance', `You only have $${parseFloat(usdc.balance).toFixed(2)} available`);
       return;
     }
 
     setIsDepositing(true);
+    const timer = Analytics.createTimer();
 
     try {
       const batch = buildStrategyBatch(
@@ -216,8 +237,8 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       );
 
       const txHash = await executeStrategyBatch(smartWalletClient, batch);
+      const duration = timer.stop();
 
-      const depositAmount = parseFloat(amount);
       await recordDeposit(displayAddress, depositAmount);
 
       const newTotalDeposited = await getTotalDeposited(displayAddress);
@@ -227,6 +248,8 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       refetchBalances();
       refetchPositions();
 
+      Analytics.trackDepositSuccess(depositAmount, STRATEGY.name, txHash, duration);
+
       Alert.alert(
         'Success',
         `$${depositAmount.toFixed(2)} added to your yield account.`,
@@ -234,12 +257,17 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           { text: 'OK' },
           {
             text: 'View Details',
-            onPress: () => Linking.openURL(`https://basescan.org/tx/${txHash}`),
+            onPress: () => {
+              Analytics.trackButtonTap('View Details', 'ManageFunds', { type: 'deposit' });
+              Linking.openURL(`https://basescan.org/tx/${txHash}`);
+            },
           },
         ]
       );
     } catch (error) {
-      Alert.alert('Failed', (error as Error)?.message || 'Please try again');
+      const errorMessage = (error as Error)?.message || 'Unknown error';
+      Analytics.trackDepositFailed(depositAmount, STRATEGY.name, errorMessage);
+      Alert.alert('Failed', errorMessage || 'Please try again');
     } finally {
       setIsDepositing(false);
     }
@@ -247,13 +275,16 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
   const handleWithdraw = async () => {
     const positionsWithBalance = positions.filter(p => p.shares > BigInt(0));
+    Analytics.trackButtonTap('Withdraw All', 'ManageFunds');
 
     if (positionsWithBalance.length === 0) {
+      Analytics.track('Withdraw No Funds');
       Alert.alert('No Funds', 'You have no funds to withdraw.');
       return;
     }
 
     if (!smartWalletClient || !displayAddress) {
+      Analytics.trackWithdrawFailed(savingsAmount, 'Not logged in');
       Alert.alert('Error', 'Please log in first.');
       return;
     }
@@ -265,6 +296,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       displayAddress as `0x${string}`,
       totalDeposited
     );
+
+    const withdrawAmount = parseFloat(batch.currentValue);
+    Analytics.trackWithdrawStarted(withdrawAmount);
 
     let confirmMessage: string;
     if (batch.hasProfits) {
@@ -294,20 +328,36 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       'Withdraw Funds',
       confirmMessage,
       [
-        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => {
+            Analytics.trackWithdrawCancelled(withdrawAmount, 'User cancelled');
+          },
+        },
         {
           text: 'Confirm Withdrawal',
           onPress: async () => {
+            Analytics.trackWithdrawConfirmation(withdrawAmount);
             setIsWithdrawing(true);
+            const timer = Analytics.createTimer();
 
             try {
               const txHash = await executeWithdrawBatch(smartWalletClient, batch);
+              const duration = timer.stop();
 
               const currentValue = parseFloat(batch.currentValue);
               await recordWithdrawal(displayAddress, currentValue, currentValue);
 
               refetchBalances();
               refetchPositions();
+
+              Analytics.trackWithdrawCompleted(
+                withdrawAmount,
+                parseFloat(batch.userReceives),
+                txHash,
+                duration
+              );
 
               let successMessage: string;
               if (batch.hasProfits) {
@@ -327,11 +377,16 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                 { text: 'OK' },
                 {
                   text: 'View Details',
-                  onPress: () => Linking.openURL(`https://basescan.org/tx/${txHash}`),
+                  onPress: () => {
+                    Analytics.trackButtonTap('View Details', 'ManageFunds', { type: 'withdraw' });
+                    Linking.openURL(`https://basescan.org/tx/${txHash}`);
+                  },
                 },
               ]);
             } catch (error) {
-              Alert.alert('Failed', (error as Error)?.message || 'Please try again');
+              const errorMessage = (error as Error)?.message || 'Unknown error';
+              Analytics.trackWithdrawFailed(withdrawAmount, errorMessage);
+              Alert.alert('Failed', errorMessage || 'Please try again');
             } finally {
               setIsWithdrawing(false);
             }
@@ -357,7 +412,10 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => {
+            Analytics.trackButtonTap('Back', 'ManageFunds');
+            navigation.goBack();
+          }} style={styles.backButton}>
             <Ionicons name="chevron-back" size={24} color={COLORS.black} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Manage Funds</Text>
@@ -375,14 +433,19 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             <View style={styles.errorState}>
               <Ionicons name="alert-circle-outline" size={24} color={COLORS.grey} />
               <Text style={styles.errorText}>Unable to load account</Text>
-              <TouchableOpacity onPress={refetchPositions} style={styles.retryButton}>
+              <TouchableOpacity onPress={() => {
+                Analytics.trackButtonTap('Retry', 'ManageFunds');
+                refetchPositions();
+              }} style={styles.retryButton}>
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <>
               <Text style={styles.summaryLabel}>Yield Account Balance</Text>
-              <Text style={styles.summaryValue}>${savingsAmount.toFixed(2)}</Text>
+              <SensitiveView>
+                <Text style={styles.summaryValue}>${savingsAmount.toFixed(2)}</Text>
+              </SensitiveView>
 
               {hasPositions && (
                 <View style={styles.earningRow}>
@@ -394,14 +457,16 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
               )}
 
               {totalDeposited > 0 && (
-                <View style={styles.earningsDisplay}>
-                  <Text style={styles.earningsLabel}>Total earned</Text>
-                  <AnimatedEarned
-                    currentBalance={savingsAmount}
-                    depositedAmount={totalDeposited}
-                    apy={parseFloat(displayApy)}
-                  />
-                </View>
+                <SensitiveView>
+                  <View style={styles.earningsDisplay}>
+                    <Text style={styles.earningsLabel}>Total earned</Text>
+                    <AnimatedEarned
+                      currentBalance={savingsAmount}
+                      depositedAmount={totalDeposited}
+                      apy={parseFloat(displayApy)}
+                    />
+                  </View>
+                </SensitiveView>
               )}
             </>
           )}
@@ -410,14 +475,20 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         {/* Available Balance */}
         <View style={styles.availableCard}>
           <Text style={styles.availableLabel}>Available to add</Text>
-          <Text style={styles.availableValue}>${availableBalance.toFixed(2)}</Text>
+          <SensitiveView>
+            <Text style={styles.availableValue}>${availableBalance.toFixed(2)}</Text>
+          </SensitiveView>
         </View>
 
         {/* Tab Selector */}
         <View style={styles.tabContainer}>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'add' && styles.tabActive]}
-            onPress={() => { setActiveTab('add'); setAmount(''); }}
+            onPress={() => {
+              Analytics.trackButtonTap('Add Funds Tab', 'ManageFunds');
+              setActiveTab('add');
+              setAmount('');
+            }}
           >
             <Ionicons
               name="add-circle-outline"
@@ -430,7 +501,11 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
-            onPress={() => { setActiveTab('withdraw'); setAmount(''); }}
+            onPress={() => {
+              Analytics.trackButtonTap('Withdraw Tab', 'ManageFunds');
+              setActiveTab('withdraw');
+              setAmount('');
+            }}
           >
             <Ionicons
               name="arrow-down-circle-outline"
@@ -460,7 +535,10 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                   placeholder="0.00"
                   placeholderTextColor={COLORS.grey}
                   keyboardType="decimal-pad"
-                  onFocus={() => setIsInputFocused(true)}
+                  onFocus={() => {
+                    setIsInputFocused(true);
+                    Analytics.trackInputFocus('Amount', 'ManageFunds');
+                  }}
                   onBlur={() => setIsInputFocused(false)}
                 />
                 <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
@@ -551,7 +629,10 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         {/* How It Works - Expandable */}
         <TouchableOpacity
           style={styles.howItWorksHeader}
-          onPress={() => setShowHowItWorks(!showHowItWorks)}
+          onPress={() => {
+            Analytics.trackButtonTap('How It Works', 'ManageFunds', { expanded: !showHowItWorks });
+            setShowHowItWorks(!showHowItWorks);
+          }}
         >
           <View style={styles.howItWorksLeft}>
             <Ionicons name="help-circle-outline" size={20} color={COLORS.secondary} />

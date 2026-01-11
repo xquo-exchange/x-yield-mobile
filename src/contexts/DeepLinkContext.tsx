@@ -2,6 +2,12 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
+// Debug mode - controlled by __DEV__
+const DEBUG = __DEV__ ?? false;
+const debugLog = (message: string, ...args: unknown[]) => {
+  if (DEBUG) console.log(message, ...args);
+};
+
 interface OfframpParams {
   toAddress: string;
   amount: string;
@@ -29,18 +35,18 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
   const hasProcessedInitialUrl = useRef(false);
 
   const parseOfframpUrl = useCallback((url: string): OfframpParams | null => {
-    console.log('[DeepLinkContext] ========================================');
-    console.log('[DeepLinkContext] Parsing URL:', url);
+    debugLog('[DeepLinkContext] ========================================');
+    debugLog('[DeepLinkContext] Parsing URL:', url);
 
     try {
       const parsed = Linking.parse(url);
-      console.log('[DeepLinkContext] Parsed:', JSON.stringify(parsed, null, 2));
+      debugLog('[DeepLinkContext] Parsed:', JSON.stringify(parsed, null, 2));
 
       const isOfframpComplete =
         (parsed.hostname === 'offramp' && (parsed.path === 'complete' || parsed.path === '/complete')) ||
         (parsed.path === 'offramp/complete' || parsed.path === '/offramp/complete');
 
-      console.log('[DeepLinkContext] isOfframpComplete:', isOfframpComplete);
+      debugLog('[DeepLinkContext] isOfframpComplete:', isOfframpComplete);
 
       if (isOfframpComplete) {
         // Try parsed.queryParams first
@@ -58,14 +64,14 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
               network: params.get('network') || 'base',
               expiresAt: params.get('expiresAt') || '',
             };
-            console.log('[DeepLinkContext] Fallback parsed params:', queryParams);
+            debugLog('[DeepLinkContext] Fallback parsed params:', queryParams);
           }
         }
 
         const { toAddress, amount, currency, network, expiresAt } = queryParams;
 
         if (toAddress && amount) {
-          console.log('[DeepLinkContext] Valid offramp params found');
+          debugLog('[DeepLinkContext] Valid offramp params found');
           return {
             toAddress: toAddress as string,
             amount: amount as string,
@@ -79,24 +85,24 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
       console.error('[DeepLinkContext] Error parsing URL:', error);
     }
 
-    console.log('[DeepLinkContext] ========================================');
+    debugLog('[DeepLinkContext] ========================================');
     return null;
   }, []);
 
   const handleDeepLink = useCallback((url: string) => {
-    console.log('[DeepLinkContext] Handling deep link:', url);
+    debugLog('[DeepLinkContext] Handling deep link:', url);
 
     // IMPORTANT: Close the WebBrowser first so the modal can show
     try {
       WebBrowser.dismissBrowser();
-      console.log('[DeepLinkContext] WebBrowser dismissed');
+      debugLog('[DeepLinkContext] WebBrowser dismissed');
     } catch (e) {
-      console.log('[DeepLinkContext] No browser to dismiss or error:', e);
+      debugLog('[DeepLinkContext] No browser to dismiss or error:', e);
     }
 
     const params = parseOfframpUrl(url);
     if (params) {
-      console.log('[DeepLinkContext] Setting pending offramp:', params);
+      debugLog('[DeepLinkContext] Setting pending offramp:', params);
       
       // Small delay to ensure browser is fully closed before showing modal
       setTimeout(() => {
@@ -106,17 +112,17 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
   }, [parseOfframpUrl]);
 
   useEffect(() => {
-    console.log('[DeepLinkContext] Setting up deep link listeners...');
+    debugLog('[DeepLinkContext] Setting up deep link listeners...');
 
     const subscription = Linking.addEventListener('url', ({ url }) => {
-      console.log('[DeepLinkContext] URL event received (foreground)');
+      debugLog('[DeepLinkContext] URL event received (foreground)');
       handleDeepLink(url);
     });
 
     if (!hasProcessedInitialUrl.current) {
       hasProcessedInitialUrl.current = true;
       Linking.getInitialURL().then((url) => {
-        console.log('[DeepLinkContext] Initial URL:', url);
+        debugLog('[DeepLinkContext] Initial URL:', url);
         if (url) {
           handleDeepLink(url);
         }
@@ -124,13 +130,13 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
     }
 
     return () => {
-      console.log('[DeepLinkContext] Cleaning up listeners');
+      debugLog('[DeepLinkContext] Cleaning up listeners');
       subscription?.remove();
     };
   }, [handleDeepLink]);
 
   const clearPendingOfframp = useCallback(() => {
-    console.log('[DeepLinkContext] Clearing pending offramp');
+    debugLog('[DeepLinkContext] Clearing pending offramp');
     setPendingOfframp(null);
   }, []);
 

@@ -1,7 +1,7 @@
 /**
  * Coinbase Onramp Service
  *
- * Integrates with x-yield-api backend to get Coinbase Onramp session tokens
+ * Integrates with backend API to get Coinbase Onramp session tokens
  * for seamless one-click USDC purchases.
  *
  * Flow:
@@ -15,6 +15,12 @@
 
 import { Linking, Alert } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+
+// Debug mode - controlled by __DEV__
+const DEBUG = __DEV__ ?? false;
+const debugLog = (message: string, ...args: unknown[]) => {
+  if (DEBUG) console.log(message, ...args);
+};
 
 // Backend API URL
 const API_BASE_URL = 'https://x-yield-api.vercel.app';
@@ -41,7 +47,7 @@ interface OnrampSessionResponse {
 export async function getOnrampSessionUrl(walletAddress: string): Promise<string | null> {
   try {
     const startTime = Date.now();
-    console.log('[Coinbase] Requesting onramp session for:', walletAddress);
+    debugLog('[Coinbase] Requesting onramp session for:', walletAddress);
 
     const response = await fetch(`${API_BASE_URL}/api/onramp/session`, {
       method: 'POST',
@@ -55,7 +61,7 @@ export async function getOnrampSessionUrl(walletAddress: string): Promise<string
     });
 
     const fetchTime = Date.now() - startTime;
-    console.log(`[Coinbase] API response received in ${fetchTime}ms`);
+    debugLog(`[Coinbase] API response received in ${fetchTime}ms`);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -65,10 +71,10 @@ export async function getOnrampSessionUrl(walletAddress: string): Promise<string
 
     const data: OnrampSessionResponse = await response.json();
     const totalTime = Date.now() - startTime;
-    console.log(`[Coinbase] Total getOnrampSessionUrl time: ${totalTime}ms`);
+    debugLog(`[Coinbase] Total getOnrampSessionUrl time: ${totalTime}ms`);
 
     if (data.url) {
-      console.log('[Coinbase] Got onramp URL');
+      debugLog('[Coinbase] Got onramp URL');
       return data.url;
     }
 
@@ -95,15 +101,15 @@ export async function getOnrampSessionUrl(walletAddress: string): Promise<string
 export async function openCoinbaseOnramp(walletAddress: string): Promise<boolean> {
   try {
     const totalStart = Date.now();
-    console.log('[Coinbase] openCoinbaseOnramp started');
+    debugLog('[Coinbase] openCoinbaseOnramp started');
 
     // Get session URL from backend
     const onrampUrl = await getOnrampSessionUrl(walletAddress);
     const apiTime = Date.now() - totalStart;
-    console.log(`[Coinbase] API call completed in ${apiTime}ms`);
+    debugLog(`[Coinbase] API call completed in ${apiTime}ms`);
 
     if (onrampUrl) {
-      console.log('[Coinbase] Opening onramp URL');
+      debugLog('[Coinbase] Opening onramp URL');
       const browserStart = Date.now();
 
       // Open in browser
@@ -114,13 +120,13 @@ export async function openCoinbaseOnramp(walletAddress: string): Promise<boolean
 
       const browserTime = Date.now() - browserStart;
       const totalTime = Date.now() - totalStart;
-      console.log(`[Coinbase] Browser opened in ${browserTime}ms, total flow: ${totalTime}ms`);
-      console.log('[Coinbase] Browser result:', result.type);
+      debugLog(`[Coinbase] Browser opened in ${browserTime}ms, total flow: ${totalTime}ms`);
+      debugLog('[Coinbase] Browser result:', result.type);
       return true;
     }
 
     // Fallback to manual flow
-    console.log('[Coinbase] Session failed, using fallback');
+    debugLog('[Coinbase] Session failed, using fallback');
     return await openCoinbaseToBuyUsdc();
   } catch (error) {
     console.error('[Coinbase] Error opening onramp:', error);
@@ -176,9 +182,9 @@ export function showBuyUsdcInstructions(
 ): void {
   Alert.alert(
     'Buy USDC',
-    'To add funds to X-Yield:\n\n' +
+    'To add funds to Unflat:\n\n' +
       '1. Buy USDC on Coinbase\n' +
-      '2. Withdraw to your X-Yield wallet\n' +
+      '2. Withdraw to your Unflat wallet\n' +
       '3. Select Base network when withdrawing\n\n' +
       'Your wallet address:',
     [
@@ -213,7 +219,7 @@ export function getFundingInstructions(walletAddress: string): string {
     'How to add funds:',
     '',
     '1. Buy USDC on Coinbase or any exchange',
-    '2. Withdraw to your X-Yield wallet',
+    '2. Withdraw to your Unflat wallet',
     `3. Your address: ${shortAddress}`,
     '4. Network: Base',
     '',

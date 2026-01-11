@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { usePrivy, useLoginWithEmail } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import * as Analytics from '../services/analytics';
 
 // Color Palette - PayPal/Revolut Style
 const COLORS = {
@@ -38,6 +39,13 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   const [showCodeInput, setShowCodeInput] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
 
+  // Analytics: Track screen view on mount
+  useEffect(() => {
+    Analytics.trackScreenView('Login');
+    Analytics.trackLoginScreenOpened();
+    return () => Analytics.trackScreenExit('Login');
+  }, []);
+
   useEffect(() => {
     if (user) {
       navigation.replace('Dashboard');
@@ -46,12 +54,15 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
   const { sendCode, loginWithCode, state } = useLoginWithEmail({
     onSendCodeSuccess: () => {
+      Analytics.trackLoginOtpRequested();
       setShowCodeInput(true);
     },
     onLoginSuccess: () => {
+      Analytics.trackLoginSuccess('email');
       navigation.replace('Dashboard');
     },
     onError: (error) => {
+      Analytics.trackLoginFailed('email', error.message || 'Unknown error');
       Alert.alert('Error', error.message || 'Something went wrong');
     },
   });
@@ -59,22 +70,31 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   const isLoading = state.status === 'sending-code' || state.status === 'submitting-code';
 
   const handleSendCode = async () => {
+    Analytics.trackButtonTap('Continue', 'Login', { step: 'email_entry' });
     if (!email.trim()) {
       Alert.alert('Error', 'Please enter your email address');
       return;
     }
+    // Track email domain for analytics
+    const emailDomain = email.split('@')[1]?.toLowerCase() || 'unknown';
+    Analytics.track('Login Email Submitted', { email_domain: emailDomain });
     await sendCode({ email: email.trim() });
   };
 
   const handleVerifyCode = async () => {
+    Analytics.trackButtonTap('Verify', 'Login', { step: 'code_verification' });
     if (!code.trim()) {
       Alert.alert('Error', 'Please enter the verification code');
       return;
     }
+    Analytics.trackLoginOtpEntered();
     await loginWithCode({ code: code.trim() });
   };
 
   const handleBack = () => {
+    Analytics.trackButtonTap('Back', 'Login', {
+      step: showCodeInput ? 'code_verification' : 'email_entry'
+    });
     if (showCodeInput) {
       setShowCodeInput(false);
       setCode('');
@@ -84,6 +104,9 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   };
 
   const handleHelp = () => {
+    Analytics.trackButtonTap('Help', 'Login', {
+      step: showCodeInput ? 'code_verification' : 'email_entry'
+    });
     Alert.alert(
       'Need Help?',
       'Enter your email address to receive a one-time verification code. Use this code to securely sign in to your account.',
@@ -128,7 +151,10 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 autoCorrect={false}
                 autoComplete="email"
                 editable={!isLoading}
-                onFocus={() => setIsInputFocused(true)}
+                onFocus={() => {
+                  setIsInputFocused(true);
+                  Analytics.trackInputFocus('Email', 'Login');
+                }}
                 onBlur={() => setIsInputFocused(false)}
               />
             </View>
@@ -165,7 +191,10 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 maxLength={6}
                 editable={!isLoading}
                 autoFocus
-                onFocus={() => setIsInputFocused(true)}
+                onFocus={() => {
+                  setIsInputFocused(true);
+                  Analytics.trackInputFocus('Verification Code', 'Login');
+                }}
                 onBlur={() => setIsInputFocused(false)}
               />
             </View>
@@ -185,7 +214,10 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
             <TouchableOpacity
               style={styles.resendButton}
-              onPress={() => sendCode({ email: email.trim() })}
+              onPress={() => {
+                Analytics.trackButtonTap('Resend Code', 'Login', { step: 'code_verification' });
+                sendCode({ email: email.trim() });
+              }}
               disabled={isLoading}
             >
               <Text style={styles.resendButtonText}>Resend code</Text>

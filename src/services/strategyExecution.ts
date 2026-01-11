@@ -10,11 +10,17 @@ import {
   BASE_RPC_URL,
   BASE_RPC_FALLBACK,
   TOKENS,
-  XYIELD_FEE_PERCENT,
-  XYIELD_TREASURY_ADDRESS,
-  XYIELD_MIN_FEE_USDC,
+  UNFLAT_FEE_PERCENT,
+  UNFLAT_TREASURY_ADDRESS,
+  UNFLAT_MIN_FEE_USDC,
 } from '../constants/contracts';
 import { type VaultPosition } from './blockchain';
+
+// Debug mode - controlled by __DEV__
+const DEBUG = __DEV__ ?? false;
+const debugLog = (message: string, ...args: unknown[]) => {
+  if (DEBUG) console.log(message, ...args);
+};
 
 export interface TransactionCall {
   to: `0x${string}`;
@@ -274,7 +280,7 @@ function buildTransferCall(
 
 /**
  * Build a batch of withdraw transactions for all positions
- * Includes X-Yield performance fee transfer (15% of YIELD only, not principal)
+ * Includes Unflat performance fee transfer (15% of YIELD only, not principal)
  *
  * Performance fee model:
  * - Fee is calculated on PROFIT only, not total withdrawal
@@ -336,7 +342,7 @@ export function buildWithdrawBatch(
       feeAmount: '0.000000',
       feeAmountRaw: BigInt(0),
       userReceives: currentValue.toFixed(6),
-      feePercent: XYIELD_FEE_PERCENT,
+      feePercent: UNFLAT_FEE_PERCENT,
       hasProfits: false,
     };
   }
@@ -351,43 +357,43 @@ export function buildWithdrawBatch(
   let feeAmountRaw = BigInt(0);
 
   if (hasProfits) {
-    feeAmount = yieldAmount * (XYIELD_FEE_PERCENT / 100);
+    feeAmount = yieldAmount * (UNFLAT_FEE_PERCENT / 100);
     feeAmountRaw = BigInt(Math.floor(feeAmount * 1_000_000));
   }
 
   const userReceives = currentValue - feeAmount;
 
   // Add fee transfer call if fee is above minimum threshold
-  if (feeAmount >= XYIELD_MIN_FEE_USDC) {
+  if (feeAmount >= UNFLAT_MIN_FEE_USDC) {
     calls.push(
       buildTransferCall(
         TOKENS.USDC as Address,
-        XYIELD_TREASURY_ADDRESS as Address,
+        UNFLAT_TREASURY_ADDRESS as Address,
         feeAmountRaw
       )
     );
-    console.log(`[Withdraw] Fee transfer added: $${feeAmount.toFixed(6)} (${feeAmountRaw} raw) to ${XYIELD_TREASURY_ADDRESS}`);
+    debugLog(`[Withdraw] Fee transfer added: $${feeAmount.toFixed(6)} (${feeAmountRaw} raw) to ${UNFLAT_TREASURY_ADDRESS}`);
   } else if (hasProfits) {
-    console.log(`[Withdraw] Fee skipped: $${feeAmount.toFixed(6)} below minimum $${XYIELD_MIN_FEE_USDC}`);
+    debugLog(`[Withdraw] Fee skipped: $${feeAmount.toFixed(6)} below minimum $${UNFLAT_MIN_FEE_USDC}`);
   } else {
-    console.log(`[Withdraw] No fee: No profits`);
+    debugLog(`[Withdraw] No fee: No profits`);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════
   // FULL PRECISION DEBUG - Verify 15% fee calculation
   // ═══════════════════════════════════════════════════════════════════════════════
-  console.log('[Withdraw] ══════════════════════════════════════════════════════');
-  console.log('[Withdraw] FULL PRECISION CALCULATION:');
-  console.log('[Withdraw] totalDeposited:', totalDeposited.toFixed(6));
-  console.log('[Withdraw] currentValue:', currentValue.toFixed(6));
-  console.log('[Withdraw] yield:', yieldAmount.toFixed(6));
-  console.log('[Withdraw] yieldPercent:', (yieldPercent).toFixed(6) + '%');
-  console.log('[Withdraw] fee (15% of yield):', feeAmount.toFixed(6));
-  console.log('[Withdraw] feeAmountRaw:', feeAmountRaw.toString(), 'raw USDC units');
-  console.log('[Withdraw] userReceives:', userReceives.toFixed(6));
-  console.log('[Withdraw] VERIFICATION: yield × 0.15 =', (yieldAmount * 0.15).toFixed(6));
-  console.log('[Withdraw] VERIFICATION: currentValue - fee =', (currentValue - feeAmount).toFixed(6));
-  console.log('[Withdraw] ══════════════════════════════════════════════════════');
+  debugLog('[Withdraw] ══════════════════════════════════════════════════════');
+  debugLog('[Withdraw] FULL PRECISION CALCULATION:');
+  debugLog('[Withdraw] totalDeposited:', totalDeposited.toFixed(6));
+  debugLog('[Withdraw] currentValue:', currentValue.toFixed(6));
+  debugLog('[Withdraw] yield:', yieldAmount.toFixed(6));
+  debugLog('[Withdraw] yieldPercent:', (yieldPercent).toFixed(6) + '%');
+  debugLog('[Withdraw] fee (15% of yield):', feeAmount.toFixed(6));
+  debugLog('[Withdraw] feeAmountRaw:', feeAmountRaw.toString(), 'raw USDC units');
+  debugLog('[Withdraw] userReceives:', userReceives.toFixed(6));
+  debugLog('[Withdraw] VERIFICATION: yield × 0.15 =', (yieldAmount * 0.15).toFixed(6));
+  debugLog('[Withdraw] VERIFICATION: currentValue - fee =', (currentValue - feeAmount).toFixed(6));
+  debugLog('[Withdraw] ══════════════════════════════════════════════════════');
 
   // Format ALL values with full USDC precision (6 decimals)
   // This allows accurate verification of fee calculations
@@ -405,9 +411,9 @@ export function buildWithdrawBatch(
     yieldPercent: yieldPercent.toFixed(1),
     // Fee breakdown
     feeAmount: formatValue(feeAmount),
-    feeAmountRaw: feeAmount >= XYIELD_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
+    feeAmountRaw: feeAmount >= UNFLAT_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
     userReceives: formatValue(userReceives),
-    feePercent: XYIELD_FEE_PERCENT,
+    feePercent: UNFLAT_FEE_PERCENT,
     hasProfits,
   };
 }
@@ -480,31 +486,31 @@ export function buildPartialWithdrawBatch(
 
   // Fee on proportional profit
   const hasProfits = proportionalYield > 0;
-  const feeAmount = hasProfits ? proportionalYield * (XYIELD_FEE_PERCENT / 100) : 0;
+  const feeAmount = hasProfits ? proportionalYield * (UNFLAT_FEE_PERCENT / 100) : 0;
   const feeAmountRaw = BigInt(Math.floor(feeAmount * 1_000_000));
 
   // Add fee transfer if applicable
-  if (feeAmount >= XYIELD_MIN_FEE_USDC) {
+  if (feeAmount >= UNFLAT_MIN_FEE_USDC) {
     calls.push(
       buildTransferCall(
         TOKENS.USDC as Address,
-        XYIELD_TREASURY_ADDRESS as Address,
+        UNFLAT_TREASURY_ADDRESS as Address,
         feeAmountRaw
       )
     );
-    console.log(`[PartialWithdraw] Fee transfer: $${feeAmount.toFixed(6)} to treasury`);
+    debugLog(`[PartialWithdraw] Fee transfer: $${feeAmount.toFixed(6)} to treasury`);
   }
 
   const userReceives = withdrawValue - feeAmount;
   const depositPortion = totalDeposited * withdrawRatio;
 
-  console.log('[PartialWithdraw] ══════════════════════════════════════════════════════');
-  console.log('[PartialWithdraw] Withdraw ratio:', (withdrawRatio * 100).toFixed(2) + '%');
-  console.log('[PartialWithdraw] Withdraw amount:', withdrawValue.toFixed(6));
-  console.log('[PartialWithdraw] Proportional yield:', proportionalYield.toFixed(6));
-  console.log('[PartialWithdraw] Fee (15% of yield):', feeAmount.toFixed(6));
-  console.log('[PartialWithdraw] User receives:', userReceives.toFixed(6));
-  console.log('[PartialWithdraw] ══════════════════════════════════════════════════════');
+  debugLog('[PartialWithdraw] ══════════════════════════════════════════════════════');
+  debugLog('[PartialWithdraw] Withdraw ratio:', (withdrawRatio * 100).toFixed(2) + '%');
+  debugLog('[PartialWithdraw] Withdraw amount:', withdrawValue.toFixed(6));
+  debugLog('[PartialWithdraw] Proportional yield:', proportionalYield.toFixed(6));
+  debugLog('[PartialWithdraw] Fee (15% of yield):', feeAmount.toFixed(6));
+  debugLog('[PartialWithdraw] User receives:', userReceives.toFixed(6));
+  debugLog('[PartialWithdraw] ══════════════════════════════════════════════════════');
 
   return {
     calls,
@@ -514,9 +520,9 @@ export function buildPartialWithdrawBatch(
     yieldAmount: proportionalYield.toFixed(6),
     yieldPercent: depositPortion > 0 ? ((proportionalYield / depositPortion) * 100).toFixed(1) : '0.0',
     feeAmount: feeAmount.toFixed(6),
-    feeAmountRaw: feeAmount >= XYIELD_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
+    feeAmountRaw: feeAmount >= UNFLAT_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
     userReceives: userReceives.toFixed(6),
-    feePercent: XYIELD_FEE_PERCENT,
+    feePercent: UNFLAT_FEE_PERCENT,
     hasProfits,
   };
 }
@@ -538,28 +544,28 @@ export async function executeWithdrawBatch(
   }
 
   const walletAddress = client.account.address;
-  console.log(`[Withdraw] Smart wallet: ${walletAddress}`);
-  console.log(`[Withdraw] Positions to withdraw: ${batch.positions.length}`);
+  debugLog(`[Withdraw] Smart wallet: ${walletAddress}`);
+  debugLog(`[Withdraw] Positions to withdraw: ${batch.positions.length}`);
 
   // Log each position being withdrawn
   for (const pos of batch.positions) {
-    console.log(`[Withdraw] - ${pos.vaultName}: ${pos.assetsFormatted} USDC`);
+    debugLog(`[Withdraw] - ${pos.vaultName}: ${pos.assetsFormatted} USDC`);
   }
 
   // Log yield breakdown
-  console.log(`[Withdraw] Your deposits: $${batch.totalDeposited}`);
-  console.log(`[Withdraw] Current value: $${batch.currentValue}`);
-  console.log(`[Withdraw] Yield earned: $${batch.yieldAmount} (${batch.yieldPercent}%)`);
+  debugLog(`[Withdraw] Your deposits: $${batch.totalDeposited}`);
+  debugLog(`[Withdraw] Current value: $${batch.currentValue}`);
+  debugLog(`[Withdraw] Yield earned: $${batch.yieldAmount} (${batch.yieldPercent}%)`);
 
   // Log fee breakdown
-  if (batch.hasProfits && parseFloat(batch.feeAmount) >= XYIELD_MIN_FEE_USDC) {
-    console.log(`[Withdraw] Performance fee (${batch.feePercent}% of yield): $${batch.feeAmount}`);
+  if (batch.hasProfits && parseFloat(batch.feeAmount) >= UNFLAT_MIN_FEE_USDC) {
+    debugLog(`[Withdraw] Performance fee (${batch.feePercent}% of yield): $${batch.feeAmount}`);
   } else if (!batch.hasProfits) {
-    console.log(`[Withdraw] No fee (no profits)`);
+    debugLog(`[Withdraw] No fee (no profits)`);
   }
-  console.log(`[Withdraw] You receive: $${batch.userReceives}`);
+  debugLog(`[Withdraw] You receive: $${batch.userReceives}`);
 
-  console.log(`[Withdraw] Sending ${batch.calls.length} calls (${batch.positions.length} redeems${parseFloat(batch.feeAmount) >= XYIELD_MIN_FEE_USDC ? ' + 1 fee transfer' : ''})...`);
+  debugLog(`[Withdraw] Sending ${batch.calls.length} calls (${batch.positions.length} redeems${parseFloat(batch.feeAmount) >= UNFLAT_MIN_FEE_USDC ? ' + 1 fee transfer' : ''})...`);
 
   const MAX_RETRIES = 2;
   let lastError: unknown = null;
@@ -567,7 +573,7 @@ export async function executeWithdrawBatch(
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       if (attempt > 0) {
-        console.log(`[Withdraw] Retry attempt ${attempt + 1}/${MAX_RETRIES}...`);
+        debugLog(`[Withdraw] Retry attempt ${attempt + 1}/${MAX_RETRIES}...`);
         await delay(2000);
       }
 
@@ -594,11 +600,11 @@ export async function executeWithdrawBatch(
         throw new Error('Transaction failed: Invalid response from wallet');
       }
 
-      console.log(`[Withdraw] Transaction submitted! Hash: ${hash}`);
-      console.log(`[Withdraw] View on BaseScan: https://basescan.org/tx/${hash}`);
+      debugLog(`[Withdraw] Transaction submitted! Hash: ${hash}`);
+      debugLog(`[Withdraw] View on BaseScan: https://basescan.org/tx/${hash}`);
 
       // Wait for confirmation
-      console.log('[Withdraw] Waiting for on-chain confirmation...');
+      debugLog('[Withdraw] Waiting for on-chain confirmation...');
       const confirmation = await waitForTransaction(hash);
 
       if (!confirmation.found) {
@@ -609,7 +615,7 @@ export async function executeWithdrawBatch(
         throw new Error(`Transaction reverted. Check BaseScan: https://basescan.org/tx/${hash}`);
       }
 
-      console.log(`[Withdraw] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
+      debugLog(`[Withdraw] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
       return hash;
 
     } catch (error) {
@@ -617,7 +623,7 @@ export async function executeWithdrawBatch(
       const msg = ((error as Error)?.message || '').toLowerCase();
 
       if (msg.includes('nonce') && attempt < MAX_RETRIES - 1) {
-        console.log('[Withdraw] Nonce error, retrying...');
+        debugLog('[Withdraw] Nonce error, retrying...');
         continue;
       }
       break;
@@ -789,8 +795,8 @@ export async function executeStrategyBatch(
 
   const callsToExecute = batch.calls;
   const walletAddress = client.account.address;
-  console.log(`[Deposit] Smart wallet: ${walletAddress}`);
-  console.log(`[Deposit] Calls to execute: ${callsToExecute.length}`);
+  debugLog(`[Deposit] Smart wallet: ${walletAddress}`);
+  debugLog(`[Deposit] Calls to execute: ${callsToExecute.length}`);
 
   // SIMULATION: We skip simulation for batched approve+deposit transactions
   // because eth_call simulates each call independently - deposits would fail
@@ -808,18 +814,18 @@ export async function executeStrategyBatch(
 
   if (hasDeposits && hasApprovals) {
     // Skip simulation for batched approve+deposit - they have interdependencies
-    console.log('[Deposit] Skipping simulation for batched approve+deposit (interdependent calls)');
+    debugLog('[Deposit] Skipping simulation for batched approve+deposit (interdependent calls)');
   } else if (callsToExecute.length === 1 && hasApprovals) {
-    console.log('[Deposit] Skipping simulation for approve-only transaction');
+    debugLog('[Deposit] Skipping simulation for approve-only transaction');
   } else {
     // Single deposit or other calls - try to simulate
-    console.log('[Deposit] Simulating transactions...');
+    debugLog('[Deposit] Simulating transactions...');
     const simulation = await simulateBatch(callsToExecute, walletAddress);
     if (!simulation.success) {
-      console.log(`[Deposit] Simulation failed: ${simulation.error}`);
+      debugLog(`[Deposit] Simulation failed: ${simulation.error}`);
       throw new Error(`Simulation failed: ${simulation.error}`);
     }
-    console.log('[Deposit] Simulation passed!');
+    debugLog('[Deposit] Simulation passed!');
   }
 
   // Retry logic for nonce errors
@@ -830,11 +836,11 @@ export async function executeStrategyBatch(
     try {
       // Wait before retry (only on subsequent attempts)
       if (attempt > 0) {
-        console.log(`[Deposit] Retry attempt ${attempt + 1}/${MAX_RETRIES} after nonce error...`);
+        debugLog(`[Deposit] Retry attempt ${attempt + 1}/${MAX_RETRIES} after nonce error...`);
         await delay(2000); // Wait 2 seconds before retry
       }
 
-      console.log(`[Deposit] Sending transaction (attempt ${attempt + 1})...`);
+      debugLog(`[Deposit] Sending transaction (attempt ${attempt + 1})...`);
 
       let hash: string;
 
@@ -845,36 +851,36 @@ export async function executeStrategyBatch(
         hash = await executeBatchCalls(client, callsToExecute);
       }
 
-      console.log(`[Deposit] Transaction submitted! Hash: ${hash}`);
-      console.log(`[Deposit] View on BaseScan: https://basescan.org/tx/${hash}`);
+      debugLog(`[Deposit] Transaction submitted! Hash: ${hash}`);
+      debugLog(`[Deposit] View on BaseScan: https://basescan.org/tx/${hash}`);
 
       // Wait for on-chain confirmation
-      console.log('[Deposit] Waiting for on-chain confirmation...');
+      debugLog('[Deposit] Waiting for on-chain confirmation...');
       const confirmation = await waitForTransaction(hash);
 
       if (!confirmation.found) {
-        console.log('[Deposit] Transaction not found on-chain after timeout');
+        debugLog('[Deposit] Transaction not found on-chain after timeout');
         throw new Error(
           'Transaction not confirmed on-chain. Please check Privy Dashboard for paymaster configuration.'
         );
       }
 
       if (confirmation.status === 'failed') {
-        console.log(`[Deposit] Transaction reverted on-chain`);
+        debugLog(`[Deposit] Transaction reverted on-chain`);
         throw new Error(`Transaction reverted. Check BaseScan: https://basescan.org/tx/${hash}`);
       }
 
-      console.log(`[Deposit] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
+      debugLog(`[Deposit] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
       return hash;
 
     } catch (error) {
       const errorMsg = (error as Error)?.message || 'Unknown error';
-      console.log(`[Deposit] Error: ${errorMsg}`);
+      debugLog(`[Deposit] Error: ${errorMsg}`);
       lastError = error;
 
       // Only retry on nonce errors
       if (isNonceError(error) && attempt < MAX_RETRIES - 1) {
-        console.log('[Deposit] Nonce error detected, will retry...');
+        debugLog('[Deposit] Nonce error detected, will retry...');
         continue; // Retry
       }
 

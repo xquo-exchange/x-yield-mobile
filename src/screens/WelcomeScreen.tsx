@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { usePrivy } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import * as Analytics from '../services/analytics';
 
 const { width } = Dimensions.get('window');
 
@@ -177,6 +178,14 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
   const { user } = usePrivy();
   const [activeIndex, setActiveIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
+  const lastTrackedIndex = useRef(-1);
+
+  // Analytics: Track screen view on mount
+  useEffect(() => {
+    Analytics.trackScreenView('Welcome');
+    Analytics.track('Onboarding Started');
+    return () => Analytics.trackScreenExit('Welcome');
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -188,6 +197,16 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
     const scrollPosition = event.nativeEvent.contentOffset.x;
     const index = Math.round(scrollPosition / width);
     setActiveIndex(index);
+
+    // Track slide changes (only when index changes)
+    if (index !== lastTrackedIndex.current && index >= 0 && index < SLIDES.length) {
+      lastTrackedIndex.current = index;
+      Analytics.track('Onboarding Slide Viewed', {
+        slide_index: index + 1,
+        slide_title: SLIDES[index].title.trim(),
+        total_slides: SLIDES.length,
+      });
+    }
   };
 
   const renderPaginationDots = () => {
@@ -236,7 +255,17 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
       <View style={styles.bottomContainer}>
         <TouchableOpacity
           style={styles.getStartedButton}
-          onPress={() => navigation.navigate('Login')}
+          onPress={() => {
+            Analytics.trackButtonTap('Get Started', 'Welcome', {
+              viewed_slides: activeIndex + 1,
+              total_slides: SLIDES.length,
+            });
+            Analytics.track('Onboarding Completed', {
+              slides_viewed: activeIndex + 1,
+              completed_all_slides: activeIndex === SLIDES.length - 1,
+            });
+            navigation.navigate('Login');
+          }}
           activeOpacity={0.9}
         >
           <Text style={styles.getStartedButtonText}>Get Started</Text>
