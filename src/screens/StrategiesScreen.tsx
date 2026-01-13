@@ -522,47 +522,83 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         <View style={styles.actionArea}>
           {activeTab === 'add' ? (
             // Add Funds Tab
-            <>
-              <Text style={styles.inputLabel}>Amount to add</Text>
-              <View style={styles.inputRow}>
-                <View style={[styles.currencyPrefix, isInputFocused && styles.inputFocused]}>
-                  <Text style={styles.currencyText}>$</Text>
+            availableBalance <= 0 ? (
+              // Zero balance state - show helpful guidance
+              <View style={styles.zeroBalanceGuide}>
+                <View style={styles.zeroBalanceIconContainer}>
+                  <Ionicons name="wallet-outline" size={36} color={COLORS.secondary} />
                 </View>
-                <TextInput
-                  style={[styles.input, isInputFocused && styles.inputFocused]}
-                  value={amount}
-                  onChangeText={handleAmountChange}
-                  placeholder="0.00"
-                  placeholderTextColor={COLORS.grey}
-                  keyboardType="decimal-pad"
-                  onFocus={() => {
-                    setIsInputFocused(true);
-                    Analytics.trackInputFocus('Amount', 'ManageFunds');
+                <Text style={styles.zeroBalanceTitle}>No funds available</Text>
+                <Text style={styles.zeroBalanceText}>
+                  First, add USDC to your Cash account. Then come back here to move it to Savings and start earning {displayApy}% APY.
+                </Text>
+
+                <View style={styles.zeroBalanceSteps}>
+                  <View style={styles.zeroBalanceStep}>
+                    <View style={styles.zeroBalanceStepDot} />
+                    <Text style={styles.zeroBalanceStepText}>Buy USDC with card via Coinbase</Text>
+                  </View>
+                  <View style={styles.zeroBalanceStep}>
+                    <View style={styles.zeroBalanceStepDot} />
+                    <Text style={styles.zeroBalanceStepText}>Or transfer USDC from another wallet</Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.zeroBalanceButton}
+                  onPress={() => {
+                    Analytics.trackButtonTap('Go to Dashboard', 'ManageFunds');
+                    navigation.goBack();
                   }}
-                  onBlur={() => setIsInputFocused(false)}
-                />
-                <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
-                  <Text style={styles.maxButtonText}>MAX</Text>
+                >
+                  <Ionicons name="arrow-back" size={18} color={COLORS.pureWhite} />
+                  <Text style={styles.zeroBalanceButtonText}>Add Funds on Dashboard</Text>
                 </TouchableOpacity>
               </View>
+            ) : (
+              // Normal add funds UI
+              <>
+                <Text style={styles.inputLabel}>Amount to add</Text>
+                <View style={styles.inputRow}>
+                  <View style={[styles.currencyPrefix, isInputFocused && styles.inputFocused]}>
+                    <Text style={styles.currencyText}>$</Text>
+                  </View>
+                  <TextInput
+                    style={[styles.input, isInputFocused && styles.inputFocused]}
+                    value={amount}
+                    onChangeText={handleAmountChange}
+                    placeholder="0.00"
+                    placeholderTextColor={COLORS.grey}
+                    keyboardType="decimal-pad"
+                    onFocus={() => {
+                      setIsInputFocused(true);
+                      Analytics.trackInputFocus('Amount', 'ManageFunds');
+                    }}
+                    onBlur={() => setIsInputFocused(false)}
+                  />
+                  <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
+                    <Text style={styles.maxButtonText}>MAX</Text>
+                  </TouchableOpacity>
+                </View>
 
-              <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  (!amount || parseFloat(amount) <= 0 || isDepositing) && styles.actionButtonDisabled,
-                ]}
-                onPress={handleDeposit}
-                disabled={!amount || parseFloat(amount) <= 0 || isDepositing}
-              >
-                {isDepositing ? (
-                  <ActivityIndicator color={COLORS.pureWhite} />
-                ) : (
-                  <Text style={styles.actionButtonText}>
-                    {amount && parseFloat(amount) > 0 ? `Add $${parseFloat(amount).toFixed(2)}` : 'Add Funds'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
+                <TouchableOpacity
+                  style={[
+                    styles.actionButton,
+                    (!amount || parseFloat(amount) <= 0 || isDepositing) && styles.actionButtonDisabled,
+                  ]}
+                  onPress={handleDeposit}
+                  disabled={!amount || parseFloat(amount) <= 0 || isDepositing}
+                >
+                  {isDepositing ? (
+                    <ActivityIndicator color={COLORS.pureWhite} />
+                  ) : (
+                    <Text style={styles.actionButtonText}>
+                      {amount && parseFloat(amount) > 0 ? `Add $${parseFloat(amount).toFixed(2)}` : 'Add Funds'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )
           ) : (
             // Withdraw Tab - Full withdrawal only
             <>
@@ -1082,6 +1118,72 @@ const styles = StyleSheet.create({
   noFundsSubtext: {
     fontSize: 14,
     color: COLORS.grey,
+  },
+  // Zero Balance Guide
+  zeroBalanceGuide: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  zeroBalanceIconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: `${COLORS.secondary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  zeroBalanceTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.black,
+    marginBottom: 8,
+  },
+  zeroBalanceText: {
+    fontSize: 14,
+    color: COLORS.grey,
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  zeroBalanceSteps: {
+    width: '100%',
+    gap: 12,
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  zeroBalanceStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  zeroBalanceStepDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.secondary,
+  },
+  zeroBalanceStepText: {
+    fontSize: 14,
+    color: COLORS.grey,
+    flex: 1,
+  },
+  zeroBalanceButton: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  zeroBalanceButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.pureWhite,
   },
   // How It Works
   howItWorksHeader: {

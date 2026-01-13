@@ -2,11 +2,14 @@
  * SensitiveView Component
  * Wraps content that should be hidden from UXCam session recordings
  * Use for wallet addresses, balances, amounts, and other sensitive financial data
+ *
+ * Note: UXCam occlusion is automatically skipped on simulator
  */
 
 import React, { useRef, useEffect } from 'react';
 import { View, ViewProps, findNodeHandle } from 'react-native';
 import RNUxcam from 'react-native-ux-cam';
+import { isUXCamAvailable } from '../services/analytics';
 
 interface SensitiveViewProps extends ViewProps {
   /** Whether occlusion is enabled (default: true) */
@@ -32,6 +35,9 @@ const SensitiveView: React.FC<SensitiveViewProps> = ({
   const viewRef = useRef<View>(null);
 
   useEffect(() => {
+    // Skip UXCam occlusion on simulator or if UXCam isn't available
+    if (!isUXCamAvailable()) return;
+
     if (enabled && viewRef.current) {
       try {
         // Get the native node handle and occlude it

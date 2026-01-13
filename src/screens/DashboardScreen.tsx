@@ -228,6 +228,11 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   // Pulse animation for earning indicator
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
 
+  // Refresh success toast state
+  const [showUpdatedToast, setShowUpdatedToast] = React.useState(false);
+  const toastOpacity = React.useRef(new Animated.Value(0)).current;
+  const toastTranslateY = React.useRef(new Animated.Value(-20)).current;
+
   // Analytics: Track screen view on mount
   React.useEffect(() => {
     Analytics.trackScreenView('Dashboard');
@@ -373,6 +378,41 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     return () => subscription.remove();
   }, [wasInCoinbase, refetchBalances, refetchPositions]);
 
+  const showRefreshToast = React.useCallback(() => {
+    setShowUpdatedToast(true);
+    toastOpacity.setValue(0);
+    toastTranslateY.setValue(-20);
+
+    Animated.parallel([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(toastTranslateY, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Auto-hide after 2 seconds
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(toastOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(toastTranslateY, {
+          toValue: -20,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start(() => setShowUpdatedToast(false));
+    }, 2000);
+  }, [toastOpacity, toastTranslateY]);
+
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     const timer = Analytics.createTimer();
@@ -380,7 +420,8 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     Analytics.trackBalanceFetchDuration(timer.stop());
     Analytics.trackBalanceRefreshed(cashBalance, savingsBalance, totalEarned);
     setRefreshing(false);
-  }, [refetchBalances, refetchPositions, refetchApy, cashBalance, savingsBalance, totalEarned]);
+    showRefreshToast();
+  }, [refetchBalances, refetchPositions, refetchApy, cashBalance, savingsBalance, totalEarned, showRefreshToast]);
 
   const handleSettings = () => {
     Analytics.trackButtonTap('Settings', 'Dashboard');
@@ -605,6 +646,22 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     <View style={styles.container}>
       <StatusBar style="dark" />
 
+      {/* Refresh Success Toast */}
+      {showUpdatedToast && (
+        <Animated.View
+          style={[
+            styles.updatedToast,
+            {
+              opacity: toastOpacity,
+              transform: [{ translateY: toastTranslateY }],
+            },
+          ]}
+        >
+          <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+          <Text style={styles.updatedToastText}>Balance updated</Text>
+        </Animated.View>
+      )}
+
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -642,6 +699,60 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
             </>
           )}
         </View>
+
+        {/* Zero Balance Onboarding Guide */}
+        {!isLoading && totalBalance === 0 && (
+          <View style={styles.onboardingCard}>
+            <View style={styles.onboardingIconContainer}>
+              <Ionicons name="rocket-outline" size={32} color={COLORS.primary} />
+            </View>
+            <Text style={styles.onboardingTitle}>Welcome! Let's get started</Text>
+            <Text style={styles.onboardingText}>
+              Add funds to your account to start earning up to {displayApy}% APY on your savings.
+            </Text>
+
+            <View style={styles.onboardingSteps}>
+              <View style={styles.onboardingStep}>
+                <View style={styles.onboardingStepNumber}>
+                  <Text style={styles.onboardingStepNumberText}>1</Text>
+                </View>
+                <View style={styles.onboardingStepContent}>
+                  <Text style={styles.onboardingStepTitle}>Add funds to your Cash account</Text>
+                  <Text style={styles.onboardingStepText}>Buy with card or transfer USDC</Text>
+                </View>
+              </View>
+              <View style={styles.onboardingStep}>
+                <View style={styles.onboardingStepNumber}>
+                  <Text style={styles.onboardingStepNumberText}>2</Text>
+                </View>
+                <View style={styles.onboardingStepContent}>
+                  <Text style={styles.onboardingStepTitle}>Move funds to Savings</Text>
+                  <Text style={styles.onboardingStepText}>Start earning yield instantly</Text>
+                </View>
+              </View>
+              <View style={styles.onboardingStep}>
+                <View style={styles.onboardingStepNumber}>
+                  <Text style={styles.onboardingStepNumberText}>3</Text>
+                </View>
+                <View style={styles.onboardingStepContent}>
+                  <Text style={styles.onboardingStepTitle}>Watch your money grow</Text>
+                  <Text style={styles.onboardingStepText}>Withdraw anytime, no lock-up</Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.onboardingButton}
+              onPress={() => {
+                Analytics.trackButtonTap('Add Funds Onboarding', 'Dashboard');
+                setShowFundingModal(true);
+              }}
+            >
+              <Ionicons name="add" size={20} color={COLORS.pureWhite} />
+              <Text style={styles.onboardingButtonText}>Add Your First Funds</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Cash Account Card */}
         {!isLoading && (
@@ -1219,6 +1330,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.white,
   },
+  updatedToast: {
+    position: 'absolute',
+    top: 60,
+    left: 24,
+    right: 24,
+    backgroundColor: COLORS.pureWhite,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    zIndex: 100,
+    shadowColor: COLORS.success,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: `${COLORS.success}30`,
+  },
+  updatedToastText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.success,
+  },
   scrollView: {
     flex: 1,
   },
@@ -1479,6 +1617,98 @@ const styles = StyleSheet.create({
     color: COLORS.grey,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  // Zero Balance Onboarding
+  onboardingCard: {
+    backgroundColor: COLORS.pureWhite,
+    borderRadius: 20,
+    padding: 24,
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: COLORS.secondary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  onboardingIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: `${COLORS.primary}10`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  onboardingTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.black,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  onboardingText: {
+    fontSize: 15,
+    color: COLORS.grey,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  onboardingSteps: {
+    gap: 16,
+    marginBottom: 24,
+  },
+  onboardingStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  onboardingStepNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.secondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  onboardingStepNumberText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.pureWhite,
+  },
+  onboardingStepContent: {
+    flex: 1,
+  },
+  onboardingStepTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.black,
+    marginBottom: 2,
+  },
+  onboardingStepText: {
+    fontSize: 13,
+    color: COLORS.grey,
+  },
+  onboardingButton: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primary,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  onboardingButtonText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: COLORS.pureWhite,
   },
   // Trust Section
   trustSection: {

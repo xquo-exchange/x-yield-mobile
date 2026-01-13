@@ -209,20 +209,39 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
     }
   };
 
+  const scrollToSlide = (index: number) => {
+    flatListRef.current?.scrollToIndex({ index, animated: true });
+    setActiveIndex(index);
+  };
+
   const renderPaginationDots = () => {
     return (
       <View style={styles.pagination}>
         {SLIDES.map((_, index) => (
-          <View
+          <TouchableOpacity
             key={index}
-            style={[
-              styles.paginationDot,
-              index === activeIndex ? styles.paginationDotActive : styles.paginationDotInactive,
-            ]}
-          />
+            onPress={() => scrollToSlide(index)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <View
+              style={[
+                styles.paginationDot,
+                index === activeIndex ? styles.paginationDotActive : styles.paginationDotInactive,
+              ]}
+            />
+          </TouchableOpacity>
         ))}
       </View>
     );
+  };
+
+  const handleSkip = () => {
+    navigation.navigate('Login');
+    Analytics.trackButtonTap('Skip', 'Welcome', {
+      skipped_at_slide: activeIndex + 1,
+      total_slides: SLIDES.length,
+    });
   };
 
   return (
@@ -232,6 +251,18 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
       style={styles.container}
     >
       <StatusBar style="dark" />
+
+      {/* Skip Button */}
+      {activeIndex < SLIDES.length - 1 && (
+        <TouchableOpacity
+          style={styles.skipButton}
+          onPress={handleSkip}
+          activeOpacity={0.7}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Text style={styles.skipButtonText}>Skip</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Carousel */}
       <FlatList
@@ -246,6 +277,16 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
         scrollEventThrottle={16}
         bounces={false}
         style={styles.flatList}
+        decelerationRate="fast"
+        snapToInterval={width}
+        snapToAlignment="start"
+        initialNumToRender={3}
+        removeClippedSubviews={false}
+        getItemLayout={(_, index) => ({
+          length: width,
+          offset: width * index,
+          index,
+        })}
       />
 
       {/* Pagination Dots */}
@@ -256,6 +297,9 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
         <TouchableOpacity
           style={styles.getStartedButton}
           onPress={() => {
+            // Navigate immediately for instant responsiveness
+            navigation.navigate('Login');
+            // Track analytics asynchronously (fire-and-forget)
             Analytics.trackButtonTap('Get Started', 'Welcome', {
               viewed_slides: activeIndex + 1,
               total_slides: SLIDES.length,
@@ -264,9 +308,8 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
               slides_viewed: activeIndex + 1,
               completed_all_slides: activeIndex === SLIDES.length - 1,
             });
-            navigation.navigate('Login');
           }}
-          activeOpacity={0.9}
+          activeOpacity={0.7}
         >
           <Text style={styles.getStartedButtonText}>Get Started</Text>
         </TouchableOpacity>
@@ -284,6 +327,19 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  skipButton: {
+    position: 'absolute',
+    top: 60,
+    right: 24,
+    zIndex: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  skipButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.grey,
   },
   logoImageContainer: {
     width: 160,

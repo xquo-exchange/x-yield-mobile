@@ -8,9 +8,13 @@ import { Mixpanel } from 'mixpanel-react-native';
 import RNUxcam from 'react-native-ux-cam';
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
+import * as Device from 'expo-device';
 
 // Debug mode - set to false for production
 const DEBUG = __DEV__ ?? false;
+
+// Simulator detection - UXCam doesn't work on simulators
+const isSimulator = !Device.isDevice;
 
 // Mixpanel Project Token
 const MIXPANEL_TOKEN = 'b8d711cabf77f254b965383fa15f7302';
@@ -112,9 +116,16 @@ export async function initializeAnalytics(): Promise<void> {
 
 /**
  * Initialize UXCam session recording
+ * Note: UXCam is skipped on simulators as it requires a real device
  */
 export async function initializeUXCam(): Promise<void> {
   if (uxcamInitialized) return;
+
+  // Skip UXCam on simulator - it doesn't work and causes errors
+  if (isSimulator) {
+    console.log('[Analytics] UXCam skipped - running on simulator');
+    return;
+  }
 
   try {
     // Configure UXCam
@@ -149,6 +160,20 @@ export async function initializeUXCam(): Promise<void> {
  */
 export function isAnalyticsReady(): boolean {
   return isInitialized && mixpanel !== null;
+}
+
+/**
+ * Check if UXCam is available (initialized and not on simulator)
+ */
+export function isUXCamAvailable(): boolean {
+  return uxcamInitialized && !isSimulator;
+}
+
+/**
+ * Check if running on simulator
+ */
+export function isRunningOnSimulator(): boolean {
+  return isSimulator;
 }
 
 /**

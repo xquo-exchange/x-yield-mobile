@@ -157,6 +157,12 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 }}
                 onBlur={() => setIsInputFocused(false)}
               />
+              <View style={styles.hintContainer}>
+                <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.secondary} />
+                <Text style={styles.hintText}>
+                  We'll send a 6-digit code to verify it's you. No password needed.
+                </Text>
+              </View>
             </View>
 
             <TouchableOpacity
@@ -279,6 +285,19 @@ const styles = StyleSheet.create({
   inputContainer: {
     marginBottom: 24,
     marginTop: 20,
+  },
+  hintContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 12,
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  hintText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.grey,
+    lineHeight: 20,
   },
   input: {
     height: 56,
