@@ -37,7 +37,37 @@ import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnr
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
 import { useDeepLink } from '../contexts/DeepLinkContext';
 import * as Analytics from '../services/analytics';
+import {
+  trackAchievementsModalOpened,
+  trackAchievementsModalClosed,
+  trackSavingsGoalSet,
+  trackSavingsGoalCleared,
+  trackSavingsGoalReached,
+  trackTrustSignalViewed,
+} from '../services/analytics';
 import SensitiveView from '../components/SensitiveView';
+import SavingsGoalCard from '../components/SavingsGoalCard';
+import SetGoalModal from '../components/SetGoalModal';
+import CelebrationModal from '../components/CelebrationModal';
+import BadgeToast from '../components/BadgeToast';
+import AchievementsModal from '../components/AchievementsModal';
+import {
+  getSavingsGoal,
+  setSavingsGoal,
+  clearSavingsGoal,
+  markGoalReached,
+  SavingsGoal,
+} from '../services/savingsGoal';
+import {
+  getBadges,
+  getBadgeStats,
+  getBadgeDefinition,
+  checkAndAwardBadges,
+  trackAppOpen,
+  BadgesData,
+  BadgeStats,
+  BadgeDefinition,
+} from '../services/badges';
 
 // Color Palette - PayPal/Revolut Style
 const COLORS = {
@@ -233,9 +263,31 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const toastOpacity = React.useRef(new Animated.Value(0)).current;
   const toastTranslateY = React.useRef(new Animated.Value(-20)).current;
 
+  // Savings goal state
+  const [savingsGoal, setSavingsGoalState] = React.useState<SavingsGoal | null>(null);
+  const [showGoalModal, setShowGoalModal] = React.useState(false);
+  const [showGoalCelebration, setShowGoalCelebration] = React.useState(false);
+
+  // Badge/Achievement state
+  const [badges, setBadges] = React.useState<BadgesData>({});
+  const [badgeStats, setBadgeStats] = React.useState<BadgeStats>({
+    totalDeposits: 0,
+    highestBalance: 0,
+    currentStreak: 0,
+    longestStreak: 0,
+    lastOpenDate: null,
+    goalsCompleted: 0,
+  });
+  const [showBadgeToast, setShowBadgeToast] = React.useState(false);
+  const [earnedBadge, setEarnedBadge] = React.useState<BadgeDefinition | null>(null);
+  const [showAchievements, setShowAchievements] = React.useState(false);
+
   // Analytics: Track screen view on mount
   React.useEffect(() => {
     Analytics.trackScreenView('Dashboard');
+    // Track trust signals viewed
+    trackTrustSignalViewed('audited_contracts', 'Dashboard');
+    trackTrustSignalViewed('non_custodial', 'Dashboard');
     return () => Analytics.trackScreenExit('Dashboard');
   }, []);
 
@@ -285,6 +337,117 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     };
     loadDeposited();
   }, [displayAddress, savingsBalance]);
+
+  // Load savings goal
+  React.useEffect(() => {
+    const loadGoal = async () => {
+      const goal = await getSavingsGoal();
+      setSavingsGoalState(goal);
+    };
+    loadGoal();
+  }, []);
+
+  // Load badges and track app open for streaks
+  React.useEffect(() => {
+    const loadBadgesAndTrackOpen = async () => {
+      // Load badges and stats
+      const [loadedBadges, loadedStats] = await Promise.all([
+        getBadges(),
+        getBadgeStats(),
+      ]);
+      setBadges(loadedBadges);
+      setBadgeStats(loadedStats);
+
+      // Track app open and check for streak badges
+      const newStreakBadges = await trackAppOpen();
+      if (newStreakBadges.length > 0) {
+        // Show toast for first new badge
+        const badgeDef = getBadgeDefinition(newStreakBadges[0]);
+        if (badgeDef) {
+          setEarnedBadge(badgeDef);
+          setShowBadgeToast(true);
+        }
+        // Refresh badges data
+        const updatedBadges = await getBadges();
+        const updatedStats = await getBadgeStats();
+        setBadges(updatedBadges);
+        setBadgeStats(updatedStats);
+      }
+    };
+    loadBadgesAndTrackOpen();
+  }, []);
+
+  // Check badges when savings balance changes
+  const prevSavingsRef = React.useRef(savingsBalance);
+  React.useEffect(() => {
+    const checkBadgesOnBalanceChange = async () => {
+      if (savingsBalance > 0 && savingsBalance !== prevSavingsRef.current) {
+        const justMadeDeposit = savingsBalance > prevSavingsRef.current;
+        prevSavingsRef.current = savingsBalance;
+
+        const newBadges = await checkAndAwardBadges({
+          savingsBalance,
+          justMadeDeposit,
+        });
+
+        if (newBadges.length > 0) {
+          // Show toast for first new badge
+          const badgeDef = getBadgeDefinition(newBadges[0]);
+          if (badgeDef) {
+            setEarnedBadge(badgeDef);
+            setShowBadgeToast(true);
+          }
+          // Refresh badges data
+          const updatedBadges = await getBadges();
+          const updatedStats = await getBadgeStats();
+          setBadges(updatedBadges);
+          setBadgeStats(updatedStats);
+        }
+      }
+    };
+    checkBadgesOnBalanceChange();
+  }, [savingsBalance]);
+
+  // Handle savings goal actions
+  const handleSetGoal = async (amount: number) => {
+    const goal = await setSavingsGoal(amount);
+    setSavingsGoalState(goal);
+    trackSavingsGoalSet(amount);
+  };
+
+  const handleClearGoal = async () => {
+    await clearSavingsGoal();
+    setSavingsGoalState(null);
+    trackSavingsGoalCleared();
+  };
+
+  const handleGoalReached = async () => {
+    await markGoalReached();
+    setShowGoalCelebration(true);
+    trackSavingsGoalReached(savingsGoal?.targetAmount || 0);
+
+    // Check for goal_getter badge
+    const newBadges = await checkAndAwardBadges({
+      savingsBalance,
+      justCompletedGoal: true,
+    });
+
+    if (newBadges.length > 0) {
+      // Delay badge toast to show after celebration
+      setTimeout(async () => {
+        const badgeDef = getBadgeDefinition(newBadges[0]);
+        if (badgeDef) {
+          setEarnedBadge(badgeDef);
+          setShowBadgeToast(true);
+        }
+        // Refresh badges data
+        const updatedBadges = await getBadges();
+        const updatedStats = await getBadgeStats();
+        setBadges(updatedBadges);
+        setBadgeStats(updatedStats);
+      }, 3000);
+    }
+  };
 
   // Handle offramp deep link from context
   const { pendingOfframp, clearPendingOfframp } = useDeepLink();
@@ -430,6 +593,15 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       'What would you like to do?',
       [
         { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Achievements',
+          onPress: () => {
+            Analytics.trackButtonTap('Achievements', 'Dashboard');
+            const earnedCount = Object.values(badges).filter((b) => b.earned).length;
+            trackAchievementsModalOpened(earnedCount, 7);
+            setShowAchievements(true);
+          },
+        },
         {
           text: 'Logout',
           style: 'destructive',
@@ -676,9 +848,32 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
             style={styles.headerLogo}
             resizeMode="contain"
           />
-          <TouchableOpacity style={styles.settingsButton} onPress={handleSettings}>
-            <Ionicons name="settings-outline" size={22} color={COLORS.grey} />
-          </TouchableOpacity>
+          <View style={styles.headerButtons}>
+            {/* Achievements Button */}
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => {
+                Analytics.trackButtonTap('Achievements Header', 'Dashboard');
+                const earnedCount = Object.values(badges).filter((b) => b.earned).length;
+                trackAchievementsModalOpened(earnedCount, 7); // 7 total badges
+                setShowAchievements(true);
+              }}
+            >
+              <Ionicons name="trophy" size={20} color={COLORS.primary} />
+              {/* Badge count indicator */}
+              {Object.values(badges).filter((b) => b.earned).length > 0 && (
+                <View style={styles.badgeCountIndicator}>
+                  <Text style={styles.badgeCountText}>
+                    {Object.values(badges).filter((b) => b.earned).length}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {/* Settings Button */}
+            <TouchableOpacity style={styles.headerButton} onPress={handleSettings}>
+              <Ionicons name="settings-outline" size={22} color={COLORS.grey} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Main Balance Section */}
@@ -695,10 +890,24 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                   isEarning={savingsBalance > 0}
                 />
               </SensitiveView>
-              <Text style={styles.balanceSubtext}>Across 2 accounts</Text>
             </>
           )}
         </View>
+
+        {/* Streak Card - show when user has activity */}
+        {!isLoading && badgeStats.currentStreak > 0 && (
+          <View style={styles.streakCard}>
+            <View style={styles.streakLeft}>
+              <Ionicons name="flame" size={20} color="#F97316" />
+              <Text style={styles.streakText}>
+                <Text style={styles.streakNumber}>{badgeStats.currentStreak}</Text> day streak
+              </Text>
+            </View>
+            <Text style={styles.streakMotivation}>
+              {badgeStats.currentStreak >= 7 ? "You're on fire!" : "Open tomorrow to continue"}
+            </Text>
+          </View>
+        )}
 
         {/* Zero Balance Onboarding Guide */}
         {!isLoading && totalBalance === 0 && (
@@ -811,6 +1020,19 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                 </View>
               </View>
 
+              {/* Trust Signals */}
+              <View style={styles.trustSignals}>
+                <View style={styles.trustItem}>
+                  <Ionicons name="shield-checkmark" size={12} color={COLORS.grey} />
+                  <Text style={styles.trustText}>Audited contracts</Text>
+                </View>
+                <View style={styles.trustDot} />
+                <View style={styles.trustItem}>
+                  <Ionicons name="lock-closed" size={12} color={COLORS.grey} />
+                  <Text style={styles.trustText}>Non-custodial</Text>
+                </View>
+              </View>
+
               {savingsBalance > 0 ? (
                 <>
                   <SensitiveView>
@@ -872,21 +1094,22 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           </View>
         )}
 
-        {/* Trust Indicators */}
-        <View style={styles.trustSection}>
-          <View style={styles.trustItem}>
-            <Ionicons name="lock-closed-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.trustText}>Non-custodial</Text>
-          </View>
-          <View style={styles.trustItem}>
-            <Ionicons name="flash-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.trustText}>No gas fees</Text>
-          </View>
-          <View style={styles.trustItem}>
-            <Ionicons name="arrow-undo-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.trustText}>Exit anytime</Text>
-          </View>
-        </View>
+        {/* Savings Goal Card - show if user has savings */}
+        {!isLoading && savingsBalance > 0 && (
+          <SavingsGoalCard
+            goal={savingsGoal}
+            currentSavings={savingsBalance}
+            onSetGoal={() => {
+              Analytics.trackButtonTap('Set Savings Goal', 'Dashboard');
+              setShowGoalModal(true);
+            }}
+            onEditGoal={() => {
+              Analytics.trackButtonTap('Edit Savings Goal', 'Dashboard');
+              setShowGoalModal(true);
+            }}
+            onGoalReached={handleGoalReached}
+          />
+        )}
 
         {/* How It Works (Expandable) */}
         <TouchableOpacity
@@ -1321,6 +1544,54 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           </View>
         </View>
       </Modal>
+
+      {/* Set Goal Modal */}
+      <SetGoalModal
+        visible={showGoalModal}
+        onClose={() => setShowGoalModal(false)}
+        onSave={handleSetGoal}
+        onClear={handleClearGoal}
+        currentGoal={savingsGoal}
+        currentSavings={savingsBalance}
+      />
+
+      {/* Goal Reached Celebration */}
+      {savingsGoal && (
+        <CelebrationModal
+          visible={showGoalCelebration}
+          onClose={() => setShowGoalCelebration(false)}
+          amount={savingsGoal.targetAmount}
+          apy={parseFloat(displayApy)}
+          isFirstDeposit={false}
+          milestoneReached={savingsGoal.targetAmount}
+        />
+      )}
+
+      {/* Badge Toast Notification */}
+      <BadgeToast
+        visible={showBadgeToast}
+        badge={earnedBadge}
+        onClose={() => {
+          setShowBadgeToast(false);
+          setEarnedBadge(null);
+        }}
+        onPress={() => {
+          setShowBadgeToast(false);
+          setEarnedBadge(null);
+          setShowAchievements(true);
+        }}
+      />
+
+      {/* Achievements Modal */}
+      <AchievementsModal
+        visible={showAchievements}
+        onClose={() => {
+          trackAchievementsModalClosed();
+          setShowAchievements(false);
+        }}
+        badges={badges}
+        stats={badgeStats}
+      />
     </View>
   );
 }
@@ -1376,6 +1647,43 @@ const styles = StyleSheet.create({
     width: 100,
     height: 32,
   },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.pureWhite,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  badgeCountIndicator: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: COLORS.pureWhite,
+  },
+  badgeCountText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.pureWhite,
+  },
   settingsButton: {
     width: 40,
     height: 40,
@@ -1399,10 +1707,55 @@ const styles = StyleSheet.create({
     color: COLORS.grey,
     marginBottom: 8,
   },
-  balanceSubtext: {
-    fontSize: 13,
+  // Streak Card
+  streakCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: COLORS.pureWhite,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  streakLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  streakText: {
+    fontSize: 14,
+    color: COLORS.black,
+  },
+  streakNumber: {
+    fontWeight: '700',
+  },
+  streakMotivation: {
+    fontSize: 12,
     color: COLORS.grey,
-    marginTop: 8,
+  },
+  // Trust Signals
+  trustSignals: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    gap: 6,
+  },
+  trustItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  trustText: {
+    fontSize: 11,
+    color: COLORS.grey,
+  },
+  trustDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: COLORS.border,
   },
   // Cash Card
   cashCard: {
@@ -1709,21 +2062,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     color: COLORS.pureWhite,
-  },
-  // Trust Section
-  trustSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  trustItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  trustText: {
-    fontSize: 12,
-    color: COLORS.grey,
   },
   // How It Works
   howItWorksToggle: {

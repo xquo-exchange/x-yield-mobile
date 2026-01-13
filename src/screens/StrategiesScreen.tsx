@@ -19,6 +19,7 @@ import {
   Linking,
 } from 'react-native';
 import * as Analytics from '../services/analytics';
+import { trackTrustSignalViewed } from '../services/analytics';
 import SensitiveView from '../components/SensitiveView';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,6 +43,8 @@ import {
   recordWithdrawal,
   recoverMissingDeposit,
 } from '../services/depositTracker';
+import { recordDepositMilestone } from '../services/milestoneTracker';
+import CelebrationModal from '../components/CelebrationModal';
 
 // Color Palette - PayPal/Revolut Style
 const COLORS = {
@@ -153,6 +156,14 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [activeTab, setActiveTab] = useState<TabType>('add');
   const [isInputFocused, setIsInputFocused] = useState(false);
 
+  // Celebration modal state
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [celebrationData, setCelebrationData] = useState<{
+    amount: number;
+    isFirstDeposit: boolean;
+    milestoneReached: number | null;
+  } | null>(null);
+
   const hasPositions = positions.some(p => p.shares > BigInt(0));
   const savingsAmount = parseFloat(positionsTotal) || 0;
   const availableBalance = usdc ? parseFloat(usdc.balance) : 0;
@@ -160,6 +171,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   // Analytics: Track screen view on mount
   useEffect(() => {
     Analytics.trackScreenView('ManageFunds');
+    // Track trust signals viewed on screen mount
+    trackTrustSignalViewed('audited_contracts', 'ManageFunds');
+    trackTrustSignalViewed('withdraw_anytime', 'ManageFunds');
     return () => Analytics.trackScreenExit('ManageFunds');
   }, []);
 
@@ -244,26 +258,33 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       const newTotalDeposited = await getTotalDeposited(displayAddress);
       setTotalDeposited(newTotalDeposited);
 
+      // Record milestone and check for achievements
+      const milestoneResult = await recordDepositMilestone(depositAmount);
+
       setAmount('');
       refetchBalances();
       refetchPositions();
 
       Analytics.trackDepositSuccess(depositAmount, STRATEGY.name, txHash, duration);
 
-      Alert.alert(
-        'Success',
-        `$${depositAmount.toFixed(2)} added to your yield account.`,
-        [
-          { text: 'OK' },
-          {
-            text: 'View Details',
-            onPress: () => {
-              Analytics.trackButtonTap('View Details', 'ManageFunds', { type: 'deposit' });
-              Linking.openURL(`https://basescan.org/tx/${txHash}`);
-            },
-          },
-        ]
-      );
+      // Track milestone events
+      if (milestoneResult.isFirstDeposit) {
+        Analytics.track('First Deposit Completed', { amount: depositAmount });
+      }
+      if (milestoneResult.newMilestoneReached) {
+        Analytics.track('Milestone Reached', {
+          milestone: milestoneResult.newMilestoneReached,
+          total_deposits: milestoneResult.depositsCount,
+        });
+      }
+
+      // Show celebration modal
+      setCelebrationData({
+        amount: depositAmount,
+        isFirstDeposit: milestoneResult.isFirstDeposit,
+        milestoneReached: milestoneResult.newMilestoneReached,
+      });
+      setShowCelebration(true);
     } catch (error) {
       const errorMessage = (error as Error)?.message || 'Unknown error';
       Analytics.trackDepositFailed(depositAmount, STRATEGY.name, errorMessage);
@@ -581,6 +602,18 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                   </TouchableOpacity>
                 </View>
 
+                {/* Trust Signals */}
+                <View style={styles.depositTrustSignals}>
+                  <View style={styles.depositTrustItem}>
+                    <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.grey} />
+                    <Text style={styles.depositTrustText}>Audited contracts</Text>
+                  </View>
+                  <View style={styles.depositTrustItem}>
+                    <Ionicons name="time-outline" size={14} color={COLORS.grey} />
+                    <Text style={styles.depositTrustText}>Withdraw anytime</Text>
+                  </View>
+                </View>
+
                 <TouchableOpacity
                   style={[
                     styles.actionButton,
@@ -759,6 +792,22 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           </View>
         </View>
       </ScrollView>
+
+      {/* Celebration Modal */}
+      {celebrationData && (
+        <CelebrationModal
+          visible={showCelebration}
+          onClose={() => {
+            setShowCelebration(false);
+            setCelebrationData(null);
+            Analytics.trackButtonTap('View Savings', 'Celebration');
+          }}
+          amount={celebrationData.amount}
+          apy={parseFloat(displayApy)}
+          isFirstDeposit={celebrationData.isFirstDeposit}
+          milestoneReached={celebrationData.milestoneReached}
+        />
+      )}
     </View>
   );
 }
@@ -1019,6 +1068,21 @@ const styles = StyleSheet.create({
     color: COLORS.pureWhite,
     fontWeight: '700',
     fontSize: 13,
+  },
+  depositTrustSignals: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginBottom: 16,
+  },
+  depositTrustItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  depositTrustText: {
+    fontSize: 12,
+    color: COLORS.grey,
   },
   actionButton: {
     backgroundColor: COLORS.primary,

@@ -1151,3 +1151,119 @@ export function addSessionNote(note: string): void {
     console.error('[Analytics] Failed to add session note:', error);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 19. CELEBRATION MODAL EVENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function trackCelebrationModalShown(amount: number, isFirstDeposit: boolean, milestone?: number): void {
+  track('celebration_modal_shown', {
+    amount,
+    is_first_deposit: isFirstDeposit,
+    milestone_reached: milestone,
+  });
+}
+
+export function trackCelebrationModalDismissed(): void {
+  track('celebration_modal_dismissed', {});
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 20. SAVINGS GOAL EVENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function trackSavingsGoalSet(targetAmount: number): void {
+  track('savings_goal_set', {
+    target_amount: targetAmount,
+  });
+
+  setUserProperties({
+    has_savings_goal: true,
+    savings_goal_amount: targetAmount,
+  });
+}
+
+export function trackSavingsGoalProgressViewed(targetAmount: number, currentAmount: number, percentComplete: number): void {
+  track('savings_goal_progress_viewed', {
+    target_amount: targetAmount,
+    current_amount: currentAmount,
+    percent_complete: percentComplete,
+  });
+}
+
+export function trackSavingsGoalReached(targetAmount: number, daysToComplete?: number): void {
+  track('savings_goal_reached', {
+    target_amount: targetAmount,
+    days_to_complete: daysToComplete,
+  });
+
+  incrementUserProperty('goals_completed', 1);
+  setUserProperties({
+    last_goal_completed_date: new Date().toISOString(),
+  });
+}
+
+export function trackSavingsGoalCleared(): void {
+  track('savings_goal_cleared', {});
+
+  setUserProperties({
+    has_savings_goal: false,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 21. BADGES/ACHIEVEMENTS EVENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function trackBadgeEarned(badgeId: string, badgeName: string): void {
+  track('badge_earned', {
+    badge_id: badgeId,
+    badge_name: badgeName,
+  });
+
+  incrementUserProperty('badges_earned', 1);
+}
+
+export function trackAchievementsModalOpened(earnedCount: number, totalCount: number): void {
+  track('achievements_modal_opened', {
+    earned_count: earnedCount,
+    total_count: totalCount,
+  });
+}
+
+export function trackAchievementsModalClosed(): void {
+  track('achievements_modal_closed', {});
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 22. STREAK EVENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function trackStreakUpdated(currentStreak: number, longestStreak: number): void {
+  track('streak_updated', {
+    current_streak: currentStreak,
+    longest_streak: longestStreak,
+  });
+
+  setUserProperties({
+    current_streak: currentStreak,
+    longest_streak: longestStreak,
+  });
+}
+
+export function trackStreakMilestoneReached(days: number): void {
+  track('streak_milestone_reached', {
+    days,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 23. TRUST SIGNALS EVENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function trackTrustSignalViewed(signalType: string, screen: string): void {
+  track('trust_signal_viewed', {
+    signal_type: signalType,
+    screen,
+  });
+}
