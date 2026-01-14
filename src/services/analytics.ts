@@ -59,29 +59,16 @@ function generateSessionId(): string {
  * Initialize Mixpanel and UXCam
  */
 export async function initializeAnalytics(): Promise<void> {
-  if (isInitialized) {
-    // Production log: already initialized
-    console.log('[Analytics] Already initialized, skipping');
-    return;
-  }
-
-  if (initializationAttempted) {
-    // Production log: initialization already attempted but failed
-    console.warn('[Analytics] Init already attempted, error was:', initializationError);
+  if (isInitialized || initializationAttempted) {
     return;
   }
 
   initializationAttempted = true;
-  console.log('[Analytics] Starting initialization...');
 
   try {
     // Initialize Mixpanel with EU server
-    console.log('[Analytics] Creating Mixpanel instance...');
     mixpanel = new Mixpanel(MIXPANEL_TOKEN, true);
-
-    console.log('[Analytics] Calling mixpanel.init() with EU server...');
     await mixpanel.init(false, {}, MIXPANEL_SERVER_URL);
-    console.log('[Analytics] Mixpanel initialized with EU server');
 
     isInitialized = true;
     sessionId = generateSessionId();
@@ -98,19 +85,16 @@ export async function initializeAnalytics(): Promise<void> {
       current_balance: 0,
     });
 
-    console.log('[Analytics] Mixpanel initialized successfully, session:', sessionId); // Production log
-
     // Initialize UXCam
     await initializeUXCam();
 
     // Track session start
     trackSessionStarted();
 
-    console.log('[Analytics] Full initialization complete'); // Production log
+    debugLog('[Analytics] Initialized successfully');
   } catch (error) {
     initializationError = (error as Error)?.message || 'Unknown error';
-    console.error('[Analytics] FAILED to initialize Mixpanel:', error);
-    console.error('[Analytics] Error details:', JSON.stringify(error, null, 2));
+    console.error('[Analytics] Failed to initialize:', initializationError);
   }
 }
 
@@ -123,7 +107,7 @@ export async function initializeUXCam(): Promise<void> {
 
   // Skip UXCam on simulator - it doesn't work and causes errors
   if (isSimulator) {
-    console.log('[Analytics] UXCam skipped - running on simulator');
+    debugLog('[Analytics] UXCam skipped - running on simulator');
     return;
   }
 
@@ -225,11 +209,6 @@ export function track(eventName: string, properties?: Record<string, unknown>): 
 
   try {
     mixpanel!.track(eventName, eventProps);
-
-    // Log key events for debugging
-    if (UXCAM_KEY_EVENTS.includes(eventName)) {
-      console.log(`[Analytics] Tracked: ${eventName}`);
-    }
   } catch (error) {
     console.error(`[Analytics] Failed to track "${eventName}":`, error);
   }

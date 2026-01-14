@@ -4,6 +4,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isValidAmount } from '../utils/validation';
 
 const STORAGE_KEY = '@savings_goal';
 
@@ -34,6 +35,11 @@ export async function getSavingsGoal(): Promise<SavingsGoal | null> {
  * Set a new savings goal
  */
 export async function setSavingsGoal(targetAmount: number): Promise<SavingsGoal> {
+  // Validate amount
+  if (!isValidAmount(targetAmount)) {
+    throw new Error('Invalid target amount');
+  }
+
   const goal: SavingsGoal = {
     targetAmount,
     createdAt: Date.now(),

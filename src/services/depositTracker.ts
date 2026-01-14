@@ -11,6 +11,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isValidEthereumAddress, isValidAmount, sanitizeAddress } from '../utils/validation';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -169,7 +170,12 @@ async function syncToBackend(walletAddress: string, totalDeposited: number): Pro
  * Returns 0 if no deposits recorded (first-time user)
  */
 export async function getTotalDeposited(walletAddress: string): Promise<number> {
-  const address = walletAddress.toLowerCase();
+  // Validate address format
+  const address = sanitizeAddress(walletAddress);
+  if (!address) {
+    console.error('[DepositTracker] Invalid wallet address format');
+    return 0;
+  }
 
   // Try backend first (source of truth)
   const backendRecord = await fetchFromBackend(address);
@@ -210,8 +216,19 @@ export async function recordDeposit(
   amount: number,
   txHash?: string
 ): Promise<void> {
+  // Validate inputs
+  const address = sanitizeAddress(walletAddress);
+  if (!address) {
+    console.error('[DepositTracker] Invalid wallet address format');
+    return;
+  }
+
+  if (!isValidAmount(amount)) {
+    console.error('[DepositTracker] Invalid deposit amount');
+    return;
+  }
+
   const deposits = await getAllDeposits();
-  const address = walletAddress.toLowerCase();
 
   const currentRecord = deposits[address] || { totalDeposited: 0, lastUpdated: 0 };
   const previousTotal = currentRecord.totalDeposited;
@@ -231,13 +248,9 @@ export async function recordDeposit(
   };
   await saveDeposits(deposits);
 
-  // Sync to backend (fire and forget, but log result)
+  // Sync to backend (fire and forget)
   recordDepositToBackend(address, amount, txHash).then((success) => {
-    if (success) {
-      debugLog('[DepositTracker] Backend sync complete');
-    } else {
-      console.warn('[DepositTracker] Backend sync failed, will retry on next read');
-    }
+    debugLog('[DepositTracker] Backend sync:', success ? 'complete' : 'failed');
   });
 
   // Verify it was saved correctly
@@ -298,13 +311,9 @@ export async function recordWithdrawal(
   // Save to local storage first
   await saveDeposits(deposits);
 
-  // Sync to backend (fire and forget, but log result)
+  // Sync to backend (fire and forget)
   recordWithdrawalToBackend(address, withdrawnValue, totalValueBeforeWithdraw).then((success) => {
-    if (success) {
-      debugLog('[DepositTracker] Backend withdrawal sync complete');
-    } else {
-      console.warn('[DepositTracker] Backend withdrawal sync failed, will retry on next read');
-    }
+    debugLog('[DepositTracker] Backend withdrawal sync:', success ? 'complete' : 'failed');
   });
 }
 
@@ -393,9 +402,7 @@ export async function recoverMissingDeposit(
   const existingDeposit = await getTotalDeposited(walletAddress);
 
   if (existingDeposit === 0 && currentValue > 0) {
-    console.warn('[SECURITY] Recovering missing deposit data');
-    console.warn(`[SECURITY] Setting deposit to current value: $${currentValue.toFixed(6)}`);
-
+    // Recover missing deposit data (possible app reinstall)
     const deposits = await getAllDeposits();
     const address = walletAddress.toLowerCase();
 
@@ -405,7 +412,7 @@ export async function recoverMissingDeposit(
     };
 
     await saveDeposits(deposits);
-    console.warn('[SECURITY] Deposit data recovered and saved');
+    debugLog('[DepositTracker] Recovered missing deposit data');
     return true;
   }
 

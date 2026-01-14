@@ -326,11 +326,9 @@ export function buildWithdrawBatch(
   // Production fix: Store deposits in backend database linked to wallet address
   // ═══════════════════════════════════════════════════════════════════════════════
   if (totalDeposited === 0 && currentValue > 0) {
-    console.warn('[SECURITY] No deposit record but user has positions!');
-    console.warn('[SECURITY] Possible app reinstall or data loss');
-    console.warn('[SECURITY] Treating current value as deposit (no fee)');
-    console.warn(`[SECURITY] Wallet: ${walletAddress}`);
-    console.warn(`[SECURITY] Current value: $${currentValue.toFixed(6)}`);
+    // No deposit record but user has positions - possible app reinstall
+    // Treat current value as deposit (conservative: no fee charged)
+    debugLog('[Withdraw] No deposit record, treating current value as deposit');
 
     return {
       calls,
