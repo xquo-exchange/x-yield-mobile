@@ -909,7 +909,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           </View>
         )}
 
-        {/* Zero Balance Onboarding Guide */}
+        {/* Zero Balance Onboarding Guide - ONLY entry point for new users */}
         {!isLoading && totalBalance === 0 && (
           <View style={styles.onboardingCard}>
             <View style={styles.onboardingIconContainer}>
@@ -963,8 +963,8 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           </View>
         )}
 
-        {/* Cash Account Card */}
-        {!isLoading && (
+        {/* Cash Account Card - Hidden for $0 balance users (they see onboarding card instead) */}
+        {!isLoading && totalBalance > 0 && (
           <View style={styles.cashCard}>
             <View style={styles.cardHeader}>
               <View style={styles.cardIconContainer}>
@@ -979,12 +979,28 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
               <Text style={styles.cashBalance}>${cashBalance.toFixed(2)}</Text>
             </SensitiveView>
             <View style={styles.cashButtonsRow}>
+              {/* Add Funds is secondary when user has cash but no savings */}
               <TouchableOpacity
-                style={[styles.cashButton, styles.addFundsButtonStyle]}
-                onPress={() => setShowFundingModal(true)}
+                style={[
+                  styles.cashButton,
+                  savingsBalance === 0 && cashBalance > 0 ? styles.addFundsButtonSecondary : styles.addFundsButtonStyle
+                ]}
+                onPress={() => {
+                  Analytics.trackButtonTap('Add Funds Cash Card', 'Dashboard');
+                  setShowFundingModal(true);
+                }}
               >
-                <Ionicons name="add" size={18} color={COLORS.pureWhite} />
-                <Text style={styles.cashButtonText}>Add Funds</Text>
+                <Ionicons
+                  name="add"
+                  size={18}
+                  color={savingsBalance === 0 && cashBalance > 0 ? COLORS.primary : COLORS.pureWhite}
+                />
+                <Text style={[
+                  styles.cashButtonText,
+                  savingsBalance === 0 && cashBalance > 0 && styles.cashButtonTextSecondary
+                ]}>
+                  Add Funds
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.cashButton, styles.withdrawCashButton, cashBalance <= 0 && styles.withdrawCashButtonDisabled]}
@@ -1000,9 +1016,12 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           </View>
         )}
 
-        {/* Savings Account Card */}
-        {!isLoading && (
-          <View style={styles.savingsCard}>
+        {/* Savings Account Card - Hidden for $0 balance users */}
+        {!isLoading && totalBalance > 0 && (
+          <View style={[
+            styles.savingsCard,
+            savingsBalance === 0 && cashBalance > 0 && styles.savingsCardHighlighted
+          ]}>
             <View style={styles.savingsAccent} />
             <View style={styles.savingsContent}>
               <View style={styles.cardHeader}>
@@ -1062,13 +1081,19 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                   <View style={styles.savingsButtons}>
                     <TouchableOpacity
                       style={styles.startEarningButton}
-                      onPress={() => navigation.navigate('Strategies')}
+                      onPress={() => {
+                        Analytics.trackButtonTap('Add More Savings', 'Dashboard');
+                        navigation.navigate('Strategies');
+                      }}
                     >
                       <Text style={styles.startEarningButtonText}>Add More</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.withdrawButton}
-                      onPress={() => navigation.navigate('Strategies')}
+                      onPress={() => {
+                        Analytics.trackButtonTap('Withdraw Savings', 'Dashboard');
+                        navigation.navigate('Strategies');
+                      }}
                     >
                       <Text style={styles.withdrawButtonText}>Withdraw</Text>
                     </TouchableOpacity>
@@ -1076,17 +1101,29 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                 </>
               ) : (
                 <>
+                  {/* Empty state with prominent CTA - this is the PRIMARY action when user has cash */}
                   <View style={styles.emptyState}>
-                    <Text style={styles.emptyStateTitle}>Start earning today</Text>
+                    <Text style={styles.emptyStateTitle}>
+                      {cashBalance > 0 ? `Put your $${cashBalance.toFixed(2)} to work` : 'Start earning today'}
+                    </Text>
                     <Text style={styles.emptyStateText}>
                       Your money grows while you sleep. Withdraw anytime.
                     </Text>
                   </View>
                   <TouchableOpacity
-                    style={styles.startEarningButton}
-                    onPress={() => navigation.navigate('Strategies')}
+                    style={[
+                      styles.startEarningButton,
+                      cashBalance > 0 && styles.startEarningButtonPrimary
+                    ]}
+                    onPress={() => {
+                      Analytics.trackButtonTap('Start Earning', 'Dashboard');
+                      navigation.navigate('Strategies');
+                    }}
                   >
-                    <Text style={styles.startEarningButtonText}>Start Earning</Text>
+                    <Ionicons name="trending-up" size={18} color={COLORS.pureWhite} />
+                    <Text style={styles.startEarningButtonText}>
+                      {cashBalance > 0 ? 'Start Earning Now' : 'Start Earning'}
+                    </Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -1177,27 +1214,81 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
             {fundingView === 'options' ? (
               <View style={styles.optionsContainer}>
-                <TouchableOpacity style={styles.fundingOption} onPress={() => setFundingView('receive')}>
-                  <View style={styles.fundingOptionIcon}>
+                {/* Helper text to reduce decision paralysis */}
+                <Text style={styles.fundingHelperText}>
+                  Choose how you'd like to add USDC to your account
+                </Text>
+
+                {/* Transfer USDC - Recommended option */}
+                <TouchableOpacity
+                  style={[styles.fundingOption, styles.fundingOptionRecommended]}
+                  onPress={() => {
+                    Analytics.trackButtonTap('Transfer USDC', 'FundingModal');
+                    setFundingView('receive');
+                  }}
+                >
+                  <View style={[styles.fundingOptionIcon, styles.fundingOptionIconRecommended]}>
                     <Ionicons name="arrow-down" size={24} color={COLORS.primary} />
                   </View>
                   <View style={styles.fundingOptionContent}>
-                    <Text style={styles.fundingOptionTitle}>Transfer USDC</Text>
-                    <Text style={styles.fundingOptionSubtitle}>Send from any wallet</Text>
+                    <View style={styles.fundingOptionTitleRow}>
+                      <Text style={styles.fundingOptionTitle}>Transfer USDC</Text>
+                      <View style={styles.recommendedBadge}>
+                        <Text style={styles.recommendedBadgeText}>RECOMMENDED</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.fundingOptionSubtitle}>From Coinbase, Binance, or any wallet</Text>
+                    <View style={styles.fundingOptionBenefits}>
+                      <View style={styles.benefitItem}>
+                        <Ionicons name="flash" size={12} color={COLORS.success} />
+                        <Text style={styles.benefitText}>Instant</Text>
+                      </View>
+                      <View style={styles.benefitItem}>
+                        <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
+                        <Text style={styles.benefitText}>No fees</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.primary} />
+                </TouchableOpacity>
+
+                {/* Divider with "or" */}
+                <View style={styles.fundingDivider}>
+                  <View style={styles.fundingDividerLine} />
+                  <Text style={styles.fundingDividerText}>or</Text>
+                  <View style={styles.fundingDividerLine} />
+                </View>
+
+                {/* Buy with Card - Secondary option */}
+                <TouchableOpacity
+                  style={styles.fundingOption}
+                  onPress={() => {
+                    Analytics.trackButtonTap('Buy with Card', 'FundingModal');
+                    handleBuyWithCard();
+                  }}
+                >
+                  <View style={styles.fundingOptionIcon}>
+                    <Ionicons name="card-outline" size={24} color={COLORS.grey} />
+                  </View>
+                  <View style={styles.fundingOptionContent}>
+                    <Text style={[styles.fundingOptionTitle, styles.fundingOptionTitleSecondary]}>
+                      Buy with Card
+                    </Text>
+                    <Text style={styles.fundingOptionSubtitle}>Via Coinbase · 1-2% fee</Text>
+                    <Text style={styles.fundingOptionNote}>
+                      Opens Coinbase to purchase USDC
+                    </Text>
                   </View>
                   <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.fundingOption} onPress={handleBuyWithCard}>
-                  <View style={styles.fundingOptionIcon}>
-                    <Ionicons name="card-outline" size={24} color={COLORS.primary} />
-                  </View>
-                  <View style={styles.fundingOptionContent}>
-                    <Text style={styles.fundingOptionTitle}>Buy with Card</Text>
-                    <Text style={styles.fundingOptionSubtitle}>Via Coinbase</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
-                </TouchableOpacity>
+                {/* Info banner about Coinbase */}
+                <View style={styles.fundingInfoBanner}>
+                  <Ionicons name="information-circle-outline" size={16} color={COLORS.grey} />
+                  <Text style={styles.fundingInfoText}>
+                    Already have crypto? Transfer is fastest. New to crypto? Buy with card works too.
+                  </Text>
+                </View>
               </View>
             ) : (
               <View style={styles.receiveContainer}>
@@ -1359,7 +1450,9 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                       onChangeText={(val) => {
                         const sanitized = val.replace(/[^0-9.]/g, '');
                         if (parseFloat(sanitized) > cashBalance) {
-                          setWithdrawAmount(cashBalance.toFixed(2));
+                          // Truncate to 6 decimals (USDC precision) - never round up
+                          const truncated = Math.floor(cashBalance * 1000000) / 1000000;
+                          setWithdrawAmount(truncated.toString());
                         } else {
                           setWithdrawAmount(sanitized);
                         }
@@ -1374,7 +1467,11 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                     <Text style={styles.availableAmount}>${cashBalance.toFixed(6)}</Text>
                     <TouchableOpacity
                       style={styles.maxButtonSmall}
-                      onPress={() => setWithdrawAmount(cashBalance.toFixed(2))}
+                      onPress={() => {
+                        // Use exact amount truncated to 6 decimals - never round up
+                        const truncated = Math.floor(cashBalance * 1000000) / 1000000;
+                        setWithdrawAmount(truncated.toString());
+                      }}
                     >
                       <Text style={styles.maxButtonSmallText}>Max</Text>
                     </TouchableOpacity>
@@ -1422,7 +1519,9 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                         onChangeText={(val) => {
                           const sanitized = val.replace(/[^0-9.]/g, '');
                           if (parseFloat(sanitized) > cashBalance) {
-                            setWithdrawAmount(cashBalance.toFixed(2));
+                            // Truncate to 6 decimals (USDC precision) - never round up
+                            const truncated = Math.floor(cashBalance * 1000000) / 1000000;
+                            setWithdrawAmount(truncated.toString());
                           } else {
                             setWithdrawAmount(sanitized);
                           }
@@ -1437,10 +1536,14 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                     </View>
                     <View style={styles.availableRow}>
                       <Text style={styles.availableText}>Available</Text>
-                      <Text style={styles.availableAmount}>${cashBalance.toFixed(2)}</Text>
+                      <Text style={styles.availableAmount}>${cashBalance.toFixed(6)}</Text>
                       <TouchableOpacity
                         style={styles.maxButtonSmall}
-                        onPress={() => setWithdrawAmount(cashBalance.toFixed(2))}
+                        onPress={() => {
+                          // Use exact amount truncated to 6 decimals - never round up
+                          const truncated = Math.floor(cashBalance * 1000000) / 1000000;
+                          setWithdrawAmount(truncated.toString());
+                        }}
                       >
                         <Text style={styles.maxButtonSmallText}>Max</Text>
                       </TouchableOpacity>
@@ -1591,6 +1694,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         }}
         badges={badges}
         stats={badgeStats}
+        currentBalance={parseFloat(savingsTotal) || 0}
       />
     </View>
   );
@@ -1831,10 +1935,18 @@ const styles = StyleSheet.create({
   addFundsButtonStyle: {
     backgroundColor: COLORS.primary,
   },
+  addFundsButtonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+  },
   cashButtonText: {
     fontSize: 15,
     fontWeight: '600',
     color: COLORS.pureWhite,
+  },
+  cashButtonTextSecondary: {
+    color: COLORS.primary,
   },
   withdrawCashButton: {
     backgroundColor: 'transparent',
@@ -1866,6 +1978,12 @@ const styles = StyleSheet.create({
     elevation: 3,
     flexDirection: 'row',
     overflow: 'hidden',
+  },
+  savingsCardHighlighted: {
+    borderColor: COLORS.secondary,
+    borderWidth: 2,
+    shadowColor: COLORS.secondary,
+    shadowOpacity: 0.15,
   },
   savingsAccent: {
     width: 4,
@@ -1930,10 +2048,21 @@ const styles = StyleSheet.create({
   },
   startEarningButton: {
     flex: 1,
+    flexDirection: 'row',
     backgroundColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  startEarningButtonPrimary: {
+    paddingVertical: 16,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
   },
   startEarningButtonText: {
     fontSize: 15,
@@ -2162,6 +2291,12 @@ const styles = StyleSheet.create({
   optionsContainer: {
     gap: 12,
   },
+  fundingHelperText: {
+    fontSize: 14,
+    color: COLORS.grey,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
   fundingOption: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2171,27 +2306,105 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  fundingOptionRecommended: {
+    borderColor: COLORS.primary,
+    borderWidth: 2,
+    backgroundColor: `${COLORS.primary}05`,
+  },
   fundingOptionIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: `${COLORS.primary}10`,
+    backgroundColor: `${COLORS.grey}15`,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
   },
+  fundingOptionIconRecommended: {
+    backgroundColor: `${COLORS.primary}15`,
+  },
   fundingOptionContent: {
     flex: 1,
+  },
+  fundingOptionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
   },
   fundingOptionTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.black,
-    marginBottom: 4,
+  },
+  fundingOptionTitleSecondary: {
+    color: COLORS.grey,
   },
   fundingOptionSubtitle: {
     fontSize: 14,
     color: COLORS.grey,
+    marginBottom: 6,
+  },
+  fundingOptionBenefits: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  benefitItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  benefitText: {
+    fontSize: 12,
+    color: COLORS.success,
+    fontWeight: '500',
+  },
+  fundingOptionNote: {
+    fontSize: 12,
+    color: COLORS.grey,
+    fontStyle: 'italic',
+  },
+  recommendedBadge: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  recommendedBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: COLORS.pureWhite,
+    letterSpacing: 0.5,
+  },
+  fundingDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  fundingDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  fundingDividerText: {
+    fontSize: 13,
+    color: COLORS.grey,
+    paddingHorizontal: 16,
+  },
+  fundingInfoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: `${COLORS.grey}10`,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 8,
+    gap: 8,
+  },
+  fundingInfoText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.grey,
+    lineHeight: 18,
   },
   // Receive View
   receiveContainer: {

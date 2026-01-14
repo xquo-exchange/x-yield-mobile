@@ -5,7 +5,7 @@
  * Hides crypto complexity, emphasizes trust and simplicity.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import * as Analytics from '../services/analytics';
 import { trackTrustSignalViewed } from '../services/analytics';
@@ -155,6 +156,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [totalDeposited, setTotalDeposited] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>('add');
   const [isInputFocused, setIsInputFocused] = useState(false);
+  const amountInputRef = useRef<TextInput>(null);
 
   // Celebration modal state
   const [showCelebration, setShowCelebration] = useState(false);
@@ -427,6 +429,8 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
         }
@@ -581,22 +585,34 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
               <>
                 <Text style={styles.inputLabel}>Amount to add</Text>
                 <View style={styles.inputRow}>
-                  <View style={[styles.currencyPrefix, isInputFocused && styles.inputFocused]}>
-                    <Text style={styles.currencyText}>$</Text>
-                  </View>
-                  <TextInput
-                    style={[styles.input, isInputFocused && styles.inputFocused]}
-                    value={amount}
-                    onChangeText={handleAmountChange}
-                    placeholder="0.00"
-                    placeholderTextColor={COLORS.grey}
-                    keyboardType="decimal-pad"
-                    onFocus={() => {
-                      setIsInputFocused(true);
-                      Analytics.trackInputFocus('Amount', 'ManageFunds');
+                  <TouchableOpacity
+                    style={styles.inputTouchable}
+                    activeOpacity={1}
+                    onPress={() => {
+                      // iOS fix: Programmatically focus input on container tap
+                      amountInputRef.current?.focus();
                     }}
-                    onBlur={() => setIsInputFocused(false)}
-                  />
+                  >
+                    <View style={[styles.currencyPrefix, isInputFocused && styles.inputFocused]}>
+                      <Text style={styles.currencyText}>$</Text>
+                    </View>
+                    <TextInput
+                      ref={amountInputRef}
+                      style={[styles.input, isInputFocused && styles.inputFocused]}
+                      value={amount}
+                      onChangeText={handleAmountChange}
+                      placeholder="0.00"
+                      placeholderTextColor={COLORS.grey}
+                      keyboardType="decimal-pad"
+                      autoCorrect={false}
+                      spellCheck={false}
+                      onFocus={() => {
+                        setIsInputFocused(true);
+                        Analytics.trackInputFocus('Amount', 'ManageFunds');
+                      }}
+                      onBlur={() => setIsInputFocused(false)}
+                    />
+                  </TouchableOpacity>
                   <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
                     <Text style={styles.maxButtonText}>MAX</Text>
                   </TouchableOpacity>
@@ -1022,6 +1038,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+  },
+  inputTouchable: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   currencyPrefix: {
     backgroundColor: COLORS.pureWhite,
