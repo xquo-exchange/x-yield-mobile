@@ -37,7 +37,15 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0a0a0a",
+          "image": "./assets/logo_icon.png",
+          "imageWidth": 100
+        }
+      ]
     ],
     "extra": {
       "eas": {

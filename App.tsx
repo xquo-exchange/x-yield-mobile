@@ -1,12 +1,17 @@
-import React from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Platform, View, Text, StyleSheet, Image } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PrivyProvider } from '@privy-io/expo';
 import { SmartWalletsProvider } from '@privy-io/expo/smart-wallets';
 import { PrivyElements } from '@privy-io/expo/ui';
+import * as ExpoSplashScreen from 'expo-splash-screen';
 import AppNavigator from './src/navigation/AppNavigator';
 import { DeepLinkProvider } from './src/contexts/DeepLinkContext';
 import { AnalyticsProvider } from './src/contexts/AnalyticsContext';
+import SplashScreen from './src/components/SplashScreen';
+
+// Mantieni visibile la splash nativa fino a quando non la nascondiamo manualmente
+ExpoSplashScreen.preventAutoHideAsync();
 
 // Define Base chain for Privy (matches viem Chain type)
 const base = {
@@ -42,6 +47,17 @@ function WebNotSupported() {
 }
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
+
+  useEffect(() => {
+    // Nasconde la splash nativa appena il componente monta
+    ExpoSplashScreen.hideAsync();
+  }, []);
+
+  const handleSplashComplete = useCallback(() => {
+    setShowSplash(false);
+  }, []);
+
   if (Platform.OS === 'web') {
     return <WebNotSupported />;
   }
@@ -69,6 +85,7 @@ export default function App() {
           </PrivyProvider>
         </DeepLinkProvider>
       </AnalyticsProvider>
+      {showSplash && <SplashScreen onAnimationComplete={handleSplashComplete} />}
     </SafeAreaProvider>
   );
 }
