@@ -631,10 +631,17 @@ export async function getNetDepositedFromBlockchain(
 }
 
 /**
+ * Date range preset type
+ */
+export type DateRangePresetType = 'this_year' | 'last_year' | 'all_time' | 'ytd' | 'custom';
+
+/**
  * Get date range presets
+ * For 'custom' preset, pass customRange parameter
  */
 export function getDateRangePreset(
-  preset: 'this_year' | 'last_year' | 'all_time' | 'ytd'
+  preset: DateRangePresetType,
+  customRange?: { from: Date; to: Date }
 ): { from: Date; to: Date } {
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -655,12 +662,70 @@ export function getDateRangePreset(
         from: new Date(currentYear, 0, 1),
         to: now,
       };
+    case 'custom':
+      if (customRange) {
+        return {
+          from: customRange.from,
+          to: customRange.to,
+        };
+      }
+      // Fallback to all time if no custom range provided
+      return {
+        from: new Date(2024, 0, 1),
+        to: now,
+      };
     case 'all_time':
     default:
       return {
         from: new Date(2024, 0, 1), // Base chain started 2023, Morpho later
         to: now,
       };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CUSTOM DATE RANGE PERSISTENCE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CUSTOM_DATE_RANGE_KEY = 'custom_date_range';
+
+interface SavedCustomDateRange {
+  from: string; // ISO date string
+  to: string; // ISO date string
+}
+
+/**
+ * Save custom date range to AsyncStorage
+ */
+export async function saveCustomDateRange(from: Date, to: Date): Promise<void> {
+  try {
+    const data: SavedCustomDateRange = {
+      from: from.toISOString(),
+      to: to.toISOString(),
+    };
+    await AsyncStorage.setItem(CUSTOM_DATE_RANGE_KEY, JSON.stringify(data));
+    debugLog('[TransactionHistory] Custom date range saved');
+  } catch (error) {
+    console.error('[TransactionHistory] Error saving custom date range:', error);
+  }
+}
+
+/**
+ * Load custom date range from AsyncStorage
+ */
+export async function loadCustomDateRange(): Promise<{ from: Date; to: Date } | null> {
+  try {
+    const data = await AsyncStorage.getItem(CUSTOM_DATE_RANGE_KEY);
+    if (!data) return null;
+
+    const parsed: SavedCustomDateRange = JSON.parse(data);
+    return {
+      from: new Date(parsed.from),
+      to: new Date(parsed.to),
+    };
+  } catch (error) {
+    console.error('[TransactionHistory] Error loading custom date range:', error);
+    return null;
   }
 }
 
