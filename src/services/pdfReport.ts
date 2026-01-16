@@ -1,28 +1,18 @@
 /**
  * PDF Report Generation Service
  * Generates account statements for transaction history and capital gains calculation
- *
- * Note: PDF export requires native builds with expo-print and expo-sharing.
- * These features are disabled in development builds to prevent crashes.
  */
 
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { TransactionHistoryResult } from './transactionHistory';
 
 /**
  * Check if PDF export is available
- * Currently disabled - will be enabled in production builds
  */
 export async function isPdfExportAvailable(): Promise<boolean> {
-  // PDF export is disabled in dev builds to prevent crashes
-  // Will be enabled when running a production/preview build via EAS
-  if (__DEV__) {
-    return false;
-  }
-
-  // In production, check if native module exists
   try {
-    const ExpoModules = require('expo-modules-core');
-    return !!ExpoModules.NativeModulesProxy?.ExpoPrint;
+    return await Sharing.isAvailableAsync();
   } catch {
     return false;
   }
@@ -34,24 +24,7 @@ export async function isPdfExportAvailable(): Promise<boolean> {
 export async function generateTaxReport(
   data: TransactionHistoryResult
 ): Promise<{ success: boolean; error?: string; unavailable?: boolean }> {
-  // In development mode, return unavailable immediately
-  // This avoids any module loading issues
-  if (__DEV__) {
-    return {
-      success: false,
-      unavailable: true,
-      error: 'PDF export is available in production builds only.',
-    };
-  }
-
-  // Production build - use eval to hide require from Metro's static analysis
-  // This ensures the require is only evaluated at runtime, not bundle time
   try {
-    // eslint-disable-next-line no-eval
-    const Print = eval("require('expo-print')");
-    // eslint-disable-next-line no-eval
-    const Sharing = eval("require('expo-sharing')");
-
     const html = generateReportHTML(data);
     const { uri } = await Print.printToFileAsync({ html, base64: false });
 
@@ -70,7 +43,6 @@ export async function generateTaxReport(
     console.error('[PDFReport] Error:', error);
     return {
       success: false,
-      unavailable: true,
       error: 'PDF export failed. Please try again.',
     };
   }
@@ -82,17 +54,7 @@ export async function generateTaxReport(
 export async function previewTaxReport(
   data: TransactionHistoryResult
 ): Promise<{ success: boolean; error?: string; unavailable?: boolean }> {
-  if (__DEV__) {
-    return {
-      success: false,
-      unavailable: true,
-      error: 'PDF preview is available in production builds only.',
-    };
-  }
-
   try {
-    // eslint-disable-next-line no-eval
-    const Print = eval("require('expo-print')");
     const html = generateReportHTML(data);
     await Print.printAsync({ html });
     return { success: true };
