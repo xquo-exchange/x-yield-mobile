@@ -64,10 +64,12 @@ import {
   getBadgeDefinition,
   checkAndAwardBadges,
   trackAppOpen,
+  syncDepositCount,
   BadgesData,
   BadgeStats,
   BadgeDefinition,
 } from '../services/badges';
+import { getMilestoneState } from '../services/milestoneTracker';
 
 // Color Palette - PayPal/Revolut Style
 const COLORS = {
@@ -353,7 +355,12 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   // Load badges and track app open for streaks
   React.useEffect(() => {
     const loadBadgesAndTrackOpen = async () => {
-      // Load badges and stats
+      // Auto-fix: Sync badge deposit count with the correct count from milestoneTracker
+      // This fixes affected users who had inflated deposit counts from the balance-detection bug
+      const milestoneState = await getMilestoneState();
+      await syncDepositCount(milestoneState.depositsCount);
+
+      // Load badges and stats (now with corrected deposit count)
       const [loadedBadges, loadedStats] = await Promise.all([
         getBadges(),
         getBadgeStats(),
@@ -380,17 +387,20 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
     loadBadgesAndTrackOpen();
   }, []);
 
-  // Check badges when savings balance changes
+  // Check balance-based badges when savings balance changes
+  // NOTE: justMadeDeposit is NOT set here - deposits are tracked in StrategiesScreen
+  // This only checks for balance threshold badges ($100, $500, $1000)
   const prevSavingsRef = React.useRef(savingsBalance);
   React.useEffect(() => {
-    const checkBadgesOnBalanceChange = async () => {
+    const checkBalanceBasedBadges = async () => {
       if (savingsBalance > 0 && savingsBalance !== prevSavingsRef.current) {
-        const justMadeDeposit = savingsBalance > prevSavingsRef.current;
         prevSavingsRef.current = savingsBalance;
 
+        // Only check balance-based badges, NOT deposit count
+        // justMadeDeposit is handled in StrategiesScreen after actual deposit
         const newBadges = await checkAndAwardBadges({
           savingsBalance,
-          justMadeDeposit,
+          // justMadeDeposit: false - removed to prevent counting yield as deposits
         });
 
         if (newBadges.length > 0) {
@@ -408,7 +418,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         }
       }
     };
-    checkBadgesOnBalanceChange();
+    checkBalanceBasedBadges();
   }, [savingsBalance]);
 
   // Handle savings goal actions

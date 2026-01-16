@@ -344,3 +344,35 @@ export async function resetBadges(): Promise<void> {
     console.error('[Badges] Error resetting badges:', error);
   }
 }
+
+/**
+ * Sync badge stats deposit count with the correct count from milestoneTracker
+ * This fixes the bug where balance increases were counted as deposits
+ */
+export async function syncDepositCount(correctCount: number): Promise<void> {
+  try {
+    const stats = await getBadgeStats();
+    if (stats.totalDeposits !== correctCount) {
+      console.log(`[Badges] Syncing deposit count: ${stats.totalDeposits} -> ${correctCount}`);
+      stats.totalDeposits = correctCount;
+      await saveBadgeStats(stats);
+    }
+  } catch (error) {
+    console.error('[Badges] Error syncing deposit count:', error);
+  }
+}
+
+/**
+ * Reset only the deposit count (for fixing affected users)
+ * Preserves other stats like streak
+ */
+export async function resetDepositCount(): Promise<void> {
+  try {
+    const stats = await getBadgeStats();
+    stats.totalDeposits = 0;
+    await saveBadgeStats(stats);
+    console.log('[Badges] Deposit count reset to 0');
+  } catch (error) {
+    console.error('[Badges] Error resetting deposit count:', error);
+  }
+}

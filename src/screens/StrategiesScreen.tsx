@@ -47,6 +47,7 @@ import {
   clearTransactionCache,
 } from '../services/transactionHistory';
 import { recordDepositMilestone } from '../services/milestoneTracker';
+import { checkAndAwardBadges } from '../services/badges';
 import CelebrationModal from '../components/CelebrationModal';
 
 // Color Palette - PayPal/Revolut Style
@@ -267,6 +268,13 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
       // Record milestone and check for achievements
       const milestoneResult = await recordDepositMilestone(depositAmount);
+
+      // Award badges for this deposit (justMadeDeposit: true ensures deposit counter is correct)
+      // Note: savingsBalance here is pre-deposit, but balance badges will be caught on next refresh
+      await checkAndAwardBadges({
+        savingsBalance: savingsAmount + depositAmount,
+        justMadeDeposit: true,
+      });
 
       setAmount('');
       refetchBalances();

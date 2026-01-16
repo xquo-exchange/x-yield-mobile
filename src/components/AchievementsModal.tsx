@@ -4,7 +4,7 @@
  * With tappable locked badges showing unlock requirements
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import {
   BadgesData,
   BadgeStats,
 } from '../services/badges';
+import { getMilestoneState } from '../services/milestoneTracker';
 import BadgeIcon from './BadgeIcons';
 import * as Analytics from '../services/analytics';
 
@@ -104,8 +105,18 @@ export default function AchievementsModal({
   currentBalance = 0,
 }: AchievementsModalProps) {
   const [selectedBadge, setSelectedBadge] = useState<BadgeDefinition | null>(null);
+  const [actualDepositsCount, setActualDepositsCount] = useState(0);
   const earnedCount = Object.values(badges).filter((b) => b.earned).length;
   const totalCount = BADGE_DEFINITIONS.length;
+
+  // Fetch the correct deposit count from milestoneTracker (not badges.ts which is buggy)
+  useEffect(() => {
+    if (visible) {
+      getMilestoneState().then((state) => {
+        setActualDepositsCount(state.depositsCount);
+      });
+    }
+  }, [visible]);
 
   const formatDate = (timestamp: number | null) => {
     if (!timestamp) return '';
@@ -277,7 +288,7 @@ export default function AchievementsModal({
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{stats.totalDeposits}</Text>
+              <Text style={styles.statValue}>{actualDepositsCount}</Text>
               <Text style={styles.statLabel}>Deposits</Text>
             </View>
           </View>
