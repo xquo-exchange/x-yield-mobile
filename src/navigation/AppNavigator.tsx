@@ -8,12 +8,14 @@ import WelcomeScreen from '../screens/WelcomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import StrategiesScreen from '../screens/StrategiesScreen';
+import TransactionHistoryScreen from '../screens/TransactionHistoryScreen';
 
 export type RootStackParamList = {
   Welcome: undefined;
   Login: undefined;
   Dashboard: undefined;
   Strategies: undefined;
+  TransactionHistory: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -47,6 +49,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Dashboard" component={DashboardScreen} />
         <Stack.Screen name="Strategies" component={StrategiesScreen} />
+        <Stack.Screen name="TransactionHistory" component={TransactionHistoryScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

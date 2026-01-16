@@ -32,7 +32,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
-import { getTotalDeposited } from '../services/depositTracker';
+import { getNetDepositedFromBlockchain } from '../services/transactionHistory';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
 import { useDeepLink } from '../contexts/DeepLinkContext';
@@ -327,16 +327,19 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const totalEarned = totalDeposited > 0 ? Math.max(0, savingsBalance - totalDeposited) : 0;
   const dailyEarnings = (savingsBalance * (parseFloat(displayApy) / 100)) / 365;
 
-  // Load total deposited
+  // Load total deposited from blockchain (consistent with Statements screen)
+  // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
+  const otherOwnedAddress = smartWalletAddress && embeddedWalletAddress ? embeddedWalletAddress : undefined;
+
   React.useEffect(() => {
     const loadDeposited = async () => {
       if (displayAddress) {
-        const deposited = await getTotalDeposited(displayAddress);
+        const deposited = await getNetDepositedFromBlockchain(displayAddress, otherOwnedAddress);
         setTotalDeposited(deposited);
       }
     };
     loadDeposited();
-  }, [displayAddress, savingsBalance]);
+  }, [displayAddress, savingsBalance, otherOwnedAddress]);
 
   // Load savings goal
   React.useEffect(() => {
@@ -600,6 +603,13 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
             const earnedCount = Object.values(badges).filter((b) => b.earned).length;
             trackAchievementsModalOpened(earnedCount, 7);
             setShowAchievements(true);
+          },
+        },
+        {
+          text: 'Statements',
+          onPress: () => {
+            Analytics.trackButtonTap('Statements', 'Dashboard');
+            navigation.navigate('TransactionHistory');
           },
         },
         {
@@ -890,6 +900,19 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                   isEarning={savingsBalance > 0}
                 />
               </SensitiveView>
+              {/* View Activity Link */}
+              <TouchableOpacity
+                style={styles.viewActivityLink}
+                onPress={() => {
+                  Analytics.trackButtonTap('View Activity', 'Dashboard');
+                  navigation.navigate('TransactionHistory');
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}
+              >
+                <Ionicons name="time-outline" size={14} color={COLORS.secondary} />
+                <Text style={styles.viewActivityText}>View Activity</Text>
+                <Ionicons name="chevron-forward" size={14} color={COLORS.secondary} />
+              </TouchableOpacity>
             </>
           )}
         </View>
@@ -1810,6 +1833,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.grey,
     marginBottom: 8,
+  },
+  viewActivityLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: COLORS.secondary + '10',
+  },
+  viewActivityText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.secondary,
   },
   // Streak Card
   streakCard: {

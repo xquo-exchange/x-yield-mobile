@@ -40,10 +40,12 @@ import {
 } from '../services/strategyExecution';
 import {
   recordDeposit,
-  getTotalDeposited,
   recordWithdrawal,
-  recoverMissingDeposit,
 } from '../services/depositTracker';
+import {
+  getNetDepositedFromBlockchain,
+  clearTransactionCache,
+} from '../services/transactionHistory';
 import { recordDepositMilestone } from '../services/milestoneTracker';
 import CelebrationModal from '../components/CelebrationModal';
 
@@ -183,19 +185,19 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const totalYield = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
   const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
 
+  // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
+  const otherOwnedAddress = smartWalletAddress && embeddedWalletAddress ? embeddedWalletAddress : undefined;
+
   React.useEffect(() => {
     const loadDeposited = async () => {
-      if (displayAddress && savingsAmount > 0) {
-        await recoverMissingDeposit(displayAddress, savingsAmount);
-        const deposited = await getTotalDeposited(displayAddress);
-        setTotalDeposited(deposited);
-      } else if (displayAddress) {
-        const deposited = await getTotalDeposited(displayAddress);
+      if (displayAddress) {
+        // Use blockchain data for consistent display with Statements screen
+        const deposited = await getNetDepositedFromBlockchain(displayAddress, otherOwnedAddress);
         setTotalDeposited(deposited);
       }
     };
     loadDeposited();
-  }, [displayAddress, positions, savingsAmount]);
+  }, [displayAddress, positions, savingsAmount, otherOwnedAddress]);
 
   const onRefresh = useCallback(async () => {
     Analytics.trackButtonTap('Pull to Refresh', 'ManageFunds');
@@ -257,8 +259,11 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
       await recordDeposit(displayAddress, depositAmount, txHash);
 
-      const newTotalDeposited = await getTotalDeposited(displayAddress);
-      setTotalDeposited(newTotalDeposited);
+      // Clear cache so next fetch gets fresh blockchain data
+      await clearTransactionCache(displayAddress);
+
+      // Optimistic update: add deposit to current total (blockchain will catch up)
+      setTotalDeposited(prev => prev + depositAmount);
 
       // Record milestone and check for achievements
       const milestoneResult = await recordDepositMilestone(depositAmount);
@@ -312,12 +317,13 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       return;
     }
 
-    const totalDeposited = await getTotalDeposited(displayAddress);
+    // Use blockchain data for accurate fee calculation (consistent with Statements)
+    const depositedAmount = await getNetDepositedFromBlockchain(displayAddress, otherOwnedAddress);
 
     const batch = buildWithdrawBatch(
       positions,
       displayAddress as `0x${string}`,
-      totalDeposited
+      depositedAmount
     );
 
     const withdrawAmount = parseFloat(batch.currentValue);
@@ -371,6 +377,12 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
               const currentValue = parseFloat(batch.currentValue);
               await recordWithdrawal(displayAddress, currentValue, currentValue);
+
+              // Clear cache so next fetch gets fresh blockchain data
+              await clearTransactionCache(displayAddress);
+
+              // Reset deposited to 0 (full withdrawal)
+              setTotalDeposited(0);
 
               refetchBalances();
               refetchPositions();
