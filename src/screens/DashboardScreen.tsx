@@ -601,38 +601,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
   const handleSettings = () => {
     Analytics.trackButtonTap('Settings', 'Dashboard');
-    Alert.alert(
-      'Settings',
-      'What would you like to do?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Achievements',
-          onPress: () => {
-            Analytics.trackButtonTap('Achievements', 'Dashboard');
-            const earnedCount = Object.values(badges).filter((b) => b.earned).length;
-            trackAchievementsModalOpened(earnedCount, 7);
-            setShowAchievements(true);
-          },
-        },
-        {
-          text: 'Statements',
-          onPress: () => {
-            Analytics.trackButtonTap('Statements', 'Dashboard');
-            navigation.navigate('TransactionHistory');
-          },
-        },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            Analytics.trackLogout();
-            await logout();
-            navigation.replace('Welcome');
-          },
-        },
-      ]
-    );
+    navigation.navigate('Settings');
   };
 
   const handleCopyAddress = async () => {

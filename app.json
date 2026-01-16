@@ -9,8 +9,6 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/logo_icon.png",
-      "resizeMode": "contain",
       "backgroundColor": "#0a0a0a"
     },
     "ios": {
@@ -41,9 +39,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0a0a0a",
-          "image": "./assets/logo_icon.png",
-          "imageWidth": 100
+          "backgroundColor": "#0a0a0a"
         }
       ]
     ],

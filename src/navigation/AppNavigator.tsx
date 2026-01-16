@@ -9,6 +9,7 @@ import LoginScreen from '../screens/LoginScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import StrategiesScreen from '../screens/StrategiesScreen';
 import TransactionHistoryScreen from '../screens/TransactionHistoryScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 
 export type RootStackParamList = {
   Welcome: undefined;
@@ -16,6 +17,7 @@ export type RootStackParamList = {
   Dashboard: undefined;
   Strategies: undefined;
   TransactionHistory: undefined;
+  Settings: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -50,6 +52,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Dashboard" component={DashboardScreen} />
         <Stack.Screen name="Strategies" component={StrategiesScreen} />
         <Stack.Screen name="TransactionHistory" component={TransactionHistoryScreen} />
+        <Stack.Screen name="Settings" component={SettingsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
