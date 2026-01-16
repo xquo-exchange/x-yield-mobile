@@ -13,6 +13,7 @@
     "@privy-io/expo": "^0.63.0",
     "@privy-io/expo-native-extensions": "^0.0.6",
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/datetimepicker": "^8.2.0",
     "@react-navigation/native": "^7.1.26",
     "@react-navigation/native-stack": "^7.9.0",
     "browserify-zlib": "^0.2.0",

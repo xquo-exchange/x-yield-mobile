@@ -36,15 +36,20 @@ import {
   TransactionType,
   TransactionDisplayItem,
   GroupedTransaction,
+  DateRangePresetType,
   formatCurrency,
   formatDate,
+  formatDateShort,
   getTransactionTypeLabel,
   getTransactionTypeColor,
   getGroupedTransactionLabel,
   getAddressLabel,
   shortenTxHash,
   getBaseScanTxUrl,
+  saveCustomDateRange,
+  loadCustomDateRange,
 } from '../services/transactionHistory';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { generateTaxReport, isPdfExportAvailable } from '../services/pdfReport';
 import { generateCsvReport, isCsvExportAvailable } from '../services/csvReport';
 import * as Analytics from '../services/analytics';
@@ -67,7 +72,7 @@ type TransactionHistoryScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'TransactionHistory'>;
 };
 
-type DateRangePreset = 'this_year' | 'last_year' | 'all_time';
+type DateRangePreset = 'this_year' | 'last_year' | 'all_time' | 'custom';
 
 export default function TransactionHistoryScreen({
   navigation,
@@ -94,8 +99,17 @@ export default function TransactionHistoryScreen({
   const [isCsvAvailable, setIsCsvAvailable] = useState<boolean | null>(null);
   const [historyData, setHistoryData] = useState<TransactionHistoryResult | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('this_year');
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedItem, setSelectedItem] = useState<TransactionDisplayItem | null>(null);
+
+  // Custom date range state
+  const [showCustomDateModal, setShowCustomDateModal] = useState(false);
+  const [customStartDate, setCustomStartDate] = useState<Date>(new Date(new Date().getFullYear(), 0, 1));
+  const [customEndDate, setCustomEndDate] = useState<Date>(new Date());
+  const [tempStartDate, setTempStartDate] = useState<Date>(new Date(new Date().getFullYear(), 0, 1));
+  const [tempEndDate, setTempEndDate] = useState<Date>(new Date());
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+  const [datePickerMode, setDatePickerMode] = useState<'start' | 'end'>('start');
 
   // Get grouped transactions for display
   const displayItems = historyData
@@ -118,7 +132,9 @@ export default function TransactionHistoryScreen({
   const fetchHistory = useCallback(async (forceRefresh: boolean = false) => {
     if (!walletAddress) return;
 
-    const dateRange = getDateRangePreset(selectedPreset);
+    const dateRange = selectedPreset === 'custom'
+      ? getDateRangePreset('custom', { from: customStartDate, to: customEndDate })
+      : getDateRangePreset(selectedPreset);
 
     try {
       if (forceRefresh) {
@@ -162,7 +178,21 @@ export default function TransactionHistoryScreen({
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [walletAddress, selectedPreset, currentBalance, otherOwnedAddress]);
+  }, [walletAddress, selectedPreset, currentBalance, otherOwnedAddress, customStartDate, customEndDate]);
+
+  // Load saved custom date range on mount
+  useEffect(() => {
+    const loadSavedDateRange = async () => {
+      const savedRange = await loadCustomDateRange();
+      if (savedRange) {
+        setCustomStartDate(savedRange.from);
+        setCustomEndDate(savedRange.to);
+        setTempStartDate(savedRange.from);
+        setTempEndDate(savedRange.to);
+      }
+    };
+    loadSavedDateRange();
+  }, []);
 
   // Initial load
   useEffect(() => {
@@ -185,11 +215,68 @@ export default function TransactionHistoryScreen({
 
   // Handle date preset change (force refresh for new date range)
   const handlePresetChange = (preset: DateRangePreset) => {
-    if (preset === selectedPreset) return;
+    if (preset === selectedPreset && preset !== 'custom') return;
+
+    if (preset === 'custom') {
+      // Open custom date range modal
+      setTempStartDate(customStartDate);
+      setTempEndDate(customEndDate);
+      setShowCustomDateModal(true);
+      return;
+    }
+
     setSelectedPreset(preset);
     setIsLoading(true);
     setHistoryData(null); // Clear old data while loading new range
     Analytics.track('date_range_changed', { preset });
+  };
+
+  // Handle custom date range confirmation
+  const handleCustomDateConfirm = async () => {
+    // Validate dates
+    if (tempEndDate < tempStartDate) {
+      Alert.alert('Invalid Date Range', 'End date cannot be before start date.');
+      return;
+    }
+
+    // Save the custom date range
+    setCustomStartDate(tempStartDate);
+    setCustomEndDate(tempEndDate);
+    await saveCustomDateRange(tempStartDate, tempEndDate);
+
+    // Close modal and apply filter
+    setShowCustomDateModal(false);
+    setSelectedPreset('custom');
+    setIsLoading(true);
+    setHistoryData(null);
+    Analytics.track('date_range_changed', {
+      preset: 'custom',
+      from: tempStartDate.toISOString(),
+      to: tempEndDate.toISOString(),
+    });
+  };
+
+  // Format date for display in the selector
+  const formatDateForSelector = (date: Date): string => {
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Handle date picker change (for Android)
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowStartPicker(false);
+      setShowEndPicker(false);
+    }
+
+    if (event.type === 'dismissed') return;
+
+    if (selectedDate) {
+      if (datePickerMode === 'start') {
+        setTempStartDate(selectedDate);
+      } else {
+        setTempEndDate(selectedDate);
+      }
+    }
   };
 
   // Handle PDF generation
@@ -572,6 +659,32 @@ export default function TransactionHistoryScreen({
             </TouchableOpacity>
           )
         )}
+        {/* Custom Date Range Button */}
+        <TouchableOpacity
+          style={[
+            styles.dateOption,
+            selectedPreset === 'custom' && styles.dateOptionActive,
+          ]}
+          onPress={() => handlePresetChange('custom')}
+        >
+          <View style={styles.customDateContent}>
+            <Ionicons
+              name="calendar-outline"
+              size={14}
+              color={selectedPreset === 'custom' ? COLORS.pureWhite : COLORS.grey}
+            />
+            <Text
+              style={[
+                styles.dateOptionText,
+                selectedPreset === 'custom' && styles.dateOptionTextActive,
+              ]}
+            >
+              {selectedPreset === 'custom'
+                ? `${formatDateForSelector(customStartDate)} - ${formatDateForSelector(customEndDate)}`
+                : 'Custom'}
+            </Text>
+          </View>
+        </TouchableOpacity>
       </View>
 
       {/* Content */}
@@ -825,6 +938,160 @@ export default function TransactionHistoryScreen({
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Custom Date Range Modal */}
+      <Modal
+        visible={showCustomDateModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCustomDateModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowCustomDateModal(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.customDateModalContent}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {/* Handle bar */}
+            <View style={styles.modalHandle} />
+
+            {/* Close button */}
+            <TouchableOpacity
+              style={styles.modalClose}
+              onPress={() => setShowCustomDateModal(false)}
+            >
+              <Ionicons name="close" size={24} color={COLORS.grey} />
+            </TouchableOpacity>
+
+            {/* Title */}
+            <Text style={styles.customDateTitle}>Custom Date Range</Text>
+            <Text style={styles.customDateSubtitle}>
+              Select a start and end date for your report
+            </Text>
+
+            {/* Date Selection */}
+            <View style={styles.customDateFields}>
+              {/* Start Date */}
+              <View style={styles.customDateField}>
+                <Text style={styles.customDateLabel}>Start Date</Text>
+                <TouchableOpacity
+                  style={styles.customDateButton}
+                  onPress={() => {
+                    setDatePickerMode('start');
+                    setShowStartPicker(true);
+                  }}
+                >
+                  <Ionicons name="calendar-outline" size={20} color={COLORS.primary} />
+                  <Text style={styles.customDateButtonText}>
+                    {tempStartDate.toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* End Date */}
+              <View style={styles.customDateField}>
+                <Text style={styles.customDateLabel}>End Date</Text>
+                <TouchableOpacity
+                  style={styles.customDateButton}
+                  onPress={() => {
+                    setDatePickerMode('end');
+                    setShowEndPicker(true);
+                  }}
+                >
+                  <Ionicons name="calendar-outline" size={20} color={COLORS.primary} />
+                  <Text style={styles.customDateButtonText}>
+                    {tempEndDate.toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Date Pickers for iOS (inline) */}
+            {Platform.OS === 'ios' && (
+              <View style={styles.iosDatePickerContainer}>
+                <View style={styles.iosDatePickerRow}>
+                  <Text style={styles.iosDatePickerLabel}>From:</Text>
+                  <DateTimePicker
+                    value={tempStartDate}
+                    mode="date"
+                    display="compact"
+                    onChange={(event, date) => date && setTempStartDate(date)}
+                    maximumDate={tempEndDate}
+                    style={styles.iosDatePicker}
+                  />
+                </View>
+                <View style={styles.iosDatePickerRow}>
+                  <Text style={styles.iosDatePickerLabel}>To:</Text>
+                  <DateTimePicker
+                    value={tempEndDate}
+                    mode="date"
+                    display="compact"
+                    onChange={(event, date) => date && setTempEndDate(date)}
+                    minimumDate={tempStartDate}
+                    maximumDate={new Date()}
+                    style={styles.iosDatePicker}
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Validation message */}
+            {tempEndDate < tempStartDate && (
+              <View style={styles.validationError}>
+                <Ionicons name="warning" size={16} color={COLORS.red} />
+                <Text style={styles.validationErrorText}>
+                  End date cannot be before start date
+                </Text>
+              </View>
+            )}
+
+            {/* Apply Button */}
+            <TouchableOpacity
+              style={[
+                styles.customDateApplyButton,
+                tempEndDate < tempStartDate && styles.customDateApplyButtonDisabled,
+              ]}
+              onPress={handleCustomDateConfirm}
+              disabled={tempEndDate < tempStartDate}
+            >
+              <Text style={styles.customDateApplyButtonText}>Apply Date Range</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Android Date Pickers */}
+      {Platform.OS === 'android' && showStartPicker && (
+        <DateTimePicker
+          value={tempStartDate}
+          mode="date"
+          display="default"
+          onChange={handleDateChange}
+          maximumDate={tempEndDate}
+        />
+      )}
+      {Platform.OS === 'android' && showEndPicker && (
+        <DateTimePicker
+          value={tempEndDate}
+          mode="date"
+          display="default"
+          onChange={handleDateChange}
+          minimumDate={tempStartDate}
+          maximumDate={new Date()}
+        />
+      )}
     </View>
   );
 }
@@ -1227,6 +1494,110 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   modalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.pureWhite,
+  },
+  // Custom Date Range Styles
+  customDateContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  customDateModalContent: {
+    backgroundColor: COLORS.pureWhite,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    maxHeight: Dimensions.get('window').height * 0.8,
+  },
+  customDateTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.black,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  customDateSubtitle: {
+    fontSize: 14,
+    color: COLORS.grey,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  customDateFields: {
+    gap: 16,
+    marginBottom: 24,
+  },
+  customDateField: {
+    gap: 8,
+  },
+  customDateLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.black,
+  },
+  customDateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  customDateButtonText: {
+    fontSize: 16,
+    color: COLORS.black,
+    flex: 1,
+  },
+  iosDatePickerContainer: {
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    gap: 16,
+  },
+  iosDatePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iosDatePickerLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.black,
+  },
+  iosDatePicker: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  validationError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEE2E2',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  validationErrorText: {
+    fontSize: 14,
+    color: COLORS.red,
+    flex: 1,
+  },
+  customDateApplyButton: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  customDateApplyButtonDisabled: {
+    backgroundColor: COLORS.border,
+  },
+  customDateApplyButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.pureWhite,
