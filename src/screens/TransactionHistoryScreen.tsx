@@ -46,6 +46,7 @@ import {
   getBaseScanTxUrl,
 } from '../services/transactionHistory';
 import { generateTaxReport, isPdfExportAvailable } from '../services/pdfReport';
+import { generateCsvReport, isCsvExportAvailable } from '../services/csvReport';
 import * as Analytics from '../services/analytics';
 
 // Color Palette
@@ -88,7 +89,9 @@ export default function TransactionHistoryScreen({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isGeneratingCsv, setIsGeneratingCsv] = useState(false);
   const [isPdfAvailable, setIsPdfAvailable] = useState<boolean | null>(null);
+  const [isCsvAvailable, setIsCsvAvailable] = useState<boolean | null>(null);
   const [historyData, setHistoryData] = useState<TransactionHistoryResult | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('this_year');
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -166,8 +169,9 @@ export default function TransactionHistoryScreen({
     Analytics.trackScreenView('TransactionHistory');
     fetchHistory();
 
-    // Check if PDF export is available (async)
+    // Check if exports are available (async)
     isPdfExportAvailable().then(setIsPdfAvailable);
+    isCsvExportAvailable().then(setIsCsvAvailable);
 
     return () => Analytics.trackScreenExit('TransactionHistory');
   }, [fetchHistory]);
@@ -234,6 +238,54 @@ export default function TransactionHistoryScreen({
       Alert.alert('Error', 'Failed to generate PDF statement');
     } finally {
       setIsGeneratingPdf(false);
+    }
+  };
+
+  // Handle CSV generation
+  const handleGenerateCsv = async () => {
+    if (!historyData) return;
+
+    // Check if CSV is available first
+    if (isCsvAvailable === false) {
+      Alert.alert(
+        'Not Available',
+        'CSV export is not available on this device.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setIsGeneratingCsv(true);
+    Analytics.track('csv_export_started', {
+      transaction_count: historyData.transactions.length,
+      date_range: selectedPreset,
+    });
+
+    try {
+      const result = await generateCsvReport(historyData);
+
+      if (result.success) {
+        Analytics.track('csv_exported', {
+          transaction_count: historyData.transactions.length,
+        });
+      } else if (result.unavailable) {
+        setIsCsvAvailable(false);
+        Alert.alert(
+          'Not Available',
+          'CSV export is not available on this device.',
+          [{ text: 'OK' }]
+        );
+        Analytics.track('csv_export_unavailable');
+      } else {
+        Alert.alert('Error', result.error || 'Failed to generate CSV');
+        Analytics.track('csv_export_failed', {
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to generate CSV statement');
+    } finally {
+      setIsGeneratingCsv(false);
     }
   };
 
@@ -408,41 +460,72 @@ export default function TransactionHistoryScreen({
     );
   };
 
-  // Render export button at bottom
-  const renderExportButton = () => {
+  // Render export buttons at bottom
+  const renderExportButtons = () => {
     if (!historyData || historyData.transactions.length === 0) return null;
 
-    const isDisabled = isGeneratingPdf || isPdfAvailable === false;
-
     return (
-      <TouchableOpacity
-        style={[
-          styles.exportButtonBottom,
-          isPdfAvailable === false && styles.exportButtonDisabled,
-        ]}
-        onPress={handleGeneratePdf}
-        disabled={isGeneratingPdf}
-      >
-        {isGeneratingPdf ? (
-          <ActivityIndicator size="small" color={COLORS.pureWhite} />
-        ) : (
-          <>
-            <Ionicons
-              name={isPdfAvailable === false ? 'cloud-offline-outline' : 'document-text-outline'}
-              size={20}
-              color={isPdfAvailable === false ? COLORS.grey : COLORS.pureWhite}
-            />
-            <Text
-              style={[
-                styles.exportButtonBottomText,
-                isPdfAvailable === false && styles.exportButtonDisabledText,
-              ]}
-            >
-              {isPdfAvailable === false ? 'PDF Export (Production Only)' : 'Export PDF Statement'}
-            </Text>
-          </>
-        )}
-      </TouchableOpacity>
+      <View style={styles.exportButtonsContainer}>
+        {/* CSV Export Button - always available */}
+        <TouchableOpacity
+          style={[
+            styles.exportButtonHalf,
+            isCsvAvailable === false && styles.exportButtonDisabled,
+          ]}
+          onPress={handleGenerateCsv}
+          disabled={isGeneratingCsv}
+        >
+          {isGeneratingCsv ? (
+            <ActivityIndicator size="small" color={COLORS.pureWhite} />
+          ) : (
+            <>
+              <Ionicons
+                name="document-outline"
+                size={20}
+                color={isCsvAvailable === false ? COLORS.grey : COLORS.pureWhite}
+              />
+              <Text
+                style={[
+                  styles.exportButtonHalfText,
+                  isCsvAvailable === false && styles.exportButtonDisabledText,
+                ]}
+              >
+                CSV
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {/* PDF Export Button */}
+        <TouchableOpacity
+          style={[
+            styles.exportButtonHalf,
+            isPdfAvailable === false && styles.exportButtonDisabled,
+          ]}
+          onPress={handleGeneratePdf}
+          disabled={isGeneratingPdf}
+        >
+          {isGeneratingPdf ? (
+            <ActivityIndicator size="small" color={COLORS.pureWhite} />
+          ) : (
+            <>
+              <Ionicons
+                name={isPdfAvailable === false ? 'cloud-offline-outline' : 'document-text-outline'}
+                size={20}
+                color={isPdfAvailable === false ? COLORS.grey : COLORS.pureWhite}
+              />
+              <Text
+                style={[
+                  styles.exportButtonHalfText,
+                  isPdfAvailable === false && styles.exportButtonDisabledText,
+                ]}
+              >
+                {isPdfAvailable === false ? 'PDF (Prod)' : 'PDF'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -545,7 +628,7 @@ export default function TransactionHistoryScreen({
             </View>
 
             {/* Export Button at Bottom */}
-            {renderExportButton()}
+            {renderExportButtons()}
 
             {/* Disclaimer */}
             {historyData && historyData.transactions.length > 0 && (
@@ -874,6 +957,28 @@ const styles = StyleSheet.create({
     color: COLORS.secondary,
   },
   // Export Button (bottom)
+  exportButtonsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  exportButtonHalf: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.primary,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  exportButtonHalfText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.pureWhite,
+  },
   exportButtonBottom: {
     flexDirection: 'row',
     alignItems: 'center',
