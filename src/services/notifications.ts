@@ -4,6 +4,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { savePushToken as savePushTokenToSupabase, deletePushToken as deletePushTokenFromSupabase } from './supabase';
 
 const API_BASE_URL = 'https://x-yield-api.vercel.app';
 const STORAGE_KEYS = {
@@ -141,7 +142,19 @@ export const registerPushToken = async (
       return { success: false, error: errorData.message || 'Failed to register token' };
     }
 
+    // Save locally
     await savePushToken(registration.expoPushToken);
+
+    // Also save to Supabase for external notification services
+    const supabaseResult = await savePushTokenToSupabase(
+      registration.walletAddress,
+      registration.expoPushToken
+    );
+    if (!supabaseResult.success) {
+      console.warn('[Notifications] Failed to save token to Supabase:', supabaseResult.error);
+      // Don't fail the registration - the backend registration succeeded
+    }
+
     return { success: true };
   } catch (error) {
     console.error('Error registering push token:', error);
@@ -174,7 +187,16 @@ export const unregisterPushToken = async (
       return { success: false, error: errorData.message || 'Failed to unregister token' };
     }
 
+    // Remove locally
     await removePushToken();
+
+    // Also remove from Supabase
+    const supabaseResult = await deletePushTokenFromSupabase(walletAddress);
+    if (!supabaseResult.success) {
+      console.warn('[Notifications] Failed to delete token from Supabase:', supabaseResult.error);
+      // Don't fail - the backend unregistration succeeded
+    }
+
     return { success: true };
   } catch (error) {
     console.error('Error unregistering push token:', error);

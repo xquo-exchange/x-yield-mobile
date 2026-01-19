@@ -3,8 +3,12 @@
  * Provides global notification state and functions throughout the app
  */
 
-import React, { createContext, useContext, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useCallback, ReactNode, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNotifications, UseNotificationsReturn } from '../hooks/useNotifications';
+
+// Storage key for tracking if permission was already requested
+const PERMISSION_REQUESTED_KEY = '@notifications/permission_requested';
 
 interface NotificationContextValue extends UseNotificationsReturn {
   isRegistered: boolean;
@@ -24,12 +28,40 @@ export function NotificationProvider({
   isAuthenticated,
 }: NotificationProviderProps) {
   const notifications = useNotifications();
+  const hasAttemptedAutoRegister = useRef(false);
+  const [hasPromptedBefore, setHasPromptedBefore] = useState<boolean | null>(null);
 
   const isRegistered = Boolean(notifications.expoPushToken);
 
-  // Auto-register when user logs in with a wallet
+  // Check if we've already prompted the user before (on mount)
+  useEffect(() => {
+    const checkPromptHistory = async () => {
+      try {
+        const value = await AsyncStorage.getItem(PERMISSION_REQUESTED_KEY);
+        setHasPromptedBefore(value === 'true');
+      } catch (error) {
+        console.error('[NotificationContext] Error checking prompt history:', error);
+        setHasPromptedBefore(false);
+      }
+    };
+    checkPromptHistory();
+  }, []);
+
+  // Auto-register when user logs in with a wallet (only once per session, only if never prompted)
   useEffect(() => {
     const autoRegister = async () => {
+      // Wait until we know the prompt history
+      if (hasPromptedBefore === null) return;
+
+      // Skip if we've already prompted before
+      if (hasPromptedBefore) {
+        console.log('[NotificationContext] Already prompted before, skipping auto-register');
+        return;
+      }
+
+      // Skip if already attempted in this session
+      if (hasAttemptedAutoRegister.current) return;
+
       if (
         isAuthenticated &&
         walletAddress &&
@@ -37,16 +69,28 @@ export function NotificationProvider({
         !isRegistered &&
         notifications.preferences.enabled
       ) {
-        // Only auto-register if we haven't already and permissions might be granted
+        // Only auto-register if permissions might be granted
         if (notifications.permissionStatus !== 'denied') {
-          console.log('Auto-registering for push notifications...');
-          await notifications.registerForPushNotifications(walletAddress);
+          hasAttemptedAutoRegister.current = true;
+          console.log('[NotificationContext] Auto-registering for push notifications...');
+
+          // Mark as prompted BEFORE requesting (to prevent loops)
+          await AsyncStorage.setItem(PERMISSION_REQUESTED_KEY, 'true');
+          setHasPromptedBefore(true);
+
+          const success = await notifications.registerForPushNotifications(walletAddress);
+
+          if (success) {
+            console.log('[NotificationContext] Push notifications registered successfully');
+          } else {
+            console.log('[NotificationContext] Push notifications registration failed or denied');
+          }
         }
       }
     };
 
     autoRegister();
-  }, [isAuthenticated, walletAddress, notifications.isLoading, isRegistered]);
+  }, [isAuthenticated, walletAddress, notifications.isLoading, isRegistered, hasPromptedBefore, notifications.permissionStatus, notifications.preferences.enabled]);
 
   // Unregister when user logs out
   const handleLogout = useCallback(async () => {

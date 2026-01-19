@@ -14,7 +14,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 export type RootStackParamList = {
   Welcome: undefined;
   Login: undefined;
-  Dashboard: undefined;
+  Dashboard: { openAchievements?: boolean; restartTutorial?: boolean } | undefined;
   Strategies: undefined;
   TransactionHistory: undefined;
   Settings: undefined;
@@ -43,16 +43,22 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer>
-      <Stack.Navigator
-        initialRouteName={isAuthenticated ? 'Dashboard' : 'Welcome'}
-        screenOptions={{ headerShown: false }}
-      >
-        <Stack.Screen name="Welcome" component={WelcomeScreen} />
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Dashboard" component={DashboardScreen} />
-        <Stack.Screen name="Strategies" component={StrategiesScreen} />
-        <Stack.Screen name="TransactionHistory" component={TransactionHistoryScreen} />
-        <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {isAuthenticated ? (
+          // Authenticated screens
+          <>
+            <Stack.Screen name="Dashboard" component={DashboardScreen} />
+            <Stack.Screen name="Strategies" component={StrategiesScreen} />
+            <Stack.Screen name="TransactionHistory" component={TransactionHistoryScreen} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+          </>
+        ) : (
+          // Unauthenticated screens
+          <>
+            <Stack.Screen name="Welcome" component={WelcomeScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

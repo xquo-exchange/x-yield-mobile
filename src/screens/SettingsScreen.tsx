@@ -15,8 +15,10 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import * as Device from 'expo-device';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePrivy } from '@privy-io/expo';
 import { useSmartWallets } from '@privy-io/expo/smart-wallets';
@@ -76,11 +78,8 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
           );
         }
       } else {
-        // Disable notifications
-        await notifications.updatePreferences(walletAddress, {
-          ...notifications.preferences,
-          enabled: false,
-        });
+        // Disable notifications - unregister from push notifications
+        await notifications.unregisterFromPushNotifications(walletAddress);
       }
     } finally {
       setIsUpdating(false);
@@ -117,6 +116,11 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
     }
   }, [walletAddress, notifications]);
 
+  // Handle feedback
+  const handleFeedback = useCallback(async () => {
+    await WebBrowser.openBrowserAsync('https://tally.so/r/5B90vP');
+  }, []);
+
   // Handle logout
   const handleLogout = useCallback(async () => {
     Alert.alert(
@@ -140,24 +144,27 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   }, [logout, walletAddress, notifications]);
 
   // Get permission status text
+  // Check if running on simulator
+  const isSimulator = !Device.isDevice;
+
   const getPermissionStatusText = (): string => {
-    switch (notifications.permissionStatus) {
-      case 'granted':
-        return 'Enabled';
-      case 'denied':
-        return 'Denied - Tap to open settings';
-      case 'undetermined':
-        return 'Not requested';
-      default:
-        return 'Unknown';
+    if (isSimulator) {
+      return 'Unavailable on simulator';
     }
+    if (notifications.permissionStatus === 'denied') {
+      return 'Denied - Tap to open settings';
+    }
+    if (notifications.isRegistered) {
+      return 'Enabled';
+    }
+    if (notifications.permissionStatus === 'granted') {
+      return 'Tap to enable';
+    }
+    return 'Not enabled';
   };
 
-  // Check if notifications are effectively enabled
-  const areNotificationsEnabled =
-    notifications.permissionStatus === 'granted' &&
-    notifications.preferences.enabled &&
-    notifications.isRegistered;
+  // Check if notifications are effectively enabled (registered with backend)
+  const areNotificationsEnabled = notifications.isRegistered;
 
   return (
     <View style={styles.container}>
@@ -197,6 +204,14 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
               <View style={styles.settingRight}>
                 {isUpdating || notifications.isLoading ? (
                   <ActivityIndicator size="small" color={COLORS.primary} />
+                ) : isSimulator ? (
+                  <Switch
+                    value={false}
+                    disabled={true}
+                    trackColor={{ false: COLORS.border, true: COLORS.primary + '80' }}
+                    thumbColor={COLORS.grey}
+                    ios_backgroundColor={COLORS.border}
+                  />
                 ) : notifications.permissionStatus === 'denied' ? (
                   <TouchableOpacity
                     style={styles.openSettingsButton}
@@ -272,8 +287,18 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
             )}
           </View>
 
+          {/* Info banner for simulator */}
+          {isSimulator && (
+            <View style={styles.infoBanner}>
+              <Ionicons name="information-circle" size={20} color={COLORS.amber} />
+              <Text style={styles.infoBannerText}>
+                Push notifications are not available on simulators. Test on a physical device.
+              </Text>
+            </View>
+          )}
+
           {/* Info banner if notifications are disabled system-wide */}
-          {notifications.permissionStatus === 'denied' && (
+          {!isSimulator && notifications.permissionStatus === 'denied' && (
             <View style={styles.infoBanner}>
               <Ionicons name="information-circle" size={20} color={COLORS.amber} />
               <Text style={styles.infoBannerText}>
@@ -291,7 +316,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
             {/* Achievements */}
             <TouchableOpacity
               style={styles.settingRow}
-              onPress={() => navigation.navigate('Dashboard')}
+              onPress={() => navigation.navigate('Dashboard', { openAchievements: true })}
               activeOpacity={0.7}
             >
               <View style={styles.settingLeft}>
@@ -321,6 +346,46 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
                 <View style={styles.settingInfo}>
                   <Text style={styles.settingTitle}>Statements</Text>
                   <Text style={styles.settingDescription}>View transaction history and reports</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
+            </TouchableOpacity>
+
+            <View style={styles.divider} />
+
+            {/* Restart Tutorial */}
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={() => navigation.navigate('Dashboard', { restartTutorial: true })}
+              activeOpacity={0.7}
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.settingIcon, { backgroundColor: COLORS.primary + '20' }]}>
+                  <Ionicons name="help-circle-outline" size={20} color={COLORS.primary} />
+                </View>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingTitle}>Watch Tutorial</Text>
+                  <Text style={styles.settingDescription}>Introduction guide to the app</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
+            </TouchableOpacity>
+
+            <View style={styles.divider} />
+
+            {/* Feedback */}
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={handleFeedback}
+              activeOpacity={0.7}
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.settingIcon, { backgroundColor: COLORS.green + '20' }]}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={20} color={COLORS.green} />
+                </View>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingTitle}>Leave Feedback</Text>
+                  <Text style={styles.settingDescription}>Help us improve the app</Text>
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
