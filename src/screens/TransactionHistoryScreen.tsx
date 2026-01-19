@@ -662,28 +662,16 @@ export default function TransactionHistoryScreen({
         {/* Custom Date Range Button */}
         <TouchableOpacity
           style={[
-            styles.dateOption,
+            styles.customDateIconButton,
             selectedPreset === 'custom' && styles.dateOptionActive,
           ]}
           onPress={() => handlePresetChange('custom')}
         >
-          <View style={styles.customDateContent}>
-            <Ionicons
-              name="calendar-outline"
-              size={14}
-              color={selectedPreset === 'custom' ? COLORS.pureWhite : COLORS.grey}
-            />
-            <Text
-              style={[
-                styles.dateOptionText,
-                selectedPreset === 'custom' && styles.dateOptionTextActive,
-              ]}
-            >
-              {selectedPreset === 'custom'
-                ? `${formatDateForSelector(customStartDate)} - ${formatDateForSelector(customEndDate)}`
-                : 'Custom'}
-            </Text>
-          </View>
+          <Ionicons
+            name="calendar-outline"
+            size={18}
+            color={selectedPreset === 'custom' ? COLORS.pureWhite : COLORS.grey}
+          />
         </TouchableOpacity>
       </View>
 
@@ -1499,10 +1487,13 @@ const styles = StyleSheet.create({
     color: COLORS.pureWhite,
   },
   // Custom Date Range Styles
-  customDateContent: {
-    flexDirection: 'row',
+  customDateIconButton: {
+    width: 44,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: COLORS.white,
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
   },
   customDateModalContent: {
     backgroundColor: COLORS.pureWhite,

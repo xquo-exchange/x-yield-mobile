@@ -24,7 +24,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { NativeStackNavigationProp, RouteProp } from '@react-navigation/native-stack';
 import { usePrivy, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { useSmartWallets } from '@privy-io/expo/smart-wallets';
 
@@ -51,6 +51,8 @@ import SetGoalModal from '../components/SetGoalModal';
 import CelebrationModal from '../components/CelebrationModal';
 import BadgeToast from '../components/BadgeToast';
 import AchievementsModal from '../components/AchievementsModal';
+import OnboardingTutorial from '../components/OnboardingTutorial';
+import { useOnboardingTutorial, TUTORIAL_STEPS } from '../hooks/useOnboardingTutorial';
 import {
   getSavingsGoal,
   setSavingsGoal,
@@ -223,9 +225,10 @@ const animatedEarnedStyles = StyleSheet.create({
 
 type DashboardScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Dashboard'>;
+  route: RouteProp<RootStackParamList, 'Dashboard'>;
 };
 
-export default function DashboardScreen({ navigation }: DashboardScreenProps) {
+export default function DashboardScreen({ navigation, route }: DashboardScreenProps) {
   const { user, logout } = usePrivy();
   const embeddedWallet = useEmbeddedEthereumWallet();
   const { client: smartWalletClient } = useSmartWallets();
@@ -284,6 +287,88 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const [earnedBadge, setEarnedBadge] = React.useState<BadgeDefinition | null>(null);
   const [showAchievements, setShowAchievements] = React.useState(false);
 
+  // Onboarding tutorial
+  const onboardingTutorial = useOnboardingTutorial();
+
+  // Refs for tutorial targets and ScrollView
+  const scrollViewRef = React.useRef<ScrollView>(null);
+  const balanceRef = React.useRef<View>(null);
+  const savingsRef = React.useRef<View>(null);
+  const addFundsRef = React.useRef<View>(null);
+  const settingsRef = React.useRef<View>(null);
+
+  // Register tutorial target refs
+  React.useEffect(() => {
+    onboardingTutorial.registerTarget('balance', balanceRef);
+    onboardingTutorial.registerTarget('savings', savingsRef);
+    onboardingTutorial.registerTarget('addFunds', addFundsRef);
+    onboardingTutorial.registerTarget('settings', settingsRef);
+  }, [onboardingTutorial.registerTarget]);
+
+  // Auto-scroll to highlighted element when tutorial step changes
+  React.useEffect(() => {
+    const scrollToTarget = async () => {
+      if (!onboardingTutorial.isActive || !onboardingTutorial.currentStep) return;
+
+      const stepId = onboardingTutorial.currentStep.id;
+
+      // For welcome step (center), scroll to top
+      if (stepId === 'welcome') {
+        scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+        return;
+      }
+
+      // For settings step, scroll to top (header is at top)
+      if (stepId === 'settings' || stepId === 'balance') {
+        scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+        return;
+      }
+
+      // For other elements, measure and scroll if needed
+      const layout = await onboardingTutorial.measureTarget(stepId);
+      if (layout) {
+        // If element is below visible area, scroll down
+        // We want the element to be roughly in the upper third of the screen
+        const targetY = Math.max(0, layout.y - 150);
+        scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
+      }
+    };
+
+    // Small delay to let the UI settle
+    const timer = setTimeout(scrollToTarget, 150);
+    return () => clearTimeout(timer);
+  }, [onboardingTutorial.isActive, onboardingTutorial.currentStep, onboardingTutorial.measureTarget]);
+
+  // Handle openAchievements navigation parameter from Settings
+  React.useEffect(() => {
+    if (route.params?.openAchievements) {
+      setShowAchievements(true);
+      // Clear the param to avoid reopening on re-render
+      navigation.setParams({ openAchievements: undefined });
+    }
+  }, [route.params?.openAchievements, navigation]);
+
+  // Handle restartTutorial navigation parameter from Settings
+  React.useEffect(() => {
+    if (route.params?.restartTutorial) {
+      // Clear the param immediately to avoid retriggering
+      navigation.setParams({ restartTutorial: undefined });
+
+      // Scroll to top first, then reset and start tutorial
+      scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+
+      // Reset tutorial state and start after a delay
+      const startTutorial = async () => {
+        await onboardingTutorial.resetTutorial();
+        // Wait for scroll and state to settle
+        setTimeout(() => {
+          onboardingTutorial.startTutorial();
+        }, 300);
+      };
+      startTutorial();
+    }
+  }, [route.params?.restartTutorial, navigation, onboardingTutorial.resetTutorial, onboardingTutorial.startTutorial]);
+
   // Analytics: Track screen view on mount
   React.useEffect(() => {
     Analytics.trackScreenView('Dashboard');
@@ -320,6 +405,28 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const { totalUsdValue: savingsTotal, isLoading: positionsLoading, refetch: refetchPositions } = usePositions(displayAddress);
 
   const isLoading = balanceLoading || positionsLoading;
+
+  // Auto-start tutorial for first-time users after loading
+  React.useEffect(() => {
+    if (
+      !onboardingTutorial.isLoading &&
+      onboardingTutorial.shouldShowTutorial &&
+      !onboardingTutorial.isActive &&
+      !isLoading
+    ) {
+      // Small delay to let the screen settle
+      const timer = setTimeout(() => {
+        onboardingTutorial.startTutorial();
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [
+    onboardingTutorial.isLoading,
+    onboardingTutorial.shouldShowTutorial,
+    onboardingTutorial.isActive,
+    isLoading,
+    onboardingTutorial.startTutorial,
+  ]);
 
   const cashBalance = usdc ? parseFloat(usdc.balance) : 0;
   const savingsBalance = parseFloat(savingsTotal) || 0;
@@ -601,38 +708,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
   const handleSettings = () => {
     Analytics.trackButtonTap('Settings', 'Dashboard');
-    Alert.alert(
-      'Settings',
-      'What would you like to do?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Achievements',
-          onPress: () => {
-            Analytics.trackButtonTap('Achievements', 'Dashboard');
-            const earnedCount = Object.values(badges).filter((b) => b.earned).length;
-            trackAchievementsModalOpened(earnedCount, 7);
-            setShowAchievements(true);
-          },
-        },
-        {
-          text: 'Statements',
-          onPress: () => {
-            Analytics.trackButtonTap('Statements', 'Dashboard');
-            navigation.navigate('TransactionHistory');
-          },
-        },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            Analytics.trackLogout();
-            await logout();
-            navigation.replace('Welcome');
-          },
-        },
-      ]
-    );
+    navigation.navigate('Settings');
   };
 
   const handleCopyAddress = async () => {
@@ -855,6 +931,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
       )}
 
       <ScrollView
+        ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -890,14 +967,18 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
               )}
             </TouchableOpacity>
             {/* Settings Button */}
-            <TouchableOpacity style={styles.headerButton} onPress={handleSettings}>
+            <TouchableOpacity
+              ref={settingsRef}
+              style={styles.headerButton}
+              onPress={handleSettings}
+            >
               <Ionicons name="settings-outline" size={22} color={COLORS.grey} />
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Main Balance Section */}
-        <View style={styles.balanceSection}>
+        <View ref={balanceRef} style={styles.balanceSection}>
           <Text style={styles.balanceLabel}>Total Balance</Text>
           {isLoading ? (
             <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 20 }} />
@@ -984,6 +1065,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
             </View>
 
             <TouchableOpacity
+              ref={totalBalance === 0 ? addFundsRef : undefined}
               style={styles.onboardingButton}
               onPress={() => {
                 Analytics.trackButtonTap('Add Funds Onboarding', 'Dashboard');
@@ -1014,6 +1096,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
             <View style={styles.cashButtonsRow}>
               {/* Add Funds is secondary when user has cash but no savings */}
               <TouchableOpacity
+                ref={totalBalance > 0 ? addFundsRef : undefined}
                 style={[
                   styles.cashButton,
                   savingsBalance === 0 && cashBalance > 0 ? styles.addFundsButtonSecondary : styles.addFundsButtonStyle
@@ -1051,10 +1134,13 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
         {/* Savings Account Card - Hidden for $0 balance users */}
         {!isLoading && totalBalance > 0 && (
-          <View style={[
-            styles.savingsCard,
-            savingsBalance === 0 && cashBalance > 0 && styles.savingsCardHighlighted
-          ]}>
+          <View
+            ref={savingsRef}
+            style={[
+              styles.savingsCard,
+              savingsBalance === 0 && cashBalance > 0 && styles.savingsCardHighlighted
+            ]}
+          >
             <View style={styles.savingsAccent} />
             <View style={styles.savingsContent}>
               <View style={styles.cardHeader}>
@@ -1728,6 +1814,19 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
         badges={badges}
         stats={badgeStats}
         currentBalance={parseFloat(savingsTotal) || 0}
+      />
+
+      {/* Onboarding Tutorial Overlay */}
+      <OnboardingTutorial
+        isActive={onboardingTutorial.isActive}
+        currentStep={onboardingTutorial.currentStep}
+        currentStepIndex={onboardingTutorial.currentStepIndex}
+        totalSteps={onboardingTutorial.totalSteps}
+        onNext={onboardingTutorial.nextStep}
+        onPrevious={onboardingTutorial.previousStep}
+        onSkip={onboardingTutorial.skipTutorial}
+        onComplete={onboardingTutorial.completeTutorial}
+        measureTarget={onboardingTutorial.measureTarget}
       />
     </View>
   );

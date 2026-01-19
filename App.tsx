@@ -1,13 +1,14 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Platform, View, Text, StyleSheet, Image } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { PrivyProvider } from '@privy-io/expo';
-import { SmartWalletsProvider } from '@privy-io/expo/smart-wallets';
+import { PrivyProvider, usePrivy, useEmbeddedEthereumWallet } from '@privy-io/expo';
+import { SmartWalletsProvider, useSmartWallets } from '@privy-io/expo/smart-wallets';
 import { PrivyElements } from '@privy-io/expo/ui';
 import * as ExpoSplashScreen from 'expo-splash-screen';
 import AppNavigator from './src/navigation/AppNavigator';
 import { DeepLinkProvider } from './src/contexts/DeepLinkContext';
 import { AnalyticsProvider } from './src/contexts/AnalyticsContext';
+import { NotificationProvider } from './src/contexts/NotificationContext';
 import SplashScreen from './src/components/SplashScreen';
 
 // Mantieni visibile la splash nativa fino a quando non la nascondiamo manualmente
@@ -46,6 +47,30 @@ function WebNotSupported() {
   );
 }
 
+// Inner component that has access to Privy hooks
+function AppContent() {
+  const { user } = usePrivy();
+  const { wallets } = useEmbeddedEthereumWallet();
+  const { client: smartWalletClient } = useSmartWallets();
+
+  const embeddedWallet = wallets?.[0];
+  const smartWalletAddress = smartWalletClient?.account?.address;
+  const eoaAddress = embeddedWallet?.address;
+  const walletAddress = smartWalletAddress || eoaAddress;
+
+  const isAuthenticated = !!user;
+
+  return (
+    <NotificationProvider
+      walletAddress={walletAddress}
+      isAuthenticated={isAuthenticated}
+    >
+      <AppNavigator />
+      <PrivyElements />
+    </NotificationProvider>
+  );
+}
+
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
 
@@ -79,8 +104,7 @@ export default function App() {
             }}
           >
             <SmartWalletsProvider>
-              <AppNavigator />
-              <PrivyElements />
+              <AppContent />
             </SmartWalletsProvider>
           </PrivyProvider>
         </DeepLinkProvider>
