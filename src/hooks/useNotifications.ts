@@ -14,6 +14,7 @@ import {
   loadPreferences,
   savePreferences,
   updatePreferencesOnServer,
+  getSavedPushToken,
   NotificationPreferences,
 } from '../services/notifications';
 
@@ -314,6 +315,10 @@ export function useNotifications(): UseNotificationsReturn {
         // Get current permission status
         const status = await getPermissionStatus();
 
+        // Load saved push token to restore registration state
+        const savedToken = await getSavedPushToken();
+        console.log('[useNotifications] Restored saved token:', savedToken ? 'yes' : 'no');
+
         // Setup Android channel if permissions granted
         if (status === 'granted') {
           await setupAndroidChannel();
@@ -324,6 +329,7 @@ export function useNotifications(): UseNotificationsReturn {
           isLoading: false,
           permissionStatus: status,
           preferences: savedPreferences,
+          expoPushToken: savedToken,
         }));
       } catch (error) {
         console.error('Error initializing notifications:', error);

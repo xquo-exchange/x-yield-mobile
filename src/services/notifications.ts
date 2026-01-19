@@ -1,12 +1,11 @@
 /**
  * Notification Service
- * Handles push notification registration and API calls
+ * Handles push notification registration with Supabase
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { savePushToken as savePushTokenToSupabase, deletePushToken as deletePushTokenFromSupabase } from './supabase';
 
-const API_BASE_URL = 'https://x-yield-api.vercel.app';
 const STORAGE_KEYS = {
   PUSH_TOKEN: '@notifications/push_token',
   PREFERENCES: '@notifications/preferences',
@@ -118,125 +117,78 @@ export const loadPreferences = async (): Promise<NotificationPreferences> => {
 };
 
 /**
- * Register push token with backend
+ * Register push token with Supabase
  */
 export const registerPushToken = async (
   registration: DeviceRegistration
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/notifications/register`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        expo_push_token: registration.expoPushToken,
-        device_id: registration.deviceId,
-        platform: registration.platform,
-        wallet_address: registration.walletAddress,
-      }),
+    console.log('[Notifications] Registering push token to Supabase:', {
+      token: registration.expoPushToken?.substring(0, 20) + '...',
+      walletAddress: registration.walletAddress,
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return { success: false, error: errorData.message || 'Failed to register token' };
+    // Save to Supabase
+    const supabaseResult = await savePushTokenToSupabase(
+      registration.walletAddress,
+      registration.expoPushToken
+    );
+
+    if (!supabaseResult.success) {
+      console.error('[Notifications] Failed to save token to Supabase:', supabaseResult.error);
+      return { success: false, error: supabaseResult.error || 'Failed to register token' };
     }
 
     // Save locally
     await savePushToken(registration.expoPushToken);
 
-    // Also save to Supabase for external notification services
-    const supabaseResult = await savePushTokenToSupabase(
-      registration.walletAddress,
-      registration.expoPushToken
-    );
-    if (!supabaseResult.success) {
-      console.warn('[Notifications] Failed to save token to Supabase:', supabaseResult.error);
-      // Don't fail the registration - the backend registration succeeded
-    }
-
+    console.log('[Notifications] Push token registered successfully');
     return { success: true };
   } catch (error) {
-    console.error('Error registering push token:', error);
+    console.error('[Notifications] Error registering push token:', error);
     return { success: false, error: 'Network error' };
   }
 };
 
 /**
- * Unregister push token from backend
+ * Unregister push token from Supabase
  */
 export const unregisterPushToken = async (
   walletAddress: string
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    const deviceId = await getDeviceId();
+    console.log('[Notifications] Unregistering push token for wallet:', walletAddress);
 
-    const response = await fetch(`${API_BASE_URL}/api/notifications/unregister`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        device_id: deviceId,
-        wallet_address: walletAddress,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return { success: false, error: errorData.message || 'Failed to unregister token' };
+    // Remove from Supabase
+    const supabaseResult = await deletePushTokenFromSupabase(walletAddress);
+    if (!supabaseResult.success) {
+      console.error('[Notifications] Failed to delete token from Supabase:', supabaseResult.error);
+      return { success: false, error: supabaseResult.error || 'Failed to unregister token' };
     }
 
     // Remove locally
     await removePushToken();
 
-    // Also remove from Supabase
-    const supabaseResult = await deletePushTokenFromSupabase(walletAddress);
-    if (!supabaseResult.success) {
-      console.warn('[Notifications] Failed to delete token from Supabase:', supabaseResult.error);
-      // Don't fail - the backend unregistration succeeded
-    }
-
+    console.log('[Notifications] Push token unregistered successfully');
     return { success: true };
   } catch (error) {
-    console.error('Error unregistering push token:', error);
+    console.error('[Notifications] Error unregistering push token:', error);
     return { success: false, error: 'Network error' };
   }
 };
 
 /**
- * Update notification preferences on backend
+ * Update notification preferences (local only)
  */
 export const updatePreferencesOnServer = async (
-  walletAddress: string,
+  _walletAddress: string,
   preferences: NotificationPreferences
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    const deviceId = await getDeviceId();
-
-    const response = await fetch(`${API_BASE_URL}/api/notifications/preferences`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        device_id: deviceId,
-        wallet_address: walletAddress,
-        notifications_enabled: preferences.enabled,
-        deposit_notifications: preferences.deposits,
-        withdrawal_notifications: preferences.withdrawals,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return { success: false, error: errorData.message || 'Failed to update preferences' };
-    }
-
     await savePreferences(preferences);
     return { success: true };
   } catch (error) {
     console.error('Error updating notification preferences:', error);
-    return { success: false, error: 'Network error' };
+    return { success: false, error: 'Failed to save preferences' };
   }
 };
