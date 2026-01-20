@@ -4,7 +4,7 @@
  * Handles Android-specific UI freeze issues by providing user feedback
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -45,10 +45,59 @@ export default function SplashScreen({
   const [showTimeout, setShowTimeout] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const minDurationRef = useRef<NodeJS.Timeout | null>(null);
   const minDurationPassed = useRef(false);
   const animationCompleted = useRef(false);
 
-  // Start entrance animation
+  // Use refs to track current prop values for use in callbacks (avoids stale closures)
+  const isLoadingRef = useRef(isLoading);
+  const loadingErrorRef = useRef(loadingError);
+
+  // Keep refs in sync with props
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+    loadingErrorRef.current = loadingError;
+  }, [isLoading, loadingError]);
+
+  // Complete animation - fade out and notify parent
+  const completeAnimation = useCallback(() => {
+    if (animationCompleted.current) return;
+    animationCompleted.current = true;
+
+    // Clear all timeouts
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    if (minDurationRef.current) {
+      clearTimeout(minDurationRef.current);
+      minDurationRef.current = null;
+    }
+
+    // Fade out
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 400,
+      useNativeDriver: true,
+    }).start(() => {
+      onAnimationComplete();
+    });
+  }, [fadeAnim, onAnimationComplete]);
+
+  // Check if we can complete the splash - uses refs to avoid stale closures
+  const checkAndComplete = useCallback(() => {
+    const canComplete =
+      minDurationPassed.current &&
+      !isLoadingRef.current &&
+      !animationCompleted.current &&
+      !loadingErrorRef.current;
+
+    if (canComplete) {
+      completeAnimation();
+    }
+  }, [completeAnimation]);
+
+  // Start entrance animation and set up timers
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -64,14 +113,15 @@ export default function SplashScreen({
     ]).start();
 
     // Minimum splash duration timer
-    setTimeout(() => {
+    minDurationRef.current = setTimeout(() => {
       minDurationPassed.current = true;
       checkAndComplete();
     }, MIN_SPLASH_DURATION_MS);
 
-    // Set up loading timeout
+    // Set up loading timeout - only show if still loading after timeout
     timeoutRef.current = setTimeout(() => {
-      if (!animationCompleted.current) {
+      // Double-check current loading state using ref (not stale closure)
+      if (!animationCompleted.current && isLoadingRef.current) {
         setShowTimeout(true);
       }
     }, LOADING_TIMEOUT_MS);
@@ -80,8 +130,11 @@ export default function SplashScreen({
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      if (minDurationRef.current) {
+        clearTimeout(minDurationRef.current);
+      }
     };
-  }, []);
+  }, [checkAndComplete]);
 
   // Spinner animation
   useEffect(() => {
@@ -117,56 +170,31 @@ export default function SplashScreen({
     return () => clearInterval(interval);
   }, [showTimeout, loadingError]);
 
-  // Check if loading is complete
+  // Check if loading is complete whenever props change
   useEffect(() => {
     if (!isLoading && !loadingError) {
       checkAndComplete();
     }
-  }, [isLoading, loadingError]);
+  }, [isLoading, loadingError, checkAndComplete]);
 
-  const checkAndComplete = () => {
-    if (minDurationPassed.current && !isLoading && !animationCompleted.current && !loadingError) {
-      completeAnimation();
-    }
-  };
-
-  const completeAnimation = () => {
-    if (animationCompleted.current) return;
-    animationCompleted.current = true;
-
-    // Clear timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    // Fade out
-    Animated.timing(fadeAnim, {
-      toValue: 0,
-      duration: 400,
-      useNativeDriver: true,
-    }).start(() => {
-      onAnimationComplete();
-    });
-  };
-
-  const handleRetry = () => {
+  const handleRetry = useCallback(() => {
     setShowTimeout(false);
     setLoadingStatus('Retrying...');
     animationCompleted.current = false;
 
-    // Reset timeout
+    // Reset timeout - use ref for loading check
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
     timeoutRef.current = setTimeout(() => {
-      if (!animationCompleted.current) {
+      if (!animationCompleted.current && isLoadingRef.current) {
         setShowTimeout(true);
       }
     }, LOADING_TIMEOUT_MS);
 
     // Call external retry handler
     onRetry?.();
-  };
+  }, [onRetry]);
 
   const spinInterpolate = spinAnim.interpolate({
     inputRange: [0, 1],
