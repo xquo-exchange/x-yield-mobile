@@ -103,20 +103,3 @@ const TrackedScreen: React.FC<TrackedScreenProps> = ({
 };
 
 export default TrackedScreen;
-
-/**
- * Higher-order component for tracking screens
- * Wrap your screen component to auto-track
- */
-export function withScreenTracking<P extends object>(
-  WrappedComponent: React.ComponentType<P>,
-  screenName: string
-): React.FC<P> {
-  return function TrackedScreenWrapper(props: P) {
-    return (
-      <TrackedScreen screenName={screenName}>
-        <WrappedComponent {...props} />
-      </TrackedScreen>
-    );
-  };
-}

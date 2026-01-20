@@ -1,9 +1,11 @@
 /**
  * Notification Service
  * Handles push notification registration with Supabase
+ * and local transaction notifications
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import { savePushToken as savePushTokenToSupabase, deletePushToken as deletePushTokenFromSupabase } from './supabase';
 
 const STORAGE_KEYS = {
@@ -190,5 +192,77 @@ export const updatePreferencesOnServer = async (
   } catch (error) {
     console.error('Error updating notification preferences:', error);
     return { success: false, error: 'Failed to save preferences' };
+  }
+};
+
+export type TransactionType = 'deposit' | 'withdrawal';
+
+export interface TransactionNotificationParams {
+  type: TransactionType;
+  amount: string;
+  txHash: string;
+}
+
+/**
+ * Send a local notification for a completed transaction
+ * Respects user preferences for deposits/withdrawals
+ */
+export const sendTransactionNotification = async (
+  params: TransactionNotificationParams
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const { type, amount, txHash } = params;
+
+    // Load user preferences
+    const preferences = await loadPreferences();
+
+    // Check if notifications are enabled globally
+    if (!preferences.enabled) {
+      console.log('[Notifications] Notifications disabled globally, skipping');
+      return { success: false, error: 'Notifications disabled' };
+    }
+
+    // Check type-specific preference
+    if (type === 'deposit' && !preferences.deposits) {
+      console.log('[Notifications] Deposit notifications disabled, skipping');
+      return { success: false, error: 'Deposit notifications disabled' };
+    }
+
+    if (type === 'withdrawal' && !preferences.withdrawals) {
+      console.log('[Notifications] Withdrawal notifications disabled, skipping');
+      return { success: false, error: 'Withdrawal notifications disabled' };
+    }
+
+    // Build notification content based on type
+    const isDeposit = type === 'deposit';
+    const title = isDeposit ? 'Deposit Successful! 🎉' : 'Withdrawal Complete! 💸';
+    const body = isDeposit
+      ? `Your deposit of $${amount} USDC has been confirmed and is now earning yield.`
+      : `Your withdrawal of $${amount} USDC has been processed successfully.`;
+
+    // Schedule immediate local notification
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        data: {
+          type,
+          amount,
+          txHash,
+        },
+        sound: 'default',
+        categoryIdentifier: 'transactions',
+      },
+      trigger: null, // null trigger = immediate delivery
+    });
+
+    console.log(`[Notifications] ${type} notification sent for $${amount}`);
+    return { success: true };
+  } catch (error) {
+    console.error('[Notifications] Error sending transaction notification:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to send notification',
+    };
   }
 };

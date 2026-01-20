@@ -220,7 +220,6 @@ export function useNotifications(): UseNotificationsReturn {
         error: null
       }));
 
-      console.log('Push notifications registered successfully');
       return true;
     } catch (error) {
       console.error('Error registering for push notifications:', error);
@@ -256,7 +255,6 @@ export function useNotifications(): UseNotificationsReturn {
         error: null
       }));
 
-      console.log('Push notifications unregistered successfully');
       return true;
     } catch (error) {
       console.error('Error unregistering from push notifications:', error);
@@ -317,12 +315,15 @@ export function useNotifications(): UseNotificationsReturn {
 
         // Load saved push token to restore registration state
         const savedToken = await getSavedPushToken();
-        console.log('[useNotifications] Restored saved token:', savedToken ? 'yes' : 'no');
 
         // Setup Android channel if permissions granted
         if (status === 'granted') {
           await setupAndroidChannel();
         }
+
+        // Clear badge on app launch (cold start)
+        await Notifications.setBadgeCountAsync(0);
+        await Notifications.dismissAllNotificationsAsync();
 
         setState(prev => ({
           ...prev,
@@ -343,20 +344,16 @@ export function useNotifications(): UseNotificationsReturn {
   // Setup notification listeners
   useEffect(() => {
     // Listener for notifications received while app is in foreground
-    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
-      console.log('Notification received in foreground:', notification);
+    notificationListener.current = Notifications.addNotificationReceivedListener(() => {
+      // Notification received - handled by system
     });
 
     // Listener for when user taps on a notification
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      console.log('Notification tapped:', response);
       const data = response.notification.request.content.data;
-
       // Handle navigation based on notification data
-      if (data?.type === 'deposit' || data?.type === 'withdrawal') {
-        // Navigation will be handled by the app through deep linking or context
-        console.log('Transaction notification tapped:', data);
-      }
+      // Navigation will be handled by the app through deep linking or context
+      void data; // Acknowledge data for future navigation handling
     });
 
     return () => {
@@ -369,11 +366,22 @@ export function useNotifications(): UseNotificationsReturn {
     };
   }, []);
 
-  // Refresh permission status when app comes to foreground
+  // Clear badge and refresh permission status when app comes to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        // App has come to foreground, refresh permission status
+        // App has come to foreground
+        // Clear badge count when user opens the app
+        Notifications.setBadgeCountAsync(0).catch(() => {
+          // Silent fail - badge clearing is non-critical
+        });
+
+        // Dismiss all delivered notifications from notification center
+        Notifications.dismissAllNotificationsAsync().catch(() => {
+          // Silent fail - dismissing notifications is non-critical
+        });
+
+        // Refresh permission status
         refreshPermissionStatus();
       }
       appState.current = nextAppState;

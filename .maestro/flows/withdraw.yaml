@@ -1,0 +1,66 @@
+# Withdraw Flow E2E Test
+# Tests withdrawing from savings strategies
+
+appId: com.xyield.mobile
+---
+
+# Precondition: User must be logged in with savings balance
+
+# Step 1: Launch app (assumes logged in state)
+- launchApp:
+    clearState: false
+
+# Handle Metro connection issues - tap Retry if app is stuck loading
+- tapOn:
+    text: "Retry"
+    optional: true
+
+# Wait for app to fully load
+- extendedWaitUntil:
+    visible:
+      text: "Total Balance"
+    timeout: 30000
+
+# Step 2: Verify Dashboard is loaded
+- assertVisible:
+    text: "Total Balance"
+
+# Step 3: Navigate to Strategies via Withdraw button (in Savings section)
+- tapOn:
+    id: "dashboard-withdraw-button"
+
+# Step 4: Wait for Strategies screen (give navigation time)
+- extendedWaitUntil:
+    visible:
+      text: "Manage Funds"
+    timeout: 15000
+
+# Step 5: Switch to Withdraw tab if not already there
+- tapOn:
+    id: "strategies-withdraw-tab"
+    optional: true
+
+# Step 6: Verify Withdraw view
+- assertVisible:
+    text: "Withdraw all funds"
+    optional: true
+
+# Step 7: Tap withdraw button (if has funds)
+- tapOn:
+    text: "Withdraw All"
+    optional: true
+
+# Step 8: Wait for transaction
+- extendedWaitUntil:
+    visible:
+      text: "Success"
+    timeout: 60000
+    optional: true
+
+# Step 9: Navigate back
+- back
+
+# Step 10: Verify Dashboard
+- assertVisible:
+    text: "Total Balance"
+    optional: true

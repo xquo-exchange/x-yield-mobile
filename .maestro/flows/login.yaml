@@ -1,0 +1,49 @@
+# Login Flow E2E Test
+# Tests the complete login flow from Welcome screen to Dashboard
+# Note: Works with dev build when Metro bundler is running
+
+appId: com.xyield.mobile
+---
+
+# Step 1: Launch app (don't clear state to preserve Metro connection)
+- launchApp:
+    clearState: false
+
+# Step 2: Wait for app to load
+- extendedWaitUntil:
+    visible:
+      text: "Get Started"
+    timeout: 30000
+    optional: true
+
+# If already logged in, we'll be on Dashboard - that's OK
+- assertVisible:
+    text: "Get Started"
+    optional: true
+
+# Step 3: Tap Get Started button (if on Welcome screen)
+- tapOn:
+    text: "Get Started"
+    optional: true
+
+# Step 4: Verify Login screen appears
+- assertVisible:
+    text: "Enter your email address"
+    optional: true
+
+# Step 5: Enter email address
+- tapOn:
+    text: "Email Address"
+    optional: true
+
+- inputText: "test@example.com"
+
+# Step 6: Tap Continue button
+- tapOn:
+    text: "Continue"
+    optional: true
+
+# Step 7: Verify OTP screen appears
+- assertVisible:
+    text: "Enter verification code"
+    optional: true

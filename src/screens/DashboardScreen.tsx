@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -66,162 +66,13 @@ import {
   getBadgeDefinition,
   checkAndAwardBadges,
   trackAppOpen,
-  syncDepositCount,
   BadgesData,
   BadgeStats,
   BadgeDefinition,
 } from '../services/badges';
-import { getMilestoneState } from '../services/milestoneTracker';
-
-// Color Palette - PayPal/Revolut Style
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-  border: '#E8E8E8',
-  success: '#22C55E',
-};
-
-// AnimatedBalance Component - Real-time yield accumulation with USDC precision
-interface AnimatedBalanceProps {
-  balance: number;
-  apy: number;
-  isEarning: boolean;
-  size?: 'large' | 'medium';
-}
-
-function AnimatedBalance({ balance, apy, isEarning, size = 'large' }: AnimatedBalanceProps) {
-  const [displayBalance, setDisplayBalance] = React.useState(balance);
-  const startTimeRef = React.useRef(Date.now());
-  const startBalanceRef = React.useRef(balance);
-
-  // Reset when balance changes significantly (new deposit/withdrawal)
-  React.useEffect(() => {
-    const diff = Math.abs(balance - startBalanceRef.current);
-    if (diff > 0.01) {
-      startBalanceRef.current = balance;
-      startTimeRef.current = Date.now();
-      setDisplayBalance(balance);
-    }
-  }, [balance]);
-
-  // Real-time yield accumulation
-  React.useEffect(() => {
-    if (!isEarning || apy <= 0 || balance <= 0) {
-      setDisplayBalance(balance);
-      return;
-    }
-
-    // yieldPerSecond = balance * (APY / 100) / seconds_per_year
-    const secondsPerYear = 31536000;
-    const yieldPerSecond = balance * (apy / 100) / secondsPerYear;
-
-    const interval = setInterval(() => {
-      const elapsedSeconds = (Date.now() - startTimeRef.current) / 1000;
-      const accumulatedYield = yieldPerSecond * elapsedSeconds;
-      setDisplayBalance(startBalanceRef.current + accumulatedYield);
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [balance, apy, isEarning]);
-
-  // Format with 6 decimal places (USDC precision)
-  const formatBalance = (value: number): string => {
-    const formatted = value.toFixed(6);
-    const parts = formatted.split('.');
-    const integerPart = parseInt(parts[0]).toLocaleString('en-US');
-    return `$${integerPart}.${parts[1]}`;
-  };
-
-  const fontSize = size === 'large' ? 44 : 28;
-
-  return (
-    <Text style={[animatedBalanceStyles.balance, { fontSize }]}>
-      {formatBalance(displayBalance)}
-    </Text>
-  );
-}
-
-const animatedBalanceStyles = StyleSheet.create({
-  balance: {
-    fontWeight: '700',
-    color: COLORS.black,
-    fontVariant: ['tabular-nums'],
-    letterSpacing: -0.5,
-  },
-});
-
-// AnimatedEarned Component - Real-time earnings with USDC precision
-interface AnimatedEarnedProps {
-  currentBalance: number;
-  depositedAmount: number;
-  apy: number;
-}
-
-function AnimatedEarned({ currentBalance, depositedAmount, apy }: AnimatedEarnedProps) {
-  const [displayEarned, setDisplayEarned] = React.useState(
-    Math.max(0, currentBalance - depositedAmount)
-  );
-  const startTimeRef = React.useRef(Date.now());
-  const startBalanceRef = React.useRef(currentBalance);
-
-  // Reset when balance changes significantly
-  React.useEffect(() => {
-    const diff = Math.abs(currentBalance - startBalanceRef.current);
-    if (diff > 0.01) {
-      startBalanceRef.current = currentBalance;
-      startTimeRef.current = Date.now();
-      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
-    }
-  }, [currentBalance, depositedAmount]);
-
-  // Real-time yield accumulation for earned amount
-  React.useEffect(() => {
-    if (apy <= 0 || currentBalance <= 0 || depositedAmount <= 0) {
-      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
-      return;
-    }
-
-    // yieldPerSecond based on current balance
-    const secondsPerYear = 31536000;
-    const yieldPerSecond = currentBalance * (apy / 100) / secondsPerYear;
-
-    const interval = setInterval(() => {
-      const elapsedSeconds = (Date.now() - startTimeRef.current) / 1000;
-      const accumulatedYield = yieldPerSecond * elapsedSeconds;
-      const newBalance = startBalanceRef.current + accumulatedYield;
-      setDisplayEarned(Math.max(0, newBalance - depositedAmount));
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [currentBalance, depositedAmount, apy]);
-
-  // Format with 6 decimal places (USDC precision)
-  const formatEarned = (value: number): string => {
-    const formatted = value.toFixed(6);
-    const parts = formatted.split('.');
-    const integerPart = parseInt(parts[0]).toLocaleString('en-US');
-    return `+$${integerPart}.${parts[1]}`;
-  };
-
-  return (
-    <Text style={animatedEarnedStyles.earned}>
-      {formatEarned(displayEarned)}
-    </Text>
-  );
-}
-
-const animatedEarnedStyles = StyleSheet.create({
-  earned: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.success,
-    fontVariant: ['tabular-nums'],
-  },
-});
+import { getErrorMessage } from '../utils/errorHelpers';
+import { COLORS } from '../constants/colors';
+import { AnimatedBalance, AnimatedEarned } from '../components/AnimatedBalance';
 
 type DashboardScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Dashboard'>;
@@ -395,7 +246,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const embeddedWalletAddress = wallets.length > 0 ? wallets[0].address : '';
   const smartWalletFromHook = smartWalletClient?.account?.address || '';
   const smartWalletAccount = user?.linked_accounts?.find(
-    (account: any) => account.type === 'smart_wallet'
+    (account) => account.type === 'smart_wallet'
   ) as { address?: string } | undefined;
   const smartWalletFromLinkedAccounts = smartWalletAccount?.address || '';
   const smartWalletAddress = smartWalletFromHook || smartWalletFromLinkedAccounts;
@@ -462,12 +313,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   // Load badges and track app open for streaks
   React.useEffect(() => {
     const loadBadgesAndTrackOpen = async () => {
-      // Auto-fix: Sync badge deposit count with the correct count from milestoneTracker
-      // This fixes affected users who had inflated deposit counts from the balance-detection bug
-      const milestoneState = await getMilestoneState();
-      await syncDepositCount(milestoneState.depositsCount);
-
-      // Load badges and stats (now with corrected deposit count)
+      // Load badges and stats
       const [loadedBadges, loadedStats] = await Promise.all([
         getBadges(),
         getBadgeStats(),
@@ -629,7 +475,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
       refetchBalances();
 
     } catch (error) {
-      const errorMessage = (error as Error)?.message || 'Unknown error';
+      const errorMessage = getErrorMessage(error);
       Analytics.trackErrorDisplayed('offramp_transfer', errorMessage, 'Dashboard');
       Alert.alert('Transfer Failed', errorMessage || 'Something went wrong');
     } finally {
@@ -706,19 +552,37 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
     showRefreshToast();
   }, [refetchBalances, refetchPositions, refetchApy, cashBalance, savingsBalance, totalEarned, showRefreshToast]);
 
-  const handleSettings = () => {
+  const handleSettings = useCallback(() => {
     Analytics.trackButtonTap('Settings', 'Dashboard');
     navigation.navigate('Settings');
-  };
+  }, [navigation]);
 
-  const handleCopyAddress = async () => {
+  const handleCopyAddress = useCallback(async () => {
     if (displayAddress) {
       await Clipboard.setStringAsync(displayAddress);
       Analytics.trackAddressCopied('Dashboard');
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
-  };
+  }, [displayAddress]);
+
+  // Memoized modal handlers
+  const handleOpenAchievements = useCallback(() => {
+    Analytics.trackButtonTap('Achievements Header', 'Dashboard');
+    const earnedCount = Object.values(badges).filter((b) => b.earned).length;
+    trackAchievementsModalOpened(earnedCount, 7);
+    setShowAchievements(true);
+  }, [badges]);
+
+  const handleOpenFundingModal = useCallback(() => {
+    Analytics.trackButtonTap('Add Funds', 'Dashboard');
+    setShowFundingModal(true);
+  }, []);
+
+  const handleOpenWithdrawModal = useCallback(() => {
+    Analytics.trackButtonTap('Withdraw Cash', 'Dashboard');
+    setShowWithdrawModal(true);
+  }, []);
 
   const handleBuyWithCard = async () => {
     if (isBuyingUsdc) return;
@@ -744,26 +608,53 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
         await openCoinbaseOnramp(displayAddress);
       }
     } catch (error) {
-      Analytics.trackOnrampError((error as Error)?.message || 'Unknown error');
+      Analytics.trackOnrampError(getErrorMessage(error));
       Alert.alert('Error', 'Could not open payment provider');
     } finally {
       setIsBuyingUsdc(false);
     }
   };
 
-  const closeFundingModal = () => {
+  const closeFundingModal = useCallback(() => {
     Analytics.trackModalClosed('AddFunds', 'button');
     setShowFundingModal(false);
     setFundingView('options');
-  };
+  }, []);
 
-  const closeWithdrawModal = () => {
+  const closeWithdrawModal = useCallback(() => {
     Analytics.trackModalClosed('Withdraw', 'button');
     setShowWithdrawModal(false);
     setWithdrawAddress('');
     setWithdrawAmount('');
     setWithdrawMethod('select');
-  };
+  }, []);
+
+  // Handle logo press - dismiss modals and scroll to top (Home button behavior)
+  const handleLogoPress = useCallback(() => {
+    Analytics.trackButtonTap('Logo Home', 'Dashboard');
+
+    // Dismiss keyboard if open
+    Keyboard.dismiss();
+
+    // Close all modals and overlays
+    setShowFundingModal(false);
+    setShowWithdrawModal(false);
+    setShowOfframpTransfer(false);
+    setShowGoalModal(false);
+    setShowGoalCelebration(false);
+    setShowAchievements(false);
+    setShowHowItWorks(false);
+    setShowBadgeToast(false);
+
+    // Reset modal states
+    setFundingView('options');
+    setWithdrawMethod('select');
+    setWithdrawAddress('');
+    setWithdrawAmount('');
+
+    // Scroll to top
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+  }, []);
 
   const handleWithdrawCashReview = () => {
     // Address validation
@@ -853,7 +744,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
         ]
       );
     } catch (error) {
-      Alert.alert('Failed', (error as Error)?.message || 'Transaction failed. Please try again.');
+      Alert.alert('Failed', getErrorMessage(error) || 'Transaction failed. Please try again.');
     } finally {
       setIsWithdrawingCash(false);
     }
@@ -903,8 +794,9 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
         }, 2000);
       }
     } catch (error) {
-      Analytics.trackOfframpError((error as Error)?.message || 'Unknown error');
-      Alert.alert('Error', (error as Error)?.message || 'Something went wrong');
+      const errorMsg = getErrorMessage(error);
+      Analytics.trackOfframpError(errorMsg);
+      Alert.alert('Error', errorMsg || 'Something went wrong');
     } finally {
       setIsCashingOut(false);
     }
@@ -940,21 +832,22 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
       >
         {/* Header */}
         <View style={styles.header}>
-          <Image
-            source={require('../../assets/logo_full.png')}
-            style={styles.headerLogo}
-            resizeMode="contain"
-          />
+          <TouchableOpacity
+            onPress={handleLogoPress}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Image
+              source={require('../../assets/logo_full.png')}
+              style={styles.headerLogo}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
           <View style={styles.headerButtons}>
             {/* Achievements Button */}
             <TouchableOpacity
               style={styles.headerButton}
-              onPress={() => {
-                Analytics.trackButtonTap('Achievements Header', 'Dashboard');
-                const earnedCount = Object.values(badges).filter((b) => b.earned).length;
-                trackAchievementsModalOpened(earnedCount, 7); // 7 total badges
-                setShowAchievements(true);
-              }}
+              onPress={handleOpenAchievements}
             >
               <Ionicons name="trophy" size={20} color={COLORS.primary} />
               {/* Badge count indicator */}
@@ -968,6 +861,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
             </TouchableOpacity>
             {/* Settings Button */}
             <TouchableOpacity
+              testID="dashboard-settings-button"
               ref={settingsRef}
               style={styles.headerButton}
               onPress={handleSettings}
@@ -1067,6 +961,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
             <TouchableOpacity
               ref={totalBalance === 0 ? addFundsRef : undefined}
               style={styles.onboardingButton}
+              activeOpacity={0.7}
               onPress={() => {
                 Analytics.trackButtonTap('Add Funds Onboarding', 'Dashboard');
                 setShowFundingModal(true);
@@ -1096,11 +991,13 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
             <View style={styles.cashButtonsRow}>
               {/* Add Funds is secondary when user has cash but no savings */}
               <TouchableOpacity
+                testID="dashboard-add-funds-button"
                 ref={totalBalance > 0 ? addFundsRef : undefined}
                 style={[
                   styles.cashButton,
                   savingsBalance === 0 && cashBalance > 0 ? styles.addFundsButtonSecondary : styles.addFundsButtonStyle
                 ]}
+                activeOpacity={0.7}
                 onPress={() => {
                   Analytics.trackButtonTap('Add Funds Cash Card', 'Dashboard');
                   setShowFundingModal(true);
@@ -1199,6 +1096,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
                   </SensitiveView>
                   <View style={styles.savingsButtons}>
                     <TouchableOpacity
+                      testID="dashboard-add-more-button"
                       style={styles.startEarningButton}
                       onPress={() => {
                         Analytics.trackButtonTap('Add More Savings', 'Dashboard');
@@ -1208,6 +1106,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
                       <Text style={styles.startEarningButtonText}>Add More</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      testID="dashboard-withdraw-button"
                       style={styles.withdrawButton}
                       onPress={() => {
                         Analytics.trackButtonTap('Withdraw Savings', 'Dashboard');
@@ -1230,10 +1129,12 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
                     </Text>
                   </View>
                   <TouchableOpacity
+                    testID="dashboard-start-earning-button"
                     style={[
                       styles.startEarningButton,
                       cashBalance > 0 && styles.startEarningButtonPrimary
                     ]}
+                    activeOpacity={0.7}
                     onPress={() => {
                       Analytics.trackButtonTap('Start Earning', 'Dashboard');
                       navigation.navigate('Strategies');
@@ -1335,14 +1236,14 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
               <View style={styles.optionsContainer}>
                 {/* Helper text to reduce decision paralysis */}
                 <Text style={styles.fundingHelperText}>
-                  Choose how you'd like to add USDC to your account
+                  Choose how you'd like to transfer USDC to your account
                 </Text>
 
-                {/* Transfer USDC - Recommended option */}
+                {/* Transfer from other wallets - Recommended option */}
                 <TouchableOpacity
                   style={[styles.fundingOption, styles.fundingOptionRecommended]}
                   onPress={() => {
-                    Analytics.trackButtonTap('Transfer USDC', 'FundingModal');
+                    Analytics.trackButtonTap('Transfer from other wallets', 'FundingModal');
                     setFundingView('receive');
                   }}
                 >
@@ -1351,12 +1252,12 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
                   </View>
                   <View style={styles.fundingOptionContent}>
                     <View style={styles.fundingOptionTitleRow}>
-                      <Text style={styles.fundingOptionTitle}>Transfer USDC</Text>
+                      <Text style={styles.fundingOptionTitle}>Transfer from other wallets</Text>
                       <View style={styles.recommendedBadge}>
                         <Text style={styles.recommendedBadgeText}>RECOMMENDED</Text>
                       </View>
                     </View>
-                    <Text style={styles.fundingOptionSubtitle}>From Coinbase, Binance, or any wallet</Text>
+                    <Text style={styles.fundingOptionSubtitle}>Receive USDC via QR code or address</Text>
                     <View style={styles.fundingOptionBenefits}>
                       <View style={styles.benefitItem}>
                         <Ionicons name="flash" size={12} color={COLORS.success} />
@@ -1378,34 +1279,34 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
                   <View style={styles.fundingDividerLine} />
                 </View>
 
-                {/* Buy with Card - Secondary option */}
+                {/* Transfer with Coinbase - Secondary option */}
                 <TouchableOpacity
                   style={styles.fundingOption}
                   onPress={() => {
-                    Analytics.trackButtonTap('Buy with Card', 'FundingModal');
+                    Analytics.trackButtonTap('Transfer with Coinbase', 'FundingModal');
                     handleBuyWithCard();
                   }}
                 >
                   <View style={styles.fundingOptionIcon}>
-                    <Ionicons name="card-outline" size={24} color={COLORS.grey} />
+                    <Ionicons name="swap-horizontal-outline" size={24} color={COLORS.grey} />
                   </View>
                   <View style={styles.fundingOptionContent}>
                     <Text style={[styles.fundingOptionTitle, styles.fundingOptionTitleSecondary]}>
-                      Buy with Card
+                      Transfer with Coinbase
                     </Text>
-                    <Text style={styles.fundingOptionSubtitle}>Via Coinbase · 1-2% fee</Text>
+                    <Text style={styles.fundingOptionSubtitle}>Buy or transfer via Coinbase app</Text>
                     <Text style={styles.fundingOptionNote}>
-                      Opens Coinbase to purchase USDC
+                      Opens Coinbase · May include fees
                     </Text>
                   </View>
                   <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
                 </TouchableOpacity>
 
-                {/* Info banner about Coinbase */}
+                {/* Info banner */}
                 <View style={styles.fundingInfoBanner}>
                   <Ionicons name="information-circle-outline" size={16} color={COLORS.grey} />
                   <Text style={styles.fundingInfoText}>
-                    Already have crypto? Transfer is fastest. New to crypto? Buy with card works too.
+                    Already have USDC? Transfer from wallet is fastest. Otherwise, use Coinbase to buy and transfer.
                   </Text>
                 </View>
               </View>

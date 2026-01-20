@@ -3,7 +3,7 @@
  * Displays transaction history and allows PDF tax report generation
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -49,24 +49,11 @@ import {
   saveCustomDateRange,
   loadCustomDateRange,
 } from '../services/transactionHistory';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { generateTaxReport, isPdfExportAvailable } from '../services/pdfReport';
 import { generateCsvReport, isCsvExportAvailable } from '../services/csvReport';
 import * as Analytics from '../services/analytics';
-
-// Color Palette
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-  border: '#E8E8E8',
-  green: '#22c55e',
-  red: '#ef4444',
-  amber: '#f59e0b',
-};
+import { COLORS } from '../constants/colors';
 
 type TransactionHistoryScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'TransactionHistory'>;
@@ -111,19 +98,20 @@ export default function TransactionHistoryScreen({
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [datePickerMode, setDatePickerMode] = useState<'start' | 'end'>('start');
 
-  // Get grouped transactions for display
-  const displayItems = historyData
-    ? groupTransactionsForDisplay(historyData.transactions)
-    : [];
+  // Memoize grouped transactions for display - expensive grouping operation
+  const displayItems = useMemo(
+    () => historyData ? groupTransactionsForDisplay(historyData.transactions) : [],
+    [historyData]
+  );
 
-  // Open transaction in BaseScan
-  const openInBaseScan = (txHash: string) => {
+  // Open transaction in BaseScan - memoized to prevent recreation on every render
+  const openInBaseScan = useCallback((txHash: string) => {
     const url = getBaseScanTxUrl(txHash);
     Linking.openURL(url).catch(err => {
       console.error('Failed to open URL:', err);
       Alert.alert('Error', 'Could not open BaseScan');
     });
-  };
+  }, []);
 
   // Calculate current balance from positions (convert string to number)
   const currentBalance = parseFloat(totalUsdValue) || 0;
@@ -262,7 +250,7 @@ export default function TransactionHistoryScreen({
   };
 
   // Handle date picker change (for Android)
-  const handleDateChange = (event: any, selectedDate?: Date) => {
+  const handleDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
       setShowStartPicker(false);
       setShowEndPicker(false);

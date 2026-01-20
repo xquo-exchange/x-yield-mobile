@@ -15,14 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BadgeDefinition } from '../services/badges';
 import BadgeIcon from './BadgeIcons';
-
-const COLORS = {
-  primary: '#200191',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-};
+import { COLORS } from '../constants/colors';
 
 interface BadgeToastProps {
   visible: boolean;

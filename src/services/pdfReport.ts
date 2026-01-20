@@ -75,17 +75,7 @@ import {
   formatDateShort,
   getTransactionTypeLabel,
 } from './transactionHistory';
-
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  black: '#00041B',
-  grey: '#484848',
-  lightGrey: '#E8E8E8',
-  white: '#FFFFFF',
-  green: '#22c55e',
-  red: '#ef4444',
-};
+import { COLORS } from '../constants/colors';
 
 function generateReportHTML(data: TransactionHistoryResult): string {
   const { transactions, summary, dateRange, walletAddress } = data;

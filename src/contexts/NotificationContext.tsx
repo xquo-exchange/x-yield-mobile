@@ -55,7 +55,6 @@ export function NotificationProvider({
 
       // Skip if we've already prompted before
       if (hasPromptedBefore) {
-        console.log('[NotificationContext] Already prompted before, skipping auto-register');
         return;
       }
 
@@ -72,19 +71,12 @@ export function NotificationProvider({
         // Only auto-register if permissions might be granted
         if (notifications.permissionStatus !== 'denied') {
           hasAttemptedAutoRegister.current = true;
-          console.log('[NotificationContext] Auto-registering for push notifications...');
 
           // Mark as prompted BEFORE requesting (to prevent loops)
           await AsyncStorage.setItem(PERMISSION_REQUESTED_KEY, 'true');
           setHasPromptedBefore(true);
 
-          const success = await notifications.registerForPushNotifications(walletAddress);
-
-          if (success) {
-            console.log('[NotificationContext] Push notifications registered successfully');
-          } else {
-            console.log('[NotificationContext] Push notifications registration failed or denied');
-          }
+          await notifications.registerForPushNotifications(walletAddress);
         }
       }
     };

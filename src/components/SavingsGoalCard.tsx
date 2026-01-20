@@ -14,18 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SavingsGoal, calculateProgress } from '../services/savingsGoal';
-
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  success: '#22C55E',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-  border: '#E8E8E8',
-  progressBg: '#E5E7EB',
-};
+import { COLORS } from '../constants/colors';
 
 interface SavingsGoalCardProps {
   goal: SavingsGoal | null;

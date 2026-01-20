@@ -4,7 +4,7 @@
  * With tappable locked badges showing unlock requirements
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -25,17 +25,7 @@ import {
 import { getMilestoneState } from '../services/milestoneTracker';
 import BadgeIcon from './BadgeIcons';
 import * as Analytics from '../services/analytics';
-
-const COLORS = {
-  primary: '#200191',
-  white: '#F5F6FF',
-  grey: '#484848',
-  lightGrey: '#9CA3AF',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-  border: '#E8E8E8',
-  success: '#22C55E',
-};
+import { COLORS } from '../constants/colors';
 
 // Unlock requirements for each badge
 interface UnlockRequirement {
@@ -97,6 +87,69 @@ interface AchievementsModalProps {
   currentBalance?: number; // Current savings balance for progress calculation
 }
 
+// Memoized badge card component to prevent unnecessary re-renders
+interface BadgeCardProps {
+  badge: BadgeDefinition;
+  isEarned: boolean;
+  earnedAt: number | null;
+  onPress: (badge: BadgeDefinition, isEarned: boolean) => void;
+}
+
+const BadgeCard = memo(function BadgeCard({
+  badge,
+  isEarned,
+  earnedAt,
+  onPress,
+}: BadgeCardProps) {
+  const formatDate = (timestamp: number | null) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.badgeCard,
+        isEarned && styles.badgeCardEarned,
+      ]}
+      onPress={() => onPress(badge, isEarned)}
+      activeOpacity={isEarned ? 1 : 0.7}
+    >
+      {/* Icon */}
+      <View style={[styles.badgeIcon, isEarned && styles.badgeIconEarned]}>
+        <BadgeIcon badgeId={badge.id} size={24} isLocked={!isEarned} />
+      </View>
+
+      {/* Name */}
+      <Text
+        style={[styles.badgeName, !isEarned && styles.badgeNameLocked]}
+        numberOfLines={1}
+      >
+        {badge.name}
+      </Text>
+
+      {/* Description */}
+      <Text
+        style={[styles.badgeDescription, !isEarned && styles.badgeDescriptionLocked]}
+        numberOfLines={2}
+      >
+        {badge.description}
+      </Text>
+
+      {/* Status */}
+      {isEarned ? (
+        <Text style={styles.earnedDate}>{formatDate(earnedAt)}</Text>
+      ) : (
+        <View style={styles.lockedRow}>
+          <Ionicons name="lock-closed" size={10} color={COLORS.lightGrey} />
+          <Text style={styles.lockedText}>Tap to see how</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+});
+
 export default function AchievementsModal({
   visible,
   onClose,
@@ -118,13 +171,7 @@ export default function AchievementsModal({
     }
   }, [visible]);
 
-  const formatDate = (timestamp: number | null) => {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
-  const handleBadgeTap = (badge: BadgeDefinition, isEarned: boolean) => {
+  const handleBadgeTap = useCallback((badge: BadgeDefinition, isEarned: boolean) => {
     if (!isEarned) {
       Analytics.track('Locked Badge Tapped', {
         badge_id: badge.id,
@@ -132,59 +179,11 @@ export default function AchievementsModal({
       });
       setSelectedBadge(badge);
     }
-  };
+  }, []);
 
-  const closeTooltip = () => {
+  const closeTooltip = useCallback(() => {
     setSelectedBadge(null);
-  };
-
-  const renderBadgeCard = (badge: BadgeDefinition) => {
-    const isEarned = badges[badge.id]?.earned || false;
-    const earnedAt = badges[badge.id]?.earnedAt || null;
-
-    return (
-      <TouchableOpacity
-        key={badge.id}
-        style={[
-          styles.badgeCard,
-          isEarned && styles.badgeCardEarned,
-        ]}
-        onPress={() => handleBadgeTap(badge, isEarned)}
-        activeOpacity={isEarned ? 1 : 0.7}
-      >
-        {/* Icon */}
-        <View style={[styles.badgeIcon, isEarned && styles.badgeIconEarned]}>
-          <BadgeIcon badgeId={badge.id} size={24} isLocked={!isEarned} />
-        </View>
-
-        {/* Name */}
-        <Text
-          style={[styles.badgeName, !isEarned && styles.badgeNameLocked]}
-          numberOfLines={1}
-        >
-          {badge.name}
-        </Text>
-
-        {/* Description */}
-        <Text
-          style={[styles.badgeDescription, !isEarned && styles.badgeDescriptionLocked]}
-          numberOfLines={2}
-        >
-          {badge.description}
-        </Text>
-
-        {/* Status */}
-        {isEarned ? (
-          <Text style={styles.earnedDate}>{formatDate(earnedAt)}</Text>
-        ) : (
-          <View style={styles.lockedRow}>
-            <Ionicons name="lock-closed" size={10} color={COLORS.lightGrey} />
-            <Text style={styles.lockedText}>Tap to see how</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
+  }, []);
 
   const renderTooltip = () => {
     if (!selectedBadge) return null;
@@ -300,7 +299,15 @@ export default function AchievementsModal({
           >
             {/* All Badges Grid */}
             <View style={styles.badgeGrid}>
-              {BADGE_DEFINITIONS.map(renderBadgeCard)}
+              {BADGE_DEFINITIONS.map((badge) => (
+                <BadgeCard
+                  key={badge.id}
+                  badge={badge}
+                  isEarned={badges[badge.id]?.earned || false}
+                  earnedAt={badges[badge.id]?.earnedAt || null}
+                  onPress={handleBadgeTap}
+                />
+              ))}
             </View>
           </ScrollView>
         </View>

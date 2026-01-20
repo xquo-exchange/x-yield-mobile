@@ -26,19 +26,9 @@ import {
   trackCelebrationModalShown,
   trackCelebrationModalDismissed,
 } from '../services/analytics';
+import { COLORS } from '../constants/colors';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// Color Palette
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  success: '#22C55E',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-};
 
 // Animated Circle Component
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);

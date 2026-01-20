@@ -18,18 +18,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PRESET_GOALS, SavingsGoal, formatGoalAmount } from '../services/savingsGoal';
-
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  success: '#22C55E',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-  border: '#E8E8E8',
-  error: '#EF4444',
-};
+import { COLORS } from '../constants/colors';
 
 interface SetGoalModalProps {
   visible: boolean;

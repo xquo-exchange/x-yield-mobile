@@ -1,0 +1,29 @@
+# Maestro E2E Testing Configuration
+# X-Yield Mobile App
+
+appId: com.xyield.mobile
+name: X-Yield Mobile E2E Tests
+
+# Default settings
+env:
+  APP_ID: com.xyield.mobile
+
+# Test execution settings
+flows:
+  - flows/login.yaml
+  - flows/add-funds.yaml
+  - flows/deposit.yaml
+  - flows/withdraw.yaml
+  - flows/logout.yaml
+
+# Tags for selective test runs
+tags:
+  smoke:
+    - flows/login.yaml
+    - flows/logout.yaml
+  critical:
+    - flows/login.yaml
+    - flows/deposit.yaml
+    - flows/withdraw.yaml
+  full:
+    - flows/*.yaml

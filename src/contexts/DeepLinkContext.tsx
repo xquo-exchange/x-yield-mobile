@@ -73,11 +73,11 @@ export function DeepLinkProvider({ children }: { children: React.ReactNode }) {
         if (toAddress && amount) {
           debugLog('[DeepLinkContext] Valid offramp params found');
           return {
-            toAddress: toAddress as string,
-            amount: amount as string,
-            currency: (currency as string) || 'USDC',
-            network: (network as string) || 'base',
-            expiresAt: (expiresAt as string) || '',
+            toAddress: String(toAddress),
+            amount: String(amount),
+            currency: currency ? String(currency) : 'USDC',
+            network: network ? String(network) : 'base',
+            expiresAt: expiresAt ? String(expiresAt) : '',
           };
         }
       }

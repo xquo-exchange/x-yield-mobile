@@ -1,0 +1,55 @@
+# Logout Flow E2E Test
+# Tests the complete logout flow from Dashboard to Welcome screen
+
+appId: com.xyield.mobile
+---
+
+# Precondition: User must be logged in
+
+# Step 1: Launch app (assumes logged in state)
+- launchApp:
+    clearState: false
+
+# Step 2: Wait for Dashboard to load
+- assertVisible:
+    text: "Total Balance"
+
+# Step 3: Open Settings screen
+- tapOn:
+    id: "dashboard-settings-button"
+
+# Step 4: Verify Settings screen appears
+- assertVisible:
+    text: "Settings"
+
+- assertVisible:
+    text: "Notifications"
+
+- assertVisible:
+    text: "Account"
+
+# Step 5: Scroll to find Logout button if needed
+- scrollUntilVisible:
+    element:
+      text: "Logout"
+    direction: DOWN
+
+# Step 6: Tap Logout button
+- tapOn:
+    text: "Logout"
+
+# Step 7: Verify confirmation dialog appears
+- assertVisible:
+    text: "Are you sure you want to logout?"
+
+# Step 8: Confirm logout
+- tapOn:
+    text: "Logout"
+    index: 1
+
+# Step 9: Verify user is logged out and Welcome screen appears
+- assertVisible:
+    text: "Get Started"
+
+- assertVisible:
+    text: "Earn up to"

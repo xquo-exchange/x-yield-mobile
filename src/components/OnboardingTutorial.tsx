@@ -18,17 +18,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TutorialStep } from '../hooks/useOnboardingTutorial';
+import { COLORS } from '../constants/colors';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  white: '#F5F6FF',
-  pureWhite: '#FFFFFF',
-  black: '#00041B',
-  overlay: 'rgba(0, 0, 0, 0.75)',
-};
 
 interface OnboardingTutorialProps {
   isActive: boolean;
@@ -252,12 +244,13 @@ export default function OnboardingTutorial({
       ]}
       pointerEvents="box-none"
     >
-      {/* Dark overlay with cutout */}
+      {/* Dark overlay with cutout - all sections have pointerEvents="none" to allow taps through */}
       <View style={styles.overlayContainer} pointerEvents="box-none">
         {/* Top overlay */}
         {spotlightCutout && (
           <>
             <View
+              pointerEvents="none"
               style={[
                 styles.overlaySection,
                 {
@@ -270,6 +263,7 @@ export default function OnboardingTutorial({
             />
             {/* Left overlay */}
             <View
+              pointerEvents="none"
               style={[
                 styles.overlaySection,
                 {
@@ -282,6 +276,7 @@ export default function OnboardingTutorial({
             />
             {/* Right overlay */}
             <View
+              pointerEvents="none"
               style={[
                 styles.overlaySection,
                 {
@@ -294,6 +289,7 @@ export default function OnboardingTutorial({
             />
             {/* Bottom overlay */}
             <View
+              pointerEvents="none"
               style={[
                 styles.overlaySection,
                 {
@@ -306,6 +302,7 @@ export default function OnboardingTutorial({
             />
             {/* Spotlight border/glow */}
             <Animated.View
+              pointerEvents="none"
               style={[
                 styles.spotlightBorder,
                 {
@@ -321,7 +318,7 @@ export default function OnboardingTutorial({
           </>
         )}
         {/* Full overlay for center steps */}
-        {isCenterStep && <View style={styles.fullOverlay} />}
+        {isCenterStep && <View style={styles.fullOverlay} pointerEvents="none" />}
       </View>
 
       {/* Tooltip card */}

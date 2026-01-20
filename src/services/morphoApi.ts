@@ -3,6 +3,8 @@
  * Fetches real-time APY data from Morpho vaults via their GraphQL API
  */
 
+import { type MorphoVaultApiItem, type MorphoVaultsResponse } from '../types/api';
+
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
 const debugLog = (message: string, ...args: unknown[]) => {
@@ -136,10 +138,10 @@ export async function fetchVaultApys(): Promise<ApyResult> {
       throw new Error(`API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data: MorphoVaultsResponse = await response.json();
 
     // Check if we got results
-    let vaultItems = data?.data?.vaultV2s?.items || [];
+    let vaultItems: MorphoVaultApiItem[] = data?.data?.vaultV2s?.items || [];
 
     // If no results from our specific vaults, get market rates
     if (vaultItems.length === 0) {
@@ -155,11 +157,11 @@ export async function fetchVaultApys(): Promise<ApyResult> {
       });
 
       if (marketResponse.ok) {
-        const marketData = await marketResponse.json();
-        const allVaults = marketData?.data?.vaultV2s?.items || [];
+        const marketData: MorphoVaultsResponse = await marketResponse.json();
+        const allVaults: MorphoVaultApiItem[] = marketData?.data?.vaultV2s?.items || [];
 
         // Filter to vaults with meaningful APY (> 1%)
-        vaultItems = allVaults.filter((v: any) => {
+        vaultItems = allVaults.filter((v) => {
           const apy = parseFloat(v.avgApy || '0');
           return apy > 0.01; // More than 1% APY
         });
@@ -169,7 +171,7 @@ export async function fetchVaultApys(): Promise<ApyResult> {
     }
 
     // Process vault data
-    const vaults: VaultApyData[] = vaultItems.map((vault: any) => ({
+    const vaults: VaultApyData[] = vaultItems.map((vault) => ({
       address: vault.address?.toLowerCase() || '',
       name: vault.name || 'Unknown',
       symbol: vault.symbol || '',

@@ -59,18 +59,3 @@ const SensitiveView: React.FC<SensitiveViewProps> = ({
 };
 
 export default SensitiveView;
-
-/**
- * Higher-order component for wrapping sensitive screens or components
- */
-export function withSensitiveOcclusion<P extends object>(
-  WrappedComponent: React.ComponentType<P>
-): React.FC<P> {
-  return function SensitiveWrapper(props: P) {
-    return (
-      <SensitiveView>
-        <WrappedComponent {...props} />
-      </SensitiveView>
-    );
-  };
-}

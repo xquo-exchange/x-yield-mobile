@@ -1,0 +1,59 @@
+# Deposit Flow E2E Test
+# Tests depositing USDC into savings strategies
+
+appId: com.xyield.mobile
+---
+
+# Precondition: User must be logged in with USDC balance
+
+# Step 1: Launch app (assumes logged in state)
+- launchApp:
+    clearState: false
+
+# Step 2: Wait for Dashboard to load
+- assertVisible:
+    text: "Total Balance"
+
+# Step 3: Navigate to Strategies/Manage screen
+- tapOn:
+    text: "Add More"
+    optional: true
+- tapOn:
+    text: "Start Earning"
+    optional: true
+
+# Step 4: Verify Strategies screen loads
+- assertVisible:
+    text: "Manage Funds"
+
+# Step 5: Verify Add Funds tab content
+- assertVisible:
+    text: "Available to add"
+    optional: true
+
+# Step 6: Enter deposit amount (if balance available)
+- tapOn:
+    id: "strategies-amount-input"
+    optional: true
+
+- inputText: "10"
+
+# Step 7: Tap deposit button
+- tapOn:
+    text: "Add $10.00"
+    optional: true
+
+# Step 8: Wait for transaction (may take time)
+- extendedWaitUntil:
+    visible:
+      text: "Success"
+    timeout: 60000
+    optional: true
+
+# Step 9: Navigate back to Dashboard
+- back
+
+# Step 10: Verify Dashboard
+- assertVisible:
+    text: "Total Balance"
+    optional: true

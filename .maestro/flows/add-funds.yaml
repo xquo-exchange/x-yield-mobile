@@ -1,0 +1,65 @@
+# Add Funds Flow E2E Test
+# Tests the Add Funds modal and wallet address display
+
+appId: com.xyield.mobile
+---
+
+# Precondition: User must be logged in on Dashboard
+# This test assumes the app is already authenticated
+
+# Step 1: Launch app (assumes logged in state)
+- launchApp:
+    clearState: false
+
+# Step 2: Wait for Dashboard to load
+- assertVisible:
+    text: "Total Balance"
+
+# Step 3: Tap Add Funds button
+- tapOn:
+    text: "Add Funds"
+
+# Step 4: Verify Add Funds modal opens
+- assertVisible:
+    text: "Add Funds"
+
+- assertVisible:
+    text: "Transfer from other wallets"
+
+- assertVisible:
+    text: "Transfer with Coinbase"
+
+# Step 5: Verify recommended option is highlighted
+- assertVisible:
+    text: "RECOMMENDED"
+
+# Step 6: Tap "Transfer from other wallets" option
+- tapOn:
+    text: "Transfer from other wallets"
+
+# Step 7: Verify QR code/address view appears
+- assertVisible:
+    text: "Send USDC on Base network"
+
+- assertVisible:
+    text: "Base Network only"
+
+# Step 8: Verify Copy Address button is present
+- assertVisible:
+    text: "Copy Address"
+
+# Step 9: Tap Copy Address
+- tapOn:
+    text: "Copy Address"
+
+# Step 10: Verify copied feedback
+- assertVisible:
+    text: "Copied!"
+
+# Step 11: Close modal
+- back
+- back
+
+# Step 12: Verify back on Dashboard
+- assertVisible:
+    text: "Total Balance"

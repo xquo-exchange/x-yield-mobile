@@ -5,11 +5,7 @@
 
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
-
-const COLORS = {
-  primary: '#200191',
-  locked: '#9CA3AF',
-};
+import { COLORS } from '../constants/colors';
 
 // Badge icon mapping - all use primary purple when earned
 const BADGE_ICONS: Record<string, string> = {

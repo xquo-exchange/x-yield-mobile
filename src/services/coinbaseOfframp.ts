@@ -14,6 +14,7 @@
  */
 
 import { Linking } from 'react-native';
+import { getErrorMessage } from '../utils/errorHelpers';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -90,7 +91,7 @@ export async function getOfframpSessionUrl(
     return { error: 'No URL returned' };
   } catch (error) {
     console.error('[Coinbase Offramp] Failed to get session:', error);
-    return { error: (error as Error)?.message || 'Network error' };
+    return { error: getErrorMessage(error) };
   }
 }
 
@@ -129,6 +130,6 @@ export async function openCoinbaseOfframp(
     return { success: false, error: 'No URL returned from backend' };
   } catch (error) {
     console.error('[Coinbase Offramp] Error:', error);
-    return { success: false, error: (error as Error)?.message || 'Unknown error' };
+    return { success: false, error: getErrorMessage(error) };
   }
 }

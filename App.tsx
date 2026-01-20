@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Platform, View, Text, StyleSheet, Image } from 'react-native';
+import { Platform, View, Text, StyleSheet, Image, InteractionManager } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PrivyProvider, usePrivy, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { SmartWalletsProvider, useSmartWallets } from '@privy-io/expo/smart-wallets';
@@ -10,6 +10,7 @@ import { DeepLinkProvider } from './src/contexts/DeepLinkContext';
 import { AnalyticsProvider } from './src/contexts/AnalyticsContext';
 import { NotificationProvider } from './src/contexts/NotificationContext';
 import SplashScreen from './src/components/SplashScreen';
+import ErrorBoundary from './src/components/ErrorBoundary';
 
 // Mantieni visibile la splash nativa fino a quando non la nascondiamo manualmente
 ExpoSplashScreen.preventAutoHideAsync();
@@ -47,10 +48,16 @@ function WebNotSupported() {
   );
 }
 
-// Inner component that has access to Privy hooks
-function AppContent() {
-  const { user } = usePrivy();
-  const { wallets } = useEmbeddedEthereumWallet();
+// Loading state tracker - exposed to parent
+interface LoadingState {
+  isReady: boolean;
+  error: string | null;
+}
+
+// Inner component that has access to Privy hooks and tracks loading state
+function AppContent({ onLoadingStateChange }: { onLoadingStateChange: (state: LoadingState) => void }) {
+  const { user, isReady: privyReady } = usePrivy();
+  const { wallets, isReady: walletsReady } = useEmbeddedEthereumWallet();
   const { client: smartWalletClient } = useSmartWallets();
 
   const embeddedWallet = wallets?.[0];
@@ -59,6 +66,22 @@ function AppContent() {
   const walletAddress = smartWalletAddress || eoaAddress;
 
   const isAuthenticated = !!user;
+
+  // Track loading state
+  useEffect(() => {
+    // On Android, defer the loading state check to allow UI to render
+    if (Platform.OS === 'android') {
+      InteractionManager.runAfterInteractions(() => {
+        const isReady = privyReady;
+        console.log('[AppContent] Android loading state:', { privyReady, walletsReady, isReady });
+        onLoadingStateChange({ isReady, error: null });
+      });
+    } else {
+      const isReady = privyReady;
+      console.log('[AppContent] iOS loading state:', { privyReady, walletsReady, isReady });
+      onLoadingStateChange({ isReady, error: null });
+    }
+  }, [privyReady, walletsReady, onLoadingStateChange]);
 
   return (
     <NotificationProvider
@@ -71,16 +94,90 @@ function AppContent() {
   );
 }
 
+// Wrapper component that handles Privy initialization errors
+function PrivyWrapper({
+  children,
+  onError
+}: {
+  children: React.ReactNode;
+  onError: (error: string) => void;
+}) {
+  const [initError, setInitError] = useState<string | null>(null);
+
+  // Catch Privy initialization errors
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      // If we haven't loaded after 20 seconds, there's likely an issue
+      console.log('[PrivyWrapper] Checking initialization status...');
+    }, 20000);
+
+    return () => clearTimeout(timeout);
+  }, []);
+
+  if (initError) {
+    onError(initError);
+    return null;
+  }
+
+  return (
+    <PrivyProvider
+      appId="cmk1awjuj002ri60dlbm7ot7y"
+      clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
+      supportedChains={[base]}
+      config={{
+        embedded: {
+          ethereum: {
+            createOnLogin: 'users-without-wallets',
+          },
+        },
+      }}
+    >
+      <SmartWalletsProvider>
+        {children}
+      </SmartWalletsProvider>
+    </PrivyProvider>
+  );
+}
+
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
+  const [loadingState, setLoadingState] = useState<LoadingState>({
+    isReady: false,
+    error: null,
+  });
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     // Nasconde la splash nativa appena il componente monta
-    ExpoSplashScreen.hideAsync();
+    // Use InteractionManager on Android to prevent UI blocking
+    if (Platform.OS === 'android') {
+      InteractionManager.runAfterInteractions(() => {
+        ExpoSplashScreen.hideAsync();
+      });
+    } else {
+      ExpoSplashScreen.hideAsync();
+    }
+  }, []);
+
+  const handleLoadingStateChange = useCallback((state: LoadingState) => {
+    console.log('[App] Loading state changed:', state);
+    setLoadingState(state);
   }, []);
 
   const handleSplashComplete = useCallback(() => {
+    console.log('[App] Splash animation complete');
     setShowSplash(false);
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    console.log('[App] Retry requested');
+    setLoadingState({ isReady: false, error: null });
+    setRetryKey(prev => prev + 1);
+  }, []);
+
+  const handleError = useCallback((error: string) => {
+    console.error('[App] Error:', error);
+    setLoadingState({ isReady: false, error });
   }, []);
 
   if (Platform.OS === 'web') {
@@ -88,29 +185,30 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <AnalyticsProvider>
-        <DeepLinkProvider>
-          <PrivyProvider
-            appId="cmk1awjuj002ri60dlbm7ot7y"
-            clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
-            supportedChains={[base]}
-            config={{
-              embedded: {
-                ethereum: {
-                  createOnLogin: 'users-without-wallets',
-                },
-              },
-            }}
-          >
-            <SmartWalletsProvider>
-              <AppContent />
-            </SmartWalletsProvider>
-          </PrivyProvider>
-        </DeepLinkProvider>
-      </AnalyticsProvider>
-      {showSplash && <SplashScreen onAnimationComplete={handleSplashComplete} />}
-    </SafeAreaProvider>
+    <ErrorBoundary
+      onError={(error) => {
+        console.error('[App] ErrorBoundary caught:', error);
+        handleError(error.message);
+      }}
+    >
+      <SafeAreaProvider>
+        <AnalyticsProvider>
+          <DeepLinkProvider>
+            <PrivyWrapper key={retryKey} onError={handleError}>
+              <AppContent onLoadingStateChange={handleLoadingStateChange} />
+            </PrivyWrapper>
+          </DeepLinkProvider>
+        </AnalyticsProvider>
+        {showSplash && (
+          <SplashScreen
+            onAnimationComplete={handleSplashComplete}
+            isLoading={!loadingState.isReady}
+            loadingError={loadingState.error}
+            onRetry={handleRetry}
+          />
+        )}
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 

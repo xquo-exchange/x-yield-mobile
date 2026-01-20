@@ -16,17 +16,7 @@ import { usePrivy, useLoginWithEmail } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import * as Analytics from '../services/analytics';
-
-// Color Palette - PayPal/Revolut Style
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-  border: '#E5E5E5',
-};
+import { COLORS } from '../constants/colors';
 
 type LoginScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Login'>;
@@ -141,6 +131,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
             <View style={styles.inputContainer}>
               <TextInput
+                testID="login-email-input"
                 style={[styles.input, isInputFocused && styles.inputFocused]}
                 placeholder="Email Address"
                 placeholderTextColor={COLORS.grey}
@@ -166,6 +157,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
             </View>
 
             <TouchableOpacity
+              testID="login-continue-button"
               style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
               onPress={handleSendCode}
               disabled={isLoading}
@@ -188,6 +180,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
             <View style={styles.inputContainer}>
               <TextInput
+                testID="login-code-input"
                 style={[styles.input, isInputFocused && styles.inputFocused]}
                 placeholder="6-digit code"
                 placeholderTextColor={COLORS.grey}
@@ -206,6 +199,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
             </View>
 
             <TouchableOpacity
+              testID="login-verify-button"
               style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
               onPress={handleVerifyCode}
               disabled={isLoading}

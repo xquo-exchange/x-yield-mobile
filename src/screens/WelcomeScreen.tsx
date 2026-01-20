@@ -8,6 +8,8 @@ import {
   FlatList,
   Animated,
   Image,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,18 +18,9 @@ import { usePrivy } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import * as Analytics from '../services/analytics';
+import { COLORS } from '../constants/colors';
 
 const { width } = Dimensions.get('window');
-
-// Color Palette - PayPal/Revolut Style
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-};
 
 type WelcomeScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Welcome'>;
@@ -193,7 +186,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
     }
   }, [user, navigation]);
 
-  const handleScroll = (event: any) => {
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const scrollPosition = event.nativeEvent.contentOffset.x;
     const index = Math.round(scrollPosition / width);
     setActiveIndex(index);
@@ -295,6 +288,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
       {/* Bottom Section */}
       <View style={styles.bottomContainer}>
         <TouchableOpacity
+          testID="welcome-get-started-button"
           style={styles.getStartedButton}
           onPress={() => {
             // Navigate immediately for instant responsiveness

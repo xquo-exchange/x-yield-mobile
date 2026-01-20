@@ -15,6 +15,9 @@ import {
   UNFLAT_MIN_FEE_USDC,
 } from '../constants/contracts';
 import { type VaultPosition } from './blockchain';
+import { sendTransactionNotification } from './notifications';
+import { type SmartWalletClient } from '../types/wallet';
+import { getErrorMessage } from '../utils/errorHelpers';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -134,7 +137,7 @@ async function simulateTransaction(
     ]);
     return { success: true };
   } catch (error) {
-    const msg = (error as Error)?.message || 'Unknown error';
+    const msg = getErrorMessage(error);
 
     // Parse common revert reasons
     if (msg.includes('insufficient allowance')) {
@@ -528,9 +531,8 @@ export function buildPartialWithdrawBatch(
 /**
  * Execute a withdraw batch (redeem from all vaults)
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function executeWithdrawBatch(
-  client: any,
+  client: SmartWalletClient,
   batch: WithdrawBatch
 ): Promise<string> {
   if (!client?.account?.address) {
@@ -614,11 +616,22 @@ export async function executeWithdrawBatch(
       }
 
       debugLog(`[Withdraw] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
+
+      // Send push notification for successful withdrawal
+      sendTransactionNotification({
+        type: 'withdrawal',
+        amount: batch.userReceives,
+        txHash: hash,
+      }).catch((err) => {
+        // Don't fail the transaction if notification fails
+        debugLog('[Withdraw] Failed to send notification:', err);
+      });
+
       return hash;
 
     } catch (error) {
       lastError = error;
-      const msg = ((error as Error)?.message || '').toLowerCase();
+      const msg = getErrorMessage(error).toLowerCase();
 
       if (msg.includes('nonce') && attempt < MAX_RETRIES - 1) {
         debugLog('[Withdraw] Nonce error, retrying...');
@@ -690,7 +703,7 @@ export function buildStrategyBatch(
  * Check if an error is a nonce-related error
  */
 function isNonceError(error: unknown): boolean {
-  const msg = ((error as Error)?.message || '').toLowerCase();
+  const msg = getErrorMessage(error).toLowerCase();
   return (
     msg.includes('nonce') ||
     msg.includes('aa25') || // ERC-4337 nonce error code
@@ -703,7 +716,7 @@ function isNonceError(error: unknown): boolean {
  * Parse error message into user-friendly format
  */
 function parseErrorMessage(error: unknown): string {
-  const msg = (error as Error)?.message || 'Unknown error';
+  const msg = getErrorMessage(error);
   const msgLower = msg.toLowerCase();
 
   // Nonce errors
@@ -739,7 +752,7 @@ function parseErrorMessage(error: unknown): string {
  * Execute a single transaction call
  */
 async function executeSingleCall(
-  client: any,
+  client: SmartWalletClient,
   call: TransactionCall
 ): Promise<string> {
   const hash = await client.sendTransaction({
@@ -759,7 +772,7 @@ async function executeSingleCall(
  * Execute a batch of transaction calls
  */
 async function executeBatchCalls(
-  client: any,
+  client: SmartWalletClient,
   calls: TransactionCall[]
 ): Promise<string> {
   const hash = await client.sendTransaction({
@@ -777,10 +790,8 @@ async function executeBatchCalls(
   return hash;
 }
 
-// Using 'any' for Privy's smart wallet client to avoid complex type conflicts
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function executeStrategyBatch(
-  client: any,
+  client: SmartWalletClient,
   batch: StrategyBatch
 ): Promise<string> {
   if (!client?.account?.address) {
@@ -869,10 +880,21 @@ export async function executeStrategyBatch(
       }
 
       debugLog(`[Deposit] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
+
+      // Send push notification for successful deposit
+      sendTransactionNotification({
+        type: 'deposit',
+        amount: batch.totalAmount,
+        txHash: hash,
+      }).catch((err) => {
+        // Don't fail the transaction if notification fails
+        debugLog('[Deposit] Failed to send notification:', err);
+      });
+
       return hash;
 
     } catch (error) {
-      const errorMsg = (error as Error)?.message || 'Unknown error';
+      const errorMsg = getErrorMessage(error);
       debugLog(`[Deposit] Error: ${errorMsg}`);
       lastError = error;
 

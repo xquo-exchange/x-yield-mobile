@@ -26,19 +26,12 @@ import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useNotificationContext } from '../contexts/NotificationContext';
-
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-  border: '#E8E8E8',
-  green: '#22c55e',
-  red: '#ef4444',
-  amber: '#f59e0b',
-};
+import { trackLogout } from '../services/analytics';
+import { clearTransactionCache } from '../services/transactionHistory';
+import { resetBadges } from '../services/badges';
+import { resetMilestones } from '../services/milestoneTracker';
+import { clearSavingsGoal } from '../services/savingsGoal';
+import { COLORS } from '../constants/colors';
 
 type SettingsScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Settings'>;
@@ -57,6 +50,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const notifications = useNotificationContext();
 
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Handle notification toggle
   const handleNotificationToggle = useCallback(async (enabled: boolean) => {
@@ -121,8 +115,74 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
     await WebBrowser.openBrowserAsync('https://tally.so/r/5B90vP');
   }, []);
 
-  // Handle logout
-  const handleLogout = useCallback(async () => {
+  // Perform the actual logout
+  const performLogout = useCallback(async () => {
+    setIsLoggingOut(true);
+
+    try {
+      // Track logout in analytics first (while we still have user context)
+      trackLogout();
+
+      // Unregister from notifications before logout
+      if (walletAddress && notifications.isRegistered) {
+        try {
+          await notifications.unregisterFromPushNotifications(walletAddress);
+        } catch (notificationError) {
+          // Don't block logout if notification unregister fails
+          console.error('[Settings] Failed to unregister notifications:', notificationError);
+        }
+      }
+
+      // Clear local cached data for security
+      if (walletAddress) {
+        try {
+          await Promise.all([
+            clearTransactionCache(walletAddress),
+            resetBadges(),
+            resetMilestones(),
+            clearSavingsGoal(),
+          ]);
+        } catch (cacheError) {
+          // Don't block logout if cache clearing fails
+          console.error('[Settings] Failed to clear cache:', cacheError);
+        }
+      }
+
+      // Perform Privy logout - this will clear auth state and trigger navigation
+      await logout();
+      // Navigation will happen automatically via AppNavigator reacting to auth state change
+
+    } catch (error) {
+      console.error('[Settings] Logout failed:', error);
+      setIsLoggingOut(false);
+
+      Alert.alert(
+        'Logout Failed',
+        'There was an error logging out. Please try again.',
+        [
+          { text: 'OK', style: 'default' },
+          {
+            text: 'Force Logout',
+            style: 'destructive',
+            onPress: async () => {
+              // Force logout even if there's an error
+              try {
+                await logout();
+              } catch (forceError) {
+                console.error('[Settings] Force logout also failed:', forceError);
+                Alert.alert('Error', 'Unable to logout. Please restart the app.');
+              }
+            },
+          },
+        ]
+      );
+    }
+  }, [logout, walletAddress, notifications]);
+
+  // Handle logout button press
+  const handleLogout = useCallback(() => {
+    if (isLoggingOut) return; // Prevent double-tap
+
     Alert.alert(
       'Logout',
       'Are you sure you want to logout?',
@@ -131,17 +191,11 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         {
           text: 'Logout',
           style: 'destructive',
-          onPress: async () => {
-            // Unregister from notifications before logout
-            if (walletAddress && notifications.isRegistered) {
-              await notifications.unregisterFromPushNotifications(walletAddress);
-            }
-            await logout();
-          },
+          onPress: performLogout,
         },
       ]
     );
-  }, [logout, walletAddress, notifications]);
+  }, [performLogout, isLoggingOut]);
 
   // Get permission status text
   // Check if running on simulator
@@ -396,12 +450,23 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         {/* Logout Section */}
         <View style={styles.section}>
           <TouchableOpacity
-            style={styles.logoutButton}
+            testID="settings-logout-button"
+            style={[styles.logoutButton, isLoggingOut && styles.logoutButtonDisabled]}
             onPress={handleLogout}
             activeOpacity={0.7}
+            disabled={isLoggingOut}
           >
-            <Ionicons name="log-out-outline" size={20} color={COLORS.red} />
-            <Text style={styles.logoutText}>Logout</Text>
+            {isLoggingOut ? (
+              <>
+                <ActivityIndicator size="small" color={COLORS.red} />
+                <Text style={styles.logoutText}>Logging out...</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="log-out-outline" size={20} color={COLORS.red} />
+                <Text style={styles.logoutText}>Logout</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -539,6 +604,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     gap: 8,
+  },
+  logoutButtonDisabled: {
+    opacity: 0.7,
   },
   logoutText: {
     fontSize: 16,

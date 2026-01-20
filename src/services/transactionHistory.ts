@@ -23,8 +23,21 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TOKENS, BASE_CHAIN_ID, UNFLAT_TREASURY_ADDRESS, MORPHO } from '../constants/contracts';
+import { TOKENS, UNFLAT_TREASURY_ADDRESS, MORPHO } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
+import { type BlockscoutTokenTransfer, type BlockscoutApiResponse } from '../types/api';
+
+// Re-export formatting utilities for backward compatibility
+export {
+  formatCurrency,
+  formatDate,
+  formatDateShort,
+  shortenAddress,
+  shortenTxHash,
+} from '../utils/formatting';
+
+// Import for internal use
+import { shortenAddress as _shortenAddress } from '../utils/formatting';
 
 // Debug mode
 const DEBUG = __DEV__ ?? false;
@@ -220,7 +233,7 @@ async function fetchTokenTransfers(
   tokenAddress: string,
   startBlock: number = 0,
   endBlock: number = 99999999
-): Promise<any[]> {
+): Promise<BlockscoutTokenTransfer[]> {
   try {
     // Blockscout uses same API format as Etherscan
     const url = new URL(BLOCKSCOUT_API_URL);
@@ -239,7 +252,7 @@ async function fetchTokenTransfers(
       throw new Error(`Blockscout API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data: BlockscoutApiResponse<BlockscoutTokenTransfer[]> = await response.json();
 
     if (data.status === '1' && Array.isArray(data.result)) {
       debugLog('[TransactionHistory] Found', data.result.length, 'token transfers');
@@ -265,7 +278,7 @@ async function fetchTokenTransfers(
  * - 'withdraw': USDC coming from Morpho vault (taking from savings)
  */
 function parseTransfer(
-  transfer: any,
+  transfer: BlockscoutTokenTransfer,
   walletAddress: string,
   decimals: number = 6,
   index: number = 0,
@@ -1049,41 +1062,6 @@ export async function fetchTransactionHistoryWithCache(
   return cachedResult;
 }
 
-/**
- * Format currency for display (USDC has 6 decimals)
- */
-export function formatCurrency(amount: number, decimals: number = 6): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(amount);
-}
-
-/**
- * Format date for display
- */
-export function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
-/**
- * Format date for PDF (shorter)
- */
-export function formatDateShort(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
-}
 
 /**
  * Get transaction type label
@@ -1227,22 +1205,7 @@ const KNOWN_ADDRESSES: Record<string, string> = {
   '0xa9d1e08c': 'Coinbase',
 };
 
-/**
- * Get a shortened version of an address
- * e.g., "0x1234567890abcdef" -> "0x1234...cdef"
- */
-export function shortenAddress(address: string, chars: number = 4): string {
-  if (!address || address.length < 10) return address;
-  return `${address.slice(0, chars + 2)}...${address.slice(-chars)}`;
-}
-
-/**
- * Get a shortened transaction hash
- */
-export function shortenTxHash(hash: string, chars: number = 6): string {
-  if (!hash || hash.length < 14) return hash;
-  return `${hash.slice(0, chars + 2)}...${hash.slice(-chars)}`;
-}
+// shortenAddress and shortenTxHash moved to utils/formatting.ts
 
 /**
  * Get a friendly name for an address if known, otherwise return shortened address
@@ -1258,7 +1221,7 @@ export function getAddressLabel(address: string): string {
     }
   }
 
-  return shortenAddress(address);
+  return _shortenAddress(address);
 }
 
 /**
@@ -1303,6 +1266,9 @@ export function getBaseScanAddressUrl(address: string): string {
  * Realized = gross yield - fee (what user keeps after fees)
  */
 function runLineByLineAudit(transactions: Transaction[], totalFees: number): void {
+  // Only run in development mode
+  if (!__DEV__) return;
+
   console.log('\n═══════════════════════════════════════════════════════════════════════════════');
   console.log('                       LINE-BY-LINE AUDIT TRAIL                                ');
   console.log('═══════════════════════════════════════════════════════════════════════════════\n');

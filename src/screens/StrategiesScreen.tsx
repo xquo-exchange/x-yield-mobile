@@ -5,7 +5,7 @@
  * Hides crypto complexity, emphasizes trust and simplicity.
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -49,88 +49,9 @@ import {
 import { recordDepositMilestone } from '../services/milestoneTracker';
 import { checkAndAwardBadges } from '../services/badges';
 import CelebrationModal from '../components/CelebrationModal';
-
-// Color Palette - PayPal/Revolut Style
-const COLORS = {
-  primary: '#200191',
-  secondary: '#6198FF',
-  white: '#F5F6FF',
-  grey: '#484848',
-  black: '#00041B',
-  pureWhite: '#FFFFFF',
-  border: '#E5E5E5',
-  success: '#22C55E',
-  disabled: '#A0A0A0',
-};
-
-// AnimatedEarned Component - Real-time earnings with USDC precision
-interface AnimatedEarnedProps {
-  currentBalance: number;
-  depositedAmount: number;
-  apy: number;
-}
-
-function AnimatedEarned({ currentBalance, depositedAmount, apy }: AnimatedEarnedProps) {
-  const [displayEarned, setDisplayEarned] = React.useState(
-    Math.max(0, currentBalance - depositedAmount)
-  );
-  const startTimeRef = React.useRef(Date.now());
-  const startBalanceRef = React.useRef(currentBalance);
-
-  // Reset when balance changes significantly
-  React.useEffect(() => {
-    const diff = Math.abs(currentBalance - startBalanceRef.current);
-    if (diff > 0.01) {
-      startBalanceRef.current = currentBalance;
-      startTimeRef.current = Date.now();
-      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
-    }
-  }, [currentBalance, depositedAmount]);
-
-  // Real-time yield accumulation for earned amount
-  React.useEffect(() => {
-    if (apy <= 0 || currentBalance <= 0 || depositedAmount <= 0) {
-      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
-      return;
-    }
-
-    // yieldPerSecond based on current balance
-    const secondsPerYear = 31536000;
-    const yieldPerSecond = currentBalance * (apy / 100) / secondsPerYear;
-
-    const interval = setInterval(() => {
-      const elapsedSeconds = (Date.now() - startTimeRef.current) / 1000;
-      const accumulatedYield = yieldPerSecond * elapsedSeconds;
-      const newBalance = startBalanceRef.current + accumulatedYield;
-      setDisplayEarned(Math.max(0, newBalance - depositedAmount));
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [currentBalance, depositedAmount, apy]);
-
-  // Format with 6 decimal places (USDC precision)
-  const formatEarned = (value: number): string => {
-    const formatted = value.toFixed(6);
-    const parts = formatted.split('.');
-    const integerPart = parseInt(parts[0]).toLocaleString('en-US');
-    return `+$${integerPart}.${parts[1]}`;
-  };
-
-  return (
-    <Text style={animatedEarnedStyles.earned}>
-      {formatEarned(displayEarned)}
-    </Text>
-  );
-}
-
-const animatedEarnedStyles = StyleSheet.create({
-  earned: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.success,
-    fontVariant: ['tabular-nums'],
-  },
-});
+import { getErrorMessage } from '../utils/errorHelpers';
+import { COLORS } from '../constants/colors';
+import { AnimatedEarned } from '../components/AnimatedBalance';
 
 type StrategiesScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Strategies'>;
@@ -169,9 +90,19 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     milestoneReached: number | null;
   } | null>(null);
 
-  const hasPositions = positions.some(p => p.shares > BigInt(0));
-  const savingsAmount = parseFloat(positionsTotal) || 0;
-  const availableBalance = usdc ? parseFloat(usdc.balance) : 0;
+  // Memoize expensive computations
+  const hasPositions = useMemo(
+    () => positions.some(p => p.shares > BigInt(0)),
+    [positions]
+  );
+  const savingsAmount = useMemo(
+    () => parseFloat(positionsTotal) || 0,
+    [positionsTotal]
+  );
+  const availableBalance = useMemo(
+    () => usdc ? parseFloat(usdc.balance) : 0,
+    [usdc]
+  );
 
   // Analytics: Track screen view on mount
   useEffect(() => {
@@ -182,8 +113,11 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     return () => Analytics.trackScreenExit('ManageFunds');
   }, []);
 
-  // Calculate earnings for display (fee is handled in handleWithdraw)
-  const totalYield = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
+  // Calculate earnings for display - memoized to prevent recalculation on every render
+  const totalYield = useMemo(
+    () => totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0,
+    [totalDeposited, savingsAmount]
+  );
   const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
 
   // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
@@ -208,6 +142,17 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     setRefreshing(false);
     Analytics.trackBalanceFetchDuration(timer.stop());
   }, [refetchBalances, refetchPositions, refetchApy]);
+
+  // Memoized navigation handlers
+  const handleGoBack = useCallback(() => {
+    Analytics.trackButtonTap('Back', 'ManageFunds');
+    navigation.goBack();
+  }, [navigation]);
+
+  const handleRetry = useCallback(() => {
+    Analytics.trackButtonTap('Retry', 'ManageFunds');
+    refetchPositions();
+  }, [refetchPositions]);
 
   const handleAmountChange = (value: string) => {
     const sanitized = value.replace(/[^0-9.]/g, '');
@@ -301,7 +246,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       });
       setShowCelebration(true);
     } catch (error) {
-      const errorMessage = (error as Error)?.message || 'Unknown error';
+      const errorMessage = getErrorMessage(error);
       Analytics.trackDepositFailed(depositAmount, STRATEGY.name, errorMessage);
       Alert.alert('Failed', errorMessage || 'Please try again');
     } finally {
@@ -427,7 +372,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                 },
               ]);
             } catch (error) {
-              const errorMessage = (error as Error)?.message || 'Unknown error';
+              const errorMessage = getErrorMessage(error);
               Analytics.trackWithdrawFailed(withdrawAmount, errorMessage);
               Alert.alert('Failed', errorMessage || 'Please try again');
             } finally {
@@ -457,10 +402,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => {
-            Analytics.trackButtonTap('Back', 'ManageFunds');
-            navigation.goBack();
-          }} style={styles.backButton}>
+          <TouchableOpacity testID="strategies-back-button" onPress={handleGoBack} style={styles.backButton}>
             <Ionicons name="chevron-back" size={24} color={COLORS.black} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Manage Funds</Text>
@@ -478,10 +420,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             <View style={styles.errorState}>
               <Ionicons name="alert-circle-outline" size={24} color={COLORS.grey} />
               <Text style={styles.errorText}>Unable to load account</Text>
-              <TouchableOpacity onPress={() => {
-                Analytics.trackButtonTap('Retry', 'ManageFunds');
-                refetchPositions();
-              }} style={styles.retryButton}>
+              <TouchableOpacity onPress={handleRetry} style={styles.retryButton}>
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
@@ -528,6 +467,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         {/* Tab Selector */}
         <View style={styles.tabContainer}>
           <TouchableOpacity
+            testID="strategies-deposit-tab"
             style={[styles.tab, activeTab === 'add' && styles.tabActive]}
             onPress={() => {
               Analytics.trackButtonTap('Add Funds Tab', 'ManageFunds');
@@ -545,6 +485,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
+            testID="strategies-withdraw-tab"
             style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
             onPress={() => {
               Analytics.trackButtonTap('Withdraw Tab', 'ManageFunds');
@@ -605,18 +546,20 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
               <>
                 <Text style={styles.inputLabel}>Amount to add</Text>
                 <View style={styles.inputRow}>
-                  <TouchableOpacity
-                    style={styles.inputTouchable}
-                    activeOpacity={1}
-                    onPress={() => {
-                      // iOS fix: Programmatically focus input on container tap
-                      amountInputRef.current?.focus();
-                    }}
-                  >
-                    <View style={[styles.currencyPrefix, isInputFocused && styles.inputFocused]}>
-                      <Text style={styles.currencyText}>$</Text>
-                    </View>
+                  <View style={styles.inputTouchable}>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => {
+                        // Focus input when tapping the $ prefix
+                        amountInputRef.current?.focus();
+                      }}
+                    >
+                      <View style={[styles.currencyPrefix, isInputFocused && styles.inputFocused]}>
+                        <Text style={styles.currencyText}>$</Text>
+                      </View>
+                    </TouchableOpacity>
                     <TextInput
+                      testID="strategies-amount-input"
                       ref={amountInputRef}
                       style={[styles.input, isInputFocused && styles.inputFocused]}
                       value={amount}
@@ -626,13 +569,14 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                       keyboardType="decimal-pad"
                       autoCorrect={false}
                       spellCheck={false}
+                      editable={true}
                       onFocus={() => {
                         setIsInputFocused(true);
                         Analytics.trackInputFocus('Amount', 'ManageFunds');
                       }}
                       onBlur={() => setIsInputFocused(false)}
                     />
-                  </TouchableOpacity>
+                  </View>
                   <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
                     <Text style={styles.maxButtonText}>MAX</Text>
                   </TouchableOpacity>
@@ -651,6 +595,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                 </View>
 
                 <TouchableOpacity
+                  testID="strategies-deposit-button"
                   style={[
                     styles.actionButton,
                     (!amount || parseFloat(amount) <= 0 || isDepositing) && styles.actionButtonDisabled,
@@ -708,6 +653,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                   </View>
 
                   <TouchableOpacity
+                    testID="strategies-withdraw-button"
                     style={[
                       styles.actionButton,
                       isWithdrawing && styles.actionButtonDisabled,

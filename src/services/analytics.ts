@@ -9,6 +9,7 @@ import RNUxcam from 'react-native-ux-cam';
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
 import * as Device from 'expo-device';
+import { getErrorMessage } from '../utils/errorHelpers';
 
 // Debug mode - set to false for production
 const DEBUG = __DEV__ ?? false;
@@ -93,7 +94,7 @@ export async function initializeAnalytics(): Promise<void> {
 
     debugLog('[Analytics] Initialized successfully');
   } catch (error) {
-    initializationError = (error as Error)?.message || 'Unknown error';
+    initializationError = getErrorMessage(error);
     console.error('[Analytics] Failed to initialize:', initializationError);
   }
 }
@@ -898,24 +899,10 @@ export function trackBalanceFetchDuration(durationMs: number): void {
 // 14. SCROLL & ENGAGEMENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function trackScrollDepth(screen: string, percent: number): void {
-  track('scroll_depth', {
-    screen,
-    percent: Math.round(percent),
-  });
-}
-
 export function trackTimeOnScreen(screen: string, durationSeconds: number): void {
   track('time_on_screen', {
     screen,
     duration_seconds: durationSeconds,
-  });
-}
-
-export function trackIdleDetected(screen: string, idleDurationSeconds: number): void {
-  track('idle_detected', {
-    screen,
-    idle_duration_seconds: idleDurationSeconds,
   });
 }
 
