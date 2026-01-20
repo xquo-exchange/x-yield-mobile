@@ -271,7 +271,8 @@ export default function AchievementsModal({
               <Ionicons name="close" size={24} color={COLORS.black} />
             </TouchableOpacity>
             <Text style={styles.title}>Achievements</Text>
-            <View style={styles.closeButton} />
+            {/* Spacer to balance header - same width as close button but invisible */}
+            <View style={styles.headerSpacer} />
           </View>
 
           {/* Stats Row */}
@@ -347,6 +348,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.pureWhite,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  headerSpacer: {
+    width: 40, // Same width as closeButton for centering
+    height: 40,
   },
   title: {
     fontSize: 17,
