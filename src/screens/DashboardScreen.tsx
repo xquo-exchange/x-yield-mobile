@@ -141,6 +141,12 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const [earnedBadge, setEarnedBadge] = React.useState<BadgeDefinition | null>(null);
   const [showAchievements, setShowAchievements] = React.useState(false);
 
+  // Memoize earned badge count to avoid recalculating on every render
+  const earnedBadgeCount = React.useMemo(
+    () => Object.values(badges).filter((b) => b.earned).length,
+    [badges]
+  );
+
   // Onboarding tutorial
   const onboardingTutorial = useOnboardingTutorial();
 
@@ -255,14 +261,6 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const smartWalletAddress = smartWalletFromHook || smartWalletFromLinkedAccounts;
   const displayAddress = smartWalletAddress || embeddedWalletAddress;
 
-  // Debug: Log wallet addresses
-  console.log('[Dashboard] Wallet addresses:', {
-    smartWalletFromHook,
-    smartWalletFromLinkedAccounts,
-    embeddedWalletAddress,
-    displayAddress,
-  });
-
   const { usdc, isLoading: balanceLoading, refetch: refetchBalances } = useWalletBalance(displayAddress);
   const { totalUsdValue: savingsTotal, isLoading: positionsLoading, refetch: refetchPositions } = usePositions(displayAddress);
 
@@ -324,7 +322,6 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   // Load badges and track app open for streaks
   React.useEffect(() => {
     const loadBadgesAndTrackOpen = async () => {
-      console.log('[Dashboard] Loading badges with displayAddress:', displayAddress);
       // Load badges and stats
       const [loadedBadges, loadedStats] = await Promise.all([
         getBadges(),
@@ -587,10 +584,9 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   // Memoized modal handlers
   const handleOpenAchievements = useCallback(() => {
     Analytics.trackButtonTap('Achievements Header', 'Dashboard');
-    const earnedCount = Object.values(badges).filter((b) => b.earned).length;
-    trackAchievementsModalOpened(earnedCount, 7);
+    trackAchievementsModalOpened(earnedBadgeCount, 7);
     setShowAchievements(true);
-  }, [badges]);
+  }, [earnedBadgeCount]);
 
   const handleOpenFundingModal = useCallback(() => {
     Analytics.trackButtonTap('Add Funds', 'Dashboard');
@@ -869,10 +865,10 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
             >
               <Ionicons name="trophy" size={20} color={COLORS.primary} />
               {/* Badge count indicator */}
-              {Object.values(badges).filter((b) => b.earned).length > 0 && (
+              {earnedBadgeCount > 0 && (
                 <View style={styles.badgeCountIndicator}>
                   <Text style={styles.badgeCountText}>
-                    {Object.values(badges).filter((b) => b.earned).length}
+                    {earnedBadgeCount}
                   </Text>
                 </View>
               )}

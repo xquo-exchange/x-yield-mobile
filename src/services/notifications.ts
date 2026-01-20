@@ -125,11 +125,6 @@ export const registerPushToken = async (
   registration: DeviceRegistration
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    console.log('[Notifications] Registering push token to Supabase:', {
-      token: registration.expoPushToken?.substring(0, 20) + '...',
-      walletAddress: registration.walletAddress,
-    });
-
     // Save to Supabase
     const supabaseResult = await savePushTokenToSupabase(
       registration.walletAddress,
@@ -144,7 +139,6 @@ export const registerPushToken = async (
     // Save locally
     await savePushToken(registration.expoPushToken);
 
-    console.log('[Notifications] Push token registered successfully');
     return { success: true };
   } catch (error) {
     console.error('[Notifications] Error registering push token:', error);
@@ -159,8 +153,6 @@ export const unregisterPushToken = async (
   walletAddress: string
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    console.log('[Notifications] Unregistering push token for wallet:', walletAddress);
-
     // Remove from Supabase
     const supabaseResult = await deletePushTokenFromSupabase(walletAddress);
     if (!supabaseResult.success) {
@@ -171,7 +163,6 @@ export const unregisterPushToken = async (
     // Remove locally
     await removePushToken();
 
-    console.log('[Notifications] Push token unregistered successfully');
     return { success: true };
   } catch (error) {
     console.error('[Notifications] Error unregistering push token:', error);
@@ -218,18 +209,15 @@ export const sendTransactionNotification = async (
 
     // Check if notifications are enabled globally
     if (!preferences.enabled) {
-      console.log('[Notifications] Notifications disabled globally, skipping');
       return { success: false, error: 'Notifications disabled' };
     }
 
     // Check type-specific preference
     if (type === 'deposit' && !preferences.deposits) {
-      console.log('[Notifications] Deposit notifications disabled, skipping');
       return { success: false, error: 'Deposit notifications disabled' };
     }
 
     if (type === 'withdrawal' && !preferences.withdrawals) {
-      console.log('[Notifications] Withdrawal notifications disabled, skipping');
       return { success: false, error: 'Withdrawal notifications disabled' };
     }
 
@@ -256,7 +244,6 @@ export const sendTransactionNotification = async (
       trigger: null, // null trigger = immediate delivery
     });
 
-    console.log(`[Notifications] ${type} notification sent for $${amount}`);
     return { success: true };
   } catch (error) {
     console.error('[Notifications] Error sending transaction notification:', error);

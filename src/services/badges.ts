@@ -214,22 +214,15 @@ async function saveLocalBadgeStats(stats: LocalBadgeStats): Promise<void> {
 export async function fetchBlockchainBadgeStats(
   walletAddress: string
 ): Promise<BlockchainBadgeStats> {
-  console.log('[Badges] fetchBlockchainBadgeStats called with wallet:', walletAddress);
-
   try {
     // Try cached transactions first for speed
     let transactions = await getCachedTransactions(walletAddress);
-    let dataSource = 'cache';
 
     // If no cache, fetch fresh (this may take a few seconds)
     if (!transactions) {
-      console.log('[Badges] No cache found, fetching fresh data for:', walletAddress);
       const dateRange = getDateRangePreset('all_time');
       const result = await fetchTransactionHistory(walletAddress, dateRange, 0, false);
       transactions = result.transactions;
-      dataSource = 'api';
-    } else {
-      console.log('[Badges] Using cached data with', transactions.length, 'transactions');
     }
 
     // Count deposits and withdrawals from real blockchain data
@@ -248,7 +241,6 @@ export async function fetchBlockchainBadgeStats(
     const positions = await getVaultPositions(walletAddress as Address);
     const currentBalance = parseFloat(positions.totalUsdValue);
 
-    console.log('[Badges] Blockchain stats:', { depositCount, withdrawalCount, currentBalance, dataSource, walletAddress });
     return {
       depositCount,
       withdrawalCount,

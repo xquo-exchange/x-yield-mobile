@@ -214,10 +214,10 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       // Record milestone and check for achievements
       const milestoneResult = await recordDepositMilestone(depositAmount);
 
-      // Award badges for this deposit (justMadeDeposit: true ensures deposit counter is correct)
-      // Note: savingsBalance here is pre-deposit, but balance badges will be caught on next refresh
+      // Award badges for this deposit (walletAddress required for blockchain deposit count)
       await checkAndAwardBadges({
         savingsBalance: savingsAmount + depositAmount,
+        walletAddress: displayAddress,
         justMadeDeposit: true,
       });
 

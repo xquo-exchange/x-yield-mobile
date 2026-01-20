@@ -251,9 +251,6 @@ async function fetchTokenTransfers(
     url.searchParams.set('endblock', endBlock.toString());
     url.searchParams.set('sort', 'desc');
 
-    // Always log the full URL for debugging
-    console.log('[TransactionHistory] API URL:', url.toString());
-    console.log('[TransactionHistory] Wallet:', walletAddress);
     debugLog('[TransactionHistory] Fetching from Blockscout for:', walletAddress);
 
     // Add timeout for production reliability
@@ -277,17 +274,14 @@ async function fetchTokenTransfers(
 
     const data: BlockscoutApiResponse<BlockscoutTokenTransfer[]> = await response.json();
 
-    // Always log API response for debugging
-    console.log('[TransactionHistory] API Response - status:', data.status, 'message:', data.message);
-
     if (data.status === '1' && Array.isArray(data.result)) {
-      console.log('[TransactionHistory] Found', data.result.length, 'token transfers');
+      debugLog('[TransactionHistory] Found', data.result.length, 'token transfers');
       return data.result;
     }
 
     // API returned no results - this is valid (new wallet with no history)
     if (data.status === '0' && data.message === 'No transactions found') {
-      console.log('[TransactionHistory] No transactions found for wallet:', walletAddress);
+      debugLog('[TransactionHistory] No transactions found for wallet');
       return [];
     }
 
