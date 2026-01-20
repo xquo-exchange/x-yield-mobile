@@ -127,6 +127,9 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   // Badge/Achievement state
   const [badges, setBadges] = React.useState<BadgesData>({});
   const [badgeStats, setBadgeStats] = React.useState<BadgeStats>({
+    depositCount: 0,
+    withdrawalCount: 0,
+    currentBalance: 0,
     totalDeposits: 0,
     highestBalance: 0,
     currentStreak: 0,
@@ -316,7 +319,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
       // Load badges and stats
       const [loadedBadges, loadedStats] = await Promise.all([
         getBadges(),
-        getBadgeStats(),
+        getBadgeStats(displayAddress),
       ]);
       setBadges(loadedBadges);
       setBadgeStats(loadedStats);
@@ -332,7 +335,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
         }
         // Refresh badges data
         const updatedBadges = await getBadges();
-        const updatedStats = await getBadgeStats();
+        const updatedStats = await getBadgeStats(displayAddress);
         setBadges(updatedBadges);
         setBadgeStats(updatedStats);
       }
@@ -365,7 +368,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
           }
           // Refresh badges data
           const updatedBadges = await getBadges();
-          const updatedStats = await getBadgeStats();
+          const updatedStats = await getBadgeStats(displayAddress);
           setBadges(updatedBadges);
           setBadgeStats(updatedStats);
         }
@@ -408,7 +411,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
         }
         // Refresh badges data
         const updatedBadges = await getBadges();
-        const updatedStats = await getBadgeStats();
+        const updatedStats = await getBadgeStats(displayAddress);
         setBadges(updatedBadges);
         setBadgeStats(updatedStats);
       }, 3000);

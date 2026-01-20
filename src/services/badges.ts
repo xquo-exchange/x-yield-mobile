@@ -214,6 +214,8 @@ async function saveLocalBadgeStats(stats: LocalBadgeStats): Promise<void> {
 export async function fetchBlockchainBadgeStats(
   walletAddress: string
 ): Promise<BlockchainBadgeStats> {
+  console.log('[Badges] fetchBlockchainBadgeStats called with wallet:', walletAddress);
+
   try {
     // Try cached transactions first for speed
     let transactions = await getCachedTransactions(walletAddress);
@@ -241,6 +243,7 @@ export async function fetchBlockchainBadgeStats(
     const positions = await getVaultPositions(walletAddress as Address);
     const currentBalance = parseFloat(positions.totalUsdValue);
 
+    console.log('[Badges] Blockchain stats:', { depositCount, withdrawalCount, currentBalance });
     return {
       depositCount,
       withdrawalCount,
