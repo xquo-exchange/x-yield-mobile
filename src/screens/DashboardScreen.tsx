@@ -343,20 +343,25 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
     loadBadgesAndTrackOpen();
   }, []);
 
-  // Check balance-based badges when savings balance changes
-  // NOTE: justMadeDeposit is NOT set here - deposits are tracked in StrategiesScreen
-  // This only checks for balance threshold badges ($100, $500, $1000)
+  // Check badges when savings balance OR wallet address changes
+  // Runs when: balance changes (balance-based badges) OR address loads (deposit-based badges)
   const prevSavingsRef = React.useRef(savingsBalance);
+  const prevAddressRef = React.useRef(displayAddress);
   React.useEffect(() => {
-    const checkBalanceBasedBadges = async () => {
-      if (savingsBalance > 0 && savingsBalance !== prevSavingsRef.current) {
-        prevSavingsRef.current = savingsBalance;
+    const checkBadges = async () => {
+      // Need positive balance AND wallet address for full badge check
+      const balanceChanged = savingsBalance !== prevSavingsRef.current;
+      const addressChanged = displayAddress !== prevAddressRef.current;
 
-        // Only check balance-based badges, NOT deposit count
-        // justMadeDeposit is handled in StrategiesScreen after actual deposit
+      if (savingsBalance > 0 && displayAddress && (balanceChanged || addressChanged)) {
+        prevSavingsRef.current = savingsBalance;
+        prevAddressRef.current = displayAddress;
+
+        // Check balance-based badges AND deposit-based badges
+        // walletAddress is required for blockchain deposit count
         const newBadges = await checkAndAwardBadges({
           savingsBalance,
-          // justMadeDeposit: false - removed to prevent counting yield as deposits
+          walletAddress: displayAddress,
         });
 
         if (newBadges.length > 0) {
@@ -374,8 +379,8 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
         }
       }
     };
-    checkBalanceBasedBadges();
-  }, [savingsBalance]);
+    checkBadges();
+  }, [savingsBalance, displayAddress]);
 
   // Handle savings goal actions
   const handleSetGoal = async (amount: number) => {
@@ -395,9 +400,10 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
     setShowGoalCelebration(true);
     trackSavingsGoalReached(savingsGoal?.targetAmount || 0);
 
-    // Check for goal_getter badge
+    // Check for goal_getter badge (also checks deposit-based badges)
     const newBadges = await checkAndAwardBadges({
       savingsBalance,
+      walletAddress: displayAddress,
       justCompletedGoal: true,
     });
 
