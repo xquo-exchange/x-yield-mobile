@@ -255,6 +255,14 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const smartWalletAddress = smartWalletFromHook || smartWalletFromLinkedAccounts;
   const displayAddress = smartWalletAddress || embeddedWalletAddress;
 
+  // Debug: Log wallet addresses
+  console.log('[Dashboard] Wallet addresses:', {
+    smartWalletFromHook,
+    smartWalletFromLinkedAccounts,
+    embeddedWalletAddress,
+    displayAddress,
+  });
+
   const { usdc, isLoading: balanceLoading, refetch: refetchBalances } = useWalletBalance(displayAddress);
   const { totalUsdValue: savingsTotal, isLoading: positionsLoading, refetch: refetchPositions } = usePositions(displayAddress);
 
@@ -316,6 +324,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   // Load badges and track app open for streaks
   React.useEffect(() => {
     const loadBadgesAndTrackOpen = async () => {
+      console.log('[Dashboard] Loading badges with displayAddress:', displayAddress);
       // Load badges and stats
       const [loadedBadges, loadedStats] = await Promise.all([
         getBadges(),

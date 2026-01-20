@@ -71,6 +71,13 @@ export default function TransactionHistoryScreen({
   const eoaAddress = embeddedWallet?.address;
   const walletAddress = smartWalletAddress || eoaAddress;
 
+  // Debug: Log wallet addresses on render
+  console.log('[TransactionHistory] Wallet addresses:', {
+    smartWallet: smartWalletAddress,
+    eoa: eoaAddress,
+    using: walletAddress,
+  });
+
   // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
   const otherOwnedAddress = smartWalletAddress && eoaAddress ? eoaAddress : undefined;
 
