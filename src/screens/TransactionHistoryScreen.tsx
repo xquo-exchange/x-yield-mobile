@@ -118,7 +118,10 @@ export default function TransactionHistoryScreen({
 
   // Fetch transaction history with caching
   const fetchHistory = useCallback(async (forceRefresh: boolean = false) => {
-    if (!walletAddress) return;
+    if (!walletAddress) {
+      setIsLoading(false);
+      return;
+    }
 
     const dateRange = selectedPreset === 'custom'
       ? getDateRangePreset('custom', { from: customStartDate, to: customEndDate })
@@ -182,17 +185,23 @@ export default function TransactionHistoryScreen({
     loadSavedDateRange();
   }, []);
 
-  // Initial load
+  // Initial load - re-fetch when wallet address becomes available
   useEffect(() => {
     Analytics.trackScreenView('TransactionHistory');
-    fetchHistory();
 
     // Check if exports are available (async)
     isPdfExportAvailable().then(setIsPdfAvailable);
     isCsvExportAvailable().then(setIsCsvAvailable);
 
     return () => Analytics.trackScreenExit('TransactionHistory');
-  }, [fetchHistory]);
+  }, []);
+
+  // Fetch history when wallet address is available
+  useEffect(() => {
+    if (walletAddress) {
+      fetchHistory();
+    }
+  }, [walletAddress, fetchHistory]);
 
   // Handle refresh (pull-to-refresh forces fresh data)
   const handleRefresh = useCallback(() => {

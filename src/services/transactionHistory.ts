@@ -234,6 +234,12 @@ async function fetchTokenTransfers(
   startBlock: number = 0,
   endBlock: number = 99999999
 ): Promise<BlockscoutTokenTransfer[]> {
+  // Validate wallet address
+  if (!walletAddress || walletAddress.length < 10) {
+    console.error('[TransactionHistory] Invalid wallet address:', walletAddress);
+    return [];
+  }
+
   try {
     // Blockscout uses same API format as Etherscan
     const url = new URL(BLOCKSCOUT_API_URL);
@@ -247,9 +253,23 @@ async function fetchTokenTransfers(
 
     debugLog('[TransactionHistory] Fetching from Blockscout for:', walletAddress);
 
-    const response = await fetch(url.toString());
+    // Add timeout for production reliability
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+    const response = await fetch(url.toString(), {
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      throw new Error(`Blockscout API error: ${response.status}`);
+      console.error('[TransactionHistory] API response not OK:', response.status);
+      // Don't throw, just return empty to allow graceful degradation
+      return [];
     }
 
     const data: BlockscoutApiResponse<BlockscoutTokenTransfer[]> = await response.json();
@@ -259,11 +279,21 @@ async function fetchTokenTransfers(
       return data.result;
     }
 
-    // API returned no results or error
-    debugLog('[TransactionHistory] API status:', data.status, 'message:', data.message);
+    // API returned no results - this is valid (new wallet with no history)
+    if (data.status === '0' && data.message === 'No transactions found') {
+      debugLog('[TransactionHistory] No transactions found for wallet');
+      return [];
+    }
+
+    // API returned an error
+    console.error('[TransactionHistory] API error:', data.status, data.message);
     return [];
   } catch (error) {
-    console.error('[TransactionHistory] Error fetching transfers:', error);
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('[TransactionHistory] Request timed out');
+    } else {
+      console.error('[TransactionHistory] Error fetching transfers:', error);
+    }
     return [];
   }
 }
@@ -992,6 +1022,12 @@ export async function fetchTransactionHistory(
   otherOwnedAddress?: string
 ): Promise<TransactionHistoryResult> {
   debugLog('[TransactionHistory] Fetching for:', walletAddress, 'forceRefresh:', forceRefresh);
+
+  // Validate wallet address early
+  if (!walletAddress || walletAddress.length < 10) {
+    console.error('[TransactionHistory] Invalid wallet address provided');
+    return buildHistoryResult(walletAddress || '', [], dateRange, currentBalance, 0, 0);
+  }
 
   if (!forceRefresh) {
     // Try to get from cache first
