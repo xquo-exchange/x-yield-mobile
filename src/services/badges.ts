@@ -3,7 +3,9 @@
  * Tracks and awards badges based on user actions
  *
  * DATA SOURCES:
- * - Deposit/Withdrawal counts: Blockchain via transactionHistory.ts (Blockscout API)
+ * - Add to Savings / Withdrawal counts: Blockchain via transactionHistory.ts (Blockscout API)
+ *   Note: Counts user actions, not individual vault allocations
+ *   (e.g., adding $100 split across 3 vaults = 1 action)
  * - Current balance: Blockchain via blockchain.ts (RPC calls)
  * - Streaks: Local AsyncStorage (daily app opens - can't be on-chain)
  * - Earned badges: Local AsyncStorage (UI state)
@@ -15,7 +17,7 @@ import {
   trackStreakUpdated,
   trackStreakMilestoneReached,
 } from './analytics';
-import { getCachedTransactions, fetchTransactionHistory, getDateRangePreset } from './transactionHistory';
+import { getCachedTransactions, fetchTransactionHistory, getDateRangePreset, countUserSavingsActions } from './transactionHistory';
 import { getVaultPositions } from './blockchain';
 import type { Address } from 'viem';
 
@@ -39,7 +41,7 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
   {
     id: 'first_step',
     name: 'First Step',
-    description: 'Made your first deposit',
+    description: 'Made your first Add to Savings',
     icon: 'footsteps',
     category: 'savings',
     color: 'green',
@@ -116,8 +118,8 @@ export interface LocalBadgeStats {
 
 // Real stats fetched from blockchain
 export interface BlockchainBadgeStats {
-  depositCount: number; // Number of deposit transactions
-  withdrawalCount: number; // Number of withdrawal transactions
+  depositCount: number; // Number of Add to Savings actions (user-initiated, not per-vault)
+  withdrawalCount: number; // Number of withdrawal actions
   currentBalance: number; // Current vault balance in USD
 }
 
@@ -225,25 +227,17 @@ export async function fetchBlockchainBadgeStats(
       transactions = result.transactions;
     }
 
-    // Count deposits and withdrawals from real blockchain data
-    let depositCount = 0;
-    let withdrawalCount = 0;
-
-    for (const tx of transactions) {
-      if (tx.type === 'deposit') {
-        depositCount++;
-      } else if (tx.type === 'withdraw') {
-        withdrawalCount++;
-      }
-    }
+    // Count user-initiated savings actions (grouped, not per-vault)
+    // This ensures "Add to Savings" counts as 1 action even if split across 3 vaults
+    const { addToSavingsCount, withdrawCount } = countUserSavingsActions(transactions);
 
     // Fetch current vault balance
     const positions = await getVaultPositions(walletAddress as Address);
     const currentBalance = parseFloat(positions.totalUsdValue);
 
     return {
-      depositCount,
-      withdrawalCount,
+      depositCount: addToSavingsCount,
+      withdrawalCount: withdrawCount,
       currentBalance,
     };
   } catch (error) {

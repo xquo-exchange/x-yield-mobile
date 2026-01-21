@@ -200,12 +200,7 @@ export default function App() {
           </DeepLinkProvider>
         </AnalyticsProvider>
         {showSplash && (
-          <SplashScreen
-            onAnimationComplete={handleSplashComplete}
-            isLoading={!loadingState.isReady}
-            loadingError={loadingState.error}
-            onRetry={handleRetry}
-          />
+          <SplashScreen onAnimationComplete={handleSplashComplete} />
         )}
       </SafeAreaProvider>
     </ErrorBoundary>

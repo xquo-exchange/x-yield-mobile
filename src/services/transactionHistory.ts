@@ -1105,8 +1105,8 @@ export async function fetchTransactionHistoryWithCache(
  * User-friendly labels:
  * - receive: "Receive" (got USDC from outside)
  * - send: "Send" (sent USDC out)
- * - deposit: "Deposit" (moved to savings/yield)
- * - withdraw: "Withdraw" (took from savings)
+ * - deposit: "Add to Savings" (moved to savings/yield)
+ * - withdraw: "Withdraw from Savings" (took from savings)
  * - fee: "Fee" (platform fee to treasury)
  */
 export function getTransactionTypeLabel(type: TransactionType): string {
@@ -1116,9 +1116,9 @@ export function getTransactionTypeLabel(type: TransactionType): string {
     case 'send':
       return 'Send';
     case 'deposit':
-      return 'Deposit';
+      return 'Add to Savings';
     case 'withdraw':
-      return 'Withdraw';
+      return 'Withdraw from Savings';
     case 'fee':
       return 'Fee';
     default:
@@ -1136,9 +1136,9 @@ export function getTransactionTypeColor(type: TransactionType): string {
     case 'send':
       return '#ef4444'; // red - money going out
     case 'deposit':
-      return '#6366f1'; // purple - moving to savings
+      return '#6366f1'; // purple - adding to savings
     case 'withdraw':
-      return '#f59e0b'; // amber - taking from savings
+      return '#f59e0b'; // amber - withdrawing from savings
     case 'fee':
       return '#f97316'; // orange - platform fee
     default:
@@ -1223,7 +1223,36 @@ export function groupTransactionsForDisplay(
  * Get label for grouped transaction
  */
 export function getGroupedTransactionLabel(type: 'deposit' | 'withdraw'): string {
-  return type === 'deposit' ? 'Deposit to Savings' : 'Withdraw from Savings';
+  return type === 'deposit' ? 'Add to Savings' : 'Withdraw from Savings';
+}
+
+/**
+ * Count user-initiated savings actions
+ *
+ * This counts "Add to Savings" as a single action even if internally
+ * the funds are allocated across multiple vaults.
+ *
+ * For example: User adds $100 → allocated to 3 vaults = 1 action (not 3)
+ *
+ * Uses the same grouping logic as the transaction display.
+ */
+export function countUserSavingsActions(transactions: Transaction[]): { addToSavingsCount: number; withdrawCount: number } {
+  const displayItems = groupTransactionsForDisplay(transactions);
+
+  let addToSavingsCount = 0;
+  let withdrawCount = 0;
+
+  for (const item of displayItems) {
+    if ('type' in item) {
+      if (item.type === 'deposit') {
+        addToSavingsCount++;
+      } else if (item.type === 'withdraw') {
+        withdrawCount++;
+      }
+    }
+  }
+
+  return { addToSavingsCount, withdrawCount };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

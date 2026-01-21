@@ -111,8 +111,8 @@ function OptionsView({ onTransferWallet, onBuyWithCard }: OptionsViewProps) {
           <Ionicons name="arrow-down" size={24} color={COLORS.primary} />
         </View>
         <View style={styles.fundingOptionContent}>
-          <View style={styles.fundingOptionTitleRow}>
-            <Text style={styles.fundingOptionTitle}>Transfer from other wallets</Text>
+          <Text style={styles.fundingOptionTitle}>Transfer from other wallets</Text>
+          <View style={styles.recommendedBadgeRow}>
             <View style={styles.recommendedBadge}>
               <Text style={styles.recommendedBadgeText}>RECOMMENDED</Text>
             </View>
@@ -262,6 +262,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
+    overflow: 'visible',
   },
   fundingOptionRecommended: {
     borderColor: COLORS.primary,
@@ -281,12 +282,7 @@ const styles = StyleSheet.create({
   },
   fundingOptionContent: {
     flex: 1,
-  },
-  fundingOptionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
+    overflow: 'visible',
   },
   fundingOptionTitle: {
     fontSize: 16,
@@ -321,11 +317,18 @@ const styles = StyleSheet.create({
     color: COLORS.success,
     fontWeight: '500',
   },
+  recommendedBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 4,
+    overflow: 'visible',
+  },
   recommendedBadge: {
     backgroundColor: `${COLORS.primary}15`,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 4,
+    alignSelf: 'flex-start',
   },
   recommendedBadgeText: {
     fontSize: 10,

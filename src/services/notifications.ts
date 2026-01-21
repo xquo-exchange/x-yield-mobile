@@ -223,9 +223,9 @@ export const sendTransactionNotification = async (
 
     // Build notification content based on type
     const isDeposit = type === 'deposit';
-    const title = isDeposit ? 'Deposit Successful! 🎉' : 'Withdrawal Complete! 💸';
+    const title = isDeposit ? 'Added to Savings! 🎉' : 'Withdrawal Complete! 💸';
     const body = isDeposit
-      ? `Your deposit of $${amount} USDC has been confirmed and is now earning yield.`
+      ? `Your $${amount} USDC has been added to Savings and is now earning yield.`
       : `Your withdrawal of $${amount} USDC has been processed successfully.`;
 
     // Schedule immediate local notification

@@ -223,7 +223,7 @@ export default function CelebrationModal({
       return "You've started your journey!";
     }
     if (milestoneReached) {
-      return `Milestone reached: $${milestoneReached.toLocaleString()} deposited!`;
+      return `Milestone reached: $${milestoneReached.toLocaleString()} in Savings!`;
     }
     return null;
   };

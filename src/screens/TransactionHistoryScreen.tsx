@@ -713,7 +713,7 @@ export default function TransactionHistoryScreen({
                   />
                   <Text style={styles.emptyStateTitle}>No activity yet</Text>
                   <Text style={styles.emptyStateText}>
-                    Your transactions will appear here once you make your first deposit.
+                    Your transactions will appear here once you add to Savings.
                   </Text>
                 </View>
               ) : (

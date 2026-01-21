@@ -115,14 +115,24 @@ export interface AnimatedEarnedProps {
   style?: TextStyle;
 }
 
+/**
+ * Calculate earned amount (balance - deposited)
+ * Shows exact value from blockchain without any filtering
+ */
+function calculateEarned(balance: number, deposited: number): number {
+  if (deposited <= 0) return 0;
+  return Math.max(0, balance - deposited);
+}
+
 export function AnimatedEarned({
   currentBalance,
   depositedAmount,
   apy,
   style,
 }: AnimatedEarnedProps) {
+  // Initial earned calculation
   const [displayEarned, setDisplayEarned] = useState(
-    Math.max(0, currentBalance - depositedAmount)
+    calculateEarned(currentBalance, depositedAmount)
   );
   const startTimeRef = useRef(Date.now());
   const startBalanceRef = useRef(currentBalance);
@@ -133,14 +143,15 @@ export function AnimatedEarned({
     if (diff > 0.01) {
       startBalanceRef.current = currentBalance;
       startTimeRef.current = Date.now();
-      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
+      setDisplayEarned(calculateEarned(currentBalance, depositedAmount));
     }
   }, [currentBalance, depositedAmount]);
 
   // Real-time yield accumulation for earned amount
   useEffect(() => {
+    // If we don't have valid deposit data, show earnings as 0
     if (apy <= 0 || currentBalance <= 0 || depositedAmount <= 0) {
-      setDisplayEarned(Math.max(0, currentBalance - depositedAmount));
+      setDisplayEarned(calculateEarned(currentBalance, depositedAmount));
       return;
     }
 
@@ -151,7 +162,9 @@ export function AnimatedEarned({
       const elapsedSeconds = (Date.now() - startTimeRef.current) / 1000;
       const accumulatedYield = yieldPerSecond * elapsedSeconds;
       const newBalance = startBalanceRef.current + accumulatedYield;
-      setDisplayEarned(Math.max(0, newBalance - depositedAmount));
+      // Calculate earned from blockchain values
+      const earned = calculateEarned(newBalance, depositedAmount);
+      setDisplayEarned(earned);
     }, UPDATE_INTERVAL_MS);
 
     return () => clearInterval(interval);

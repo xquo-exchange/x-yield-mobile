@@ -292,7 +292,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const savingsBalance = parseFloat(savingsTotal) || 0;
   const totalBalance = cashBalance + savingsBalance;
 
-  // Calculate earnings
+  // Calculate earnings - show exact value from blockchain
   const totalEarned = totalDeposited > 0 ? Math.max(0, savingsBalance - totalDeposited) : 0;
   const dailyEarnings = (savingsBalance * (parseFloat(displayApy) / 100)) / 365;
 
@@ -1095,14 +1095,14 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
                   <SensitiveView>
                     <View style={styles.savingsBreakdown}>
                       <View style={styles.breakdownRow}>
-                        <Text style={styles.breakdownLabel}>Deposited</Text>
-                        <Text style={styles.breakdownValue}>${totalDeposited.toFixed(2)}</Text>
+                        <Text style={styles.breakdownLabel}>Added</Text>
+                        <Text style={styles.breakdownValue}>${Math.max(0, totalDeposited).toFixed(2)}</Text>
                       </View>
                       <View style={styles.breakdownRow}>
                         <Text style={styles.breakdownLabel}>Earned</Text>
                         <AnimatedEarned
                           currentBalance={savingsBalance}
-                          depositedAmount={totalDeposited}
+                          depositedAmount={Math.max(0, totalDeposited)}
                           apy={parseFloat(displayApy)}
                         />
                       </View>
@@ -2367,6 +2367,7 @@ const styles = StyleSheet.create({
     padding: 18,
     borderWidth: 1,
     borderColor: COLORS.border,
+    overflow: 'visible',
   },
   fundingOptionRecommended: {
     borderColor: COLORS.primary,
@@ -2387,17 +2388,21 @@ const styles = StyleSheet.create({
   },
   fundingOptionContent: {
     flex: 1,
+    overflow: 'visible',
   },
   fundingOptionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 4,
+    overflow: 'visible',
   },
   fundingOptionTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.black,
+    flexShrink: 1,
   },
   fundingOptionTitleSecondary: {
     color: COLORS.grey,
@@ -2431,6 +2436,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
+    flexShrink: 0,
   },
   recommendedBadgeText: {
     fontSize: 9,

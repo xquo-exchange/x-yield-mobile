@@ -113,11 +113,11 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     return () => Analytics.trackScreenExit('ManageFunds');
   }, []);
 
-  // Calculate earnings for display - memoized to prevent recalculation on every render
-  const totalYield = useMemo(
-    () => totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0,
-    [totalDeposited, savingsAmount]
-  );
+  // Calculate earnings for display - show exact value from blockchain
+  const totalYield = useMemo(() => {
+    if (totalDeposited <= 0) return 0;
+    return Math.max(0, savingsAmount - totalDeposited);
+  }, [totalDeposited, savingsAmount]);
   const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
 
   // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
@@ -384,7 +384,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     );
   };
 
-  // Calculate earnings
+  // Calculate earnings - show exact value from blockchain
   const totalEarned = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
 
   return (
@@ -637,8 +637,8 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                     {totalYield > 0.001 && (
                       <>
                         <View style={styles.previewRow}>
-                          <Text style={styles.previewLabel}>Total deposited</Text>
-                          <Text style={styles.previewValue}>${totalDeposited.toFixed(2)}</Text>
+                          <Text style={styles.previewLabel}>Total added</Text>
+                          <Text style={styles.previewValue}>${Math.max(0, totalDeposited).toFixed(2)}</Text>
                         </View>
                         <View style={styles.previewRow}>
                           <Text style={styles.previewLabel}>Earnings</Text>

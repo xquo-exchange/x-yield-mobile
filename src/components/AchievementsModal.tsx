@@ -35,10 +35,10 @@ interface UnlockRequirement {
 
 const UNLOCK_REQUIREMENTS: Record<string, UnlockRequirement> = {
   first_step: {
-    description: 'Make your first deposit',
+    description: 'Make your first Add to Savings',
     getProgress: (stats) => ({ current: stats.totalDeposits, target: 1 }),
     getProgressText: (stats) =>
-      stats.totalDeposits === 0 ? 'Make a deposit to unlock' : null,
+      stats.totalDeposits === 0 ? 'Add to Savings to unlock' : null,
   },
   saver: {
     description: 'Reach $100 in savings',
@@ -278,7 +278,7 @@ export default function AchievementsModal({
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{stats.depositCount}</Text>
-              <Text style={styles.statLabel}>Deposits</Text>
+              <Text style={styles.statLabel}>Add to Savings</Text>
             </View>
           </View>
 

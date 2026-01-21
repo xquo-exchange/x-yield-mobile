@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { usePrivy } from '@privy-io/expo';
 
 import WelcomeScreen from '../screens/WelcomeScreen';
@@ -23,11 +23,7 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function LoadingScreen() {
-  return (
-    <View style={styles.loadingContainer}>
-      <ActivityIndicator size="large" color="#6366f1" />
-    </View>
-  );
+  return <View style={styles.loadingContainer} />;
 }
 
 export default function AppNavigator() {
