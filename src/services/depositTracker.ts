@@ -286,35 +286,41 @@ export async function recordWithdrawal(
 
   const currentRecord = deposits[address] || { totalDeposited: 0, lastUpdated: 0 };
 
-  if (totalValueBeforeWithdraw <= 0 || currentRecord.totalDeposited <= 0) {
-    // Full withdrawal or no deposits recorded - reset to 0
-    deposits[address] = {
-      totalDeposited: 0,
-      lastUpdated: Date.now(),
-    };
+  // Check if this is a FULL withdrawal (withdrawing 99%+ of total value)
+  const isFullWithdrawal = totalValueBeforeWithdraw > 0 &&
+    withdrawnValue >= totalValueBeforeWithdraw * 0.99;
+
+  let newTotalDeposited: number;
+
+  if (isFullWithdrawal || totalValueBeforeWithdraw <= 0 || currentRecord.totalDeposited <= 0) {
+    // Full withdrawal - reset to 0
+    newTotalDeposited = 0;
+    debugLog(`[DepositTracker] FULL WITHDRAWAL detected - resetting totalDeposited to 0`);
   } else {
     // Partial withdrawal - reduce deposits proportionally
     const withdrawalRatio = withdrawnValue / totalValueBeforeWithdraw;
     const depositReduction = currentRecord.totalDeposited * withdrawalRatio;
-    const newTotalDeposited = Math.max(0, currentRecord.totalDeposited - depositReduction);
+    newTotalDeposited = Math.max(0, currentRecord.totalDeposited - depositReduction);
 
-    deposits[address] = {
-      totalDeposited: newTotalDeposited,
-      lastUpdated: Date.now(),
-    };
-
-    debugLog(`[DepositTracker] Withdrawal: $${withdrawnValue.toFixed(6)} (${(withdrawalRatio * 100).toFixed(4)}% of holdings)`);
-    debugLog(`[DepositTracker] Deposit reduction: $${depositReduction.toFixed(6)}`);
-    debugLog(`[DepositTracker] Remaining deposits: $${newTotalDeposited.toFixed(6)}`);
+    debugLog(`[DepositTracker] Partial withdrawal: $${withdrawnValue.toFixed(2)} (${(withdrawalRatio * 100).toFixed(1)}% of holdings)`);
+    debugLog(`[DepositTracker] Deposit reduction: $${depositReduction.toFixed(2)}`);
+    debugLog(`[DepositTracker] Remaining deposits: $${newTotalDeposited.toFixed(2)}`);
   }
+
+  deposits[address] = {
+    totalDeposited: newTotalDeposited,
+    lastUpdated: Date.now(),
+  };
 
   // Save to local storage first
   await saveDeposits(deposits);
 
-  // Sync to backend (fire and forget)
-  recordWithdrawalToBackend(address, withdrawnValue, totalValueBeforeWithdraw).then((success) => {
-    debugLog('[DepositTracker] Backend withdrawal sync:', success ? 'complete' : 'failed');
-  });
+  // IMPORTANT: Wait for backend sync to complete (not fire and forget)
+  // This ensures the backend has the correct value before user makes another deposit
+  const backendSuccess = await recordWithdrawalToBackend(address, withdrawnValue, totalValueBeforeWithdraw);
+  if (!backendSuccess) {
+    console.warn('[DepositTracker] Backend withdrawal sync failed - local value may differ from backend');
+  }
 }
 
 /**
@@ -425,6 +431,35 @@ export async function recoverMissingDeposit(
 export async function clearAllDeposits(): Promise<void> {
   await AsyncStorage.removeItem(STORAGE_KEY);
   debugLog('[DepositTracker] Cleared all deposit data');
+}
+
+/**
+ * Reset deposit tracker for a specific wallet
+ * Use this after a full withdrawal to ensure clean state
+ */
+export async function resetDeposits(walletAddress: string): Promise<void> {
+  const address = walletAddress.toLowerCase();
+  const deposits = await getAllDeposits();
+
+  deposits[address] = {
+    totalDeposited: 0,
+    lastUpdated: Date.now(),
+  };
+
+  await saveDeposits(deposits);
+
+  // Also sync to backend
+  try {
+    await fetch(`${API_BASE_URL}/api/deposits/${address}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ totalDeposited: 0, reset: true }),
+    });
+    debugLog(`[DepositTracker] Reset deposits for ${address} (local + backend)`);
+  } catch (error) {
+    console.warn('[DepositTracker] Backend reset failed:', error);
+    debugLog(`[DepositTracker] Reset deposits for ${address} (local only)`);
+  }
 }
 
 /**
