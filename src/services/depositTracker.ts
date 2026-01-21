@@ -453,6 +453,62 @@ export async function debugGetAllDeposits(): Promise<DepositData> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// SIMPLE EARNINGS API
+// Clean, simple functions for Dashboard/Strategies display
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get the total amount deposited for a wallet
+ * Source: depositTracker (backend + local cache)
+ *
+ * This is the ONLY source of truth for deposited amounts.
+ * Morpho vaults don't track original deposits - only shares and current value.
+ */
+export async function getDeposited(walletAddress: string): Promise<number> {
+  return getTotalDeposited(walletAddress);
+}
+
+/**
+ * Get unrealized earnings (yield still in vault)
+ * Simple formula: currentBalance - deposited
+ *
+ * @param walletAddress - User's wallet address
+ * @param currentBalance - Current vault balance (from getVaultPositions)
+ * @returns Unrealized earnings (minimum 0)
+ */
+export async function getUnrealizedEarnings(
+  walletAddress: string,
+  currentBalance: number
+): Promise<number> {
+  const deposited = await getDeposited(walletAddress);
+  // Earnings = what you have now - what you put in
+  // Can't be negative (if deposited > balance, something is wrong, return 0)
+  return Math.max(0, currentBalance - deposited);
+}
+
+/**
+ * Get both deposited and earnings in one call
+ * This is the recommended function for Dashboard/Strategies
+ *
+ * @param walletAddress - User's wallet address
+ * @param currentBalance - Current vault balance (from getVaultPositions)
+ */
+export async function getDepositedAndEarnings(
+  walletAddress: string,
+  currentBalance: number
+): Promise<{
+  deposited: number;
+  earnings: number;
+}> {
+  const deposited = await getDeposited(walletAddress);
+  const earnings = Math.max(0, currentBalance - deposited);
+
+  debugLog(`[DepositTracker] Deposited: $${deposited.toFixed(2)}, Balance: $${currentBalance.toFixed(2)}, Earnings: $${earnings.toFixed(2)}`);
+
+  return { deposited, earnings };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // TEST SCENARIOS - Fee Calculation Verification
 // ═══════════════════════════════════════════════════════════════════════════════
 

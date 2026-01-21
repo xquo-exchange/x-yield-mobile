@@ -32,7 +32,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
-import { getReliableDeposited, getTotalEarnings } from '../services/transactionHistory';
+import { getDepositedAndEarnings } from '../services/depositTracker';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
 import { useDeepLink } from '../contexts/DeepLinkContext';
@@ -93,7 +93,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const [wasInCoinbase, setWasInCoinbase] = React.useState(false);
   const [showHowItWorks, setShowHowItWorks] = React.useState(false);
   const [totalDeposited, setTotalDeposited] = React.useState(0);
-  const [realizedEarnings, setRealizedEarnings] = React.useState(0);
+  const [totalEarnings, setTotalEarnings] = React.useState(0);
 
   // Withdraw Cash Modal state
   const [showWithdrawModal, setShowWithdrawModal] = React.useState(false);
@@ -294,46 +294,32 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const totalBalance = cashBalance + savingsBalance;
 
   // ═══════════════════════════════════════════════════════════════════════════════
-  // DIRECT EARNINGS CALCULATION
-  // Instead of fragile (Balance - Deposited), use direct fee-based calculation:
-  // - Realized: calculated from fees (Fee = 15% of yield, so yield = fees / 0.15)
-  // - Unrealized: current balance - deposited (still needed for users who haven't withdrawn)
-  // - Total: realized + unrealized
+  // SIMPLE EARNINGS CALCULATION
+  // Deposited = from depositTracker (backend + local cache)
+  // Earned = Balance - Deposited (unrealized yield in vault)
   // ═══════════════════════════════════════════════════════════════════════════════
 
-  // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
-  const otherOwnedAddress = smartWalletAddress && embeddedWalletAddress ? embeddedWalletAddress : undefined;
-
-  // Calculate display values:
-  // - For users with realized earnings (have withdrawn), show the reliable realized amount
-  // - For users without realized earnings (never withdrawn), estimate from balance - deposited
+  // Display values (from state, updated by useEffect below)
   const displayDeposited = totalDeposited;
-  const unrealizedEarnings = Math.max(0, savingsBalance - totalDeposited);
-  const displayEarned = realizedEarnings + unrealizedEarnings;
-
-  // Legacy variable names for compatibility
-  const totalEarned = displayEarned;
+  const displayEarned = totalEarnings;
+  const totalEarned = totalEarnings;
   const dailyEarnings = (savingsBalance * (parseFloat(displayApy) / 100)) / 365;
 
-  // Load earnings using direct fee-based calculation (most reliable)
+  // Load deposited and earnings from depositTracker
   React.useEffect(() => {
-    const loadEarnings = async () => {
+    const loadDepositedAndEarnings = async () => {
       if (displayAddress && savingsBalance >= 0) {
         try {
-          // Get both deposited and realized earnings in one call
-          const earnings = await getTotalEarnings(displayAddress, savingsBalance, otherOwnedAddress);
-          setRealizedEarnings(earnings.realized);
-
-          // Also get deposited for display
-          const deposited = await getReliableDeposited(displayAddress, savingsBalance, otherOwnedAddress);
-          setTotalDeposited(deposited.value);
+          const { deposited, earnings } = await getDepositedAndEarnings(displayAddress, savingsBalance);
+          setTotalDeposited(deposited);
+          setTotalEarnings(earnings);
         } catch (error) {
-          console.error('[Dashboard] Error loading earnings:', error);
+          console.error('[Dashboard] Error loading deposited/earnings:', error);
         }
       }
     };
-    loadEarnings();
-  }, [displayAddress, savingsBalance, otherOwnedAddress]);
+    loadDepositedAndEarnings();
+  }, [displayAddress, savingsBalance]);
 
   // Load savings goal
   React.useEffect(() => {

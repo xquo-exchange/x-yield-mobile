@@ -41,12 +41,9 @@ import {
 import {
   recordDeposit,
   recordWithdrawal,
+  getDepositedAndEarnings,
 } from '../services/depositTracker';
-import {
-  getReliableDeposited,
-  getTotalEarnings,
-  clearTransactionCache,
-} from '../services/transactionHistory';
+import { clearTransactionCache } from '../services/transactionHistory';
 import { recordDepositMilestone } from '../services/milestoneTracker';
 import { checkAndAwardBadges } from '../services/badges';
 import CelebrationModal from '../components/CelebrationModal';
@@ -79,7 +76,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [totalDeposited, setTotalDeposited] = useState(0);
-  const [realizedEarnings, setRealizedEarnings] = useState(0);
+  const [totalEarnings, setTotalEarnings] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>('add');
   const [isInputFocused, setIsInputFocused] = useState(false);
   const amountInputRef = useRef<TextInput>(null);
@@ -116,45 +113,32 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   }, []);
 
   // ═══════════════════════════════════════════════════════════════════════════════
-  // DIRECT EARNINGS CALCULATION
-  // Instead of fragile (Balance - Deposited), use direct fee-based calculation:
-  // - Realized: calculated from fees (reliable, verifiable)
-  // - Unrealized: balance - deposited (for users who haven't withdrawn)
+  // SIMPLE EARNINGS CALCULATION
+  // Deposited = from depositTracker (backend + local cache)
+  // Earned = Balance - Deposited (unrealized yield in vault)
   // ═══════════════════════════════════════════════════════════════════════════════
 
-  // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
-  const otherOwnedAddress = smartWalletAddress && embeddedWalletAddress ? embeddedWalletAddress : undefined;
-
-  // Calculate display values using direct earnings
-  const { displayDeposited, displayEarned } = useMemo(() => {
-    const unrealizedEarnings = Math.max(0, savingsAmount - totalDeposited);
-    const totalEarnings = realizedEarnings + unrealizedEarnings;
-    return { displayDeposited: totalDeposited, displayEarned: totalEarnings };
-  }, [totalDeposited, realizedEarnings, savingsAmount]);
-
-  // Legacy variable for compatibility
-  const totalYield = displayEarned;
+  // Display values (from state, updated by useEffect below)
+  const displayDeposited = totalDeposited;
+  const displayEarned = totalEarnings;
+  const totalYield = totalEarnings;
   const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
 
-  // Load earnings using direct fee-based calculation (most reliable)
+  // Load deposited and earnings from depositTracker
   React.useEffect(() => {
-    const loadEarnings = async () => {
+    const loadDepositedAndEarnings = async () => {
       if (displayAddress && savingsAmount >= 0) {
         try {
-          // Get both deposited and realized earnings
-          const earnings = await getTotalEarnings(displayAddress, savingsAmount, otherOwnedAddress);
-          setRealizedEarnings(earnings.realized);
-
-          // Also get deposited for display
-          const deposited = await getReliableDeposited(displayAddress, savingsAmount, otherOwnedAddress);
-          setTotalDeposited(deposited.value);
+          const { deposited, earnings } = await getDepositedAndEarnings(displayAddress, savingsAmount);
+          setTotalDeposited(deposited);
+          setTotalEarnings(earnings);
         } catch (error) {
-          console.error('[Strategies] Error loading earnings:', error);
+          console.error('[Strategies] Error loading deposited/earnings:', error);
         }
       }
     };
-    loadEarnings();
-  }, [displayAddress, positions, savingsAmount, otherOwnedAddress]);
+    loadDepositedAndEarnings();
+  }, [displayAddress, positions, savingsAmount]);
 
   const onRefresh = useCallback(async () => {
     Analytics.trackButtonTap('Pull to Refresh', 'ManageFunds');
@@ -292,9 +276,8 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       return;
     }
 
-    // Use reliable deposited for accurate fee calculation (blockchain primary, tracker fallback)
-    const depositedResult = await getReliableDeposited(displayAddress, savingsAmount, otherOwnedAddress);
-    const depositedAmount = depositedResult.value;
+    // Get deposited amount for fee calculation
+    const { deposited: depositedAmount } = await getDepositedAndEarnings(displayAddress, savingsAmount);
 
     const batch = buildWithdrawBatch(
       positions,
@@ -407,7 +390,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     );
   };
 
-  // Use sanitized displayEarned (calculated above with bulletproof sanity check)
+  // Legacy variable for compatibility
   const totalEarned = displayEarned;
 
   return (
