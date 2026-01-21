@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Platform, View, Text, StyleSheet, Image, InteractionManager } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PrivyProvider, usePrivy, useEmbeddedEthereumWallet } from '@privy-io/expo';
@@ -11,6 +11,7 @@ import { AnalyticsProvider } from './src/contexts/AnalyticsContext';
 import { NotificationProvider } from './src/contexts/NotificationContext';
 import SplashScreen from './src/components/SplashScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
+import { retrySyncPendingOperations } from './src/services/depositTracker';
 
 // Mantieni visibile la splash nativa fino a quando non la nascondiamo manualmente
 ExpoSplashScreen.preventAutoHideAsync();
@@ -59,6 +60,7 @@ function AppContent({ onLoadingStateChange }: { onLoadingStateChange: (state: Lo
   const { user, isReady: privyReady } = usePrivy();
   const { wallets, isReady: walletsReady } = useEmbeddedEthereumWallet();
   const { client: smartWalletClient } = useSmartWallets();
+  const hasRetriedSync = useRef(false);
 
   const embeddedWallet = wallets?.[0];
   const smartWalletAddress = smartWalletClient?.account?.address;
@@ -82,6 +84,24 @@ function AppContent({ onLoadingStateChange }: { onLoadingStateChange: (state: Lo
       onLoadingStateChange({ isReady, error: null });
     }
   }, [privyReady, walletsReady, onLoadingStateChange]);
+
+  // Retry pending sync operations on app startup
+  useEffect(() => {
+    if (privyReady && !hasRetriedSync.current) {
+      hasRetriedSync.current = true;
+      // Run after a short delay to not block app startup
+      const timer = setTimeout(() => {
+        retrySyncPendingOperations().then((count) => {
+          if (count > 0) {
+            console.log(`[App] Synced ${count} pending operations on startup`);
+          }
+        }).catch((error) => {
+          console.warn('[App] Failed to retry pending sync operations:', error);
+        });
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [privyReady]);
 
   return (
     <NotificationProvider

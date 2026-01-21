@@ -701,15 +701,35 @@ export function buildStrategyBatch(
 
 /**
  * Check if an error is a nonce-related error
+ *
+ * IMPORTANT: Be specific! The error dump from bundler includes request body
+ * which has "nonce" as a field name. We need to match ACTUAL nonce errors,
+ * not just any message containing the word "nonce".
  */
 function isNonceError(error: unknown): boolean {
   const msg = getErrorMessage(error).toLowerCase();
-  return (
-    msg.includes('nonce') ||
-    msg.includes('aa25') || // ERC-4337 nonce error code
-    msg.includes('invalid smart account nonce') ||
-    msg.includes('sender nonce')
-  );
+
+  // These are specific nonce error patterns (not just "nonce" anywhere)
+  const noncePatterns = [
+    'aa25', // ERC-4337 nonce error code
+    'invalid smart account nonce',
+    'sender nonce',
+    'nonce too low',
+    'nonce too high',
+    'invalid nonce',
+    'nonce mismatch',
+    'nonce has already been used',
+  ];
+
+  // Check for actual nonce error patterns
+  const hasNonceError = noncePatterns.some(pattern => msg.includes(pattern));
+
+  // Exclude HTTP/network errors that just happen to dump "nonce" in request body
+  const isNetworkError = msg.includes('http request failed') ||
+                         msg.includes('network error') ||
+                         msg.includes('fetch failed');
+
+  return hasNonceError && !isNetworkError;
 }
 
 /**
@@ -719,7 +739,17 @@ function parseErrorMessage(error: unknown): string {
   const msg = getErrorMessage(error);
   const msgLower = msg.toLowerCase();
 
-  // Nonce errors
+  // HTTP/Bundler request failures (check first - these dump "nonce" in request body)
+  if (msgLower.includes('http request failed') || msgLower.includes('executing user operation')) {
+    return 'Transaction failed to submit. Please try again.';
+  }
+
+  // Simulation/estimation errors (0xe65b7a77 is a common revert)
+  if (msgLower.includes('reverted during simulation') || msgLower.includes('0xe65b7a77')) {
+    return 'Transaction simulation failed. Your balance may have changed. Please refresh and try again.';
+  }
+
+  // Nonce errors (real ones, not false positives)
   if (isNonceError(error)) {
     return 'Transaction nonce error. Please wait a moment and try again.';
   }

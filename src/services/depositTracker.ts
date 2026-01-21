@@ -6,8 +6,12 @@
  * Example: Deposit $100, grows to $105, yield = $5, fee = $0.75
  *
  * Data is persisted in two places:
- * 1. Backend (Vercel KV) - source of truth, survives app reinstalls
- * 2. AsyncStorage - local cache for offline access
+ * 1. AsyncStorage - PRIMARY source (written by recordDeposit/recordWithdrawal)
+ * 2. Backend (Vercel KV) - BACKUP for recovery (survives app reinstalls)
+ *
+ * IMPORTANT: Local storage is NEVER overwritten by backend reads.
+ * This prevents race conditions where stale backend data overwrites fresh local writes.
+ * Backend is only used for recovery when local storage is empty.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,7 +24,27 @@ const debugLog = (message: string, ...args: unknown[]) => {
 };
 
 const STORAGE_KEY = 'unflat_deposits';
+const PENDING_SYNC_KEY = 'unflat_pending_sync';
 const API_BASE_URL = 'https://x-yield-api.vercel.app';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Pending Sync Queue Types
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface PendingSyncOperation {
+  id: string;
+  type: 'deposit' | 'withdrawal' | 'sync';
+  walletAddress: string;
+  timestamp: number;
+  retryCount: number;
+  data: {
+    amount?: number;
+    txHash?: string;
+    withdrawnValue?: number;
+    totalValueBeforeWithdraw?: number;
+    totalDeposited?: number;
+  };
+}
 
 export interface DepositRecord {
   totalDeposited: number; // Total USDC deposited (in USD, not raw)
@@ -63,6 +87,83 @@ async function saveDeposits(data: DepositData): Promise<void> {
     console.error('[DepositTracker] SAVE FAILED:', error);
     throw new Error(`Failed to save deposit data: ${error}`);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Pending Sync Queue Management
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get all pending sync operations
+ */
+async function getPendingSyncQueue(): Promise<PendingSyncOperation[]> {
+  try {
+    const data = await AsyncStorage.getItem(PENDING_SYNC_KEY);
+    if (!data) return [];
+    return JSON.parse(data);
+  } catch (error) {
+    console.error('[DepositTracker] Error reading pending sync queue:', error);
+    return [];
+  }
+}
+
+/**
+ * Save pending sync queue
+ */
+async function savePendingSyncQueue(queue: PendingSyncOperation[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(queue));
+  } catch (error) {
+    console.error('[DepositTracker] Error saving pending sync queue:', error);
+  }
+}
+
+/**
+ * Add operation to pending sync queue
+ */
+async function addToPendingSyncQueue(
+  type: PendingSyncOperation['type'],
+  walletAddress: string,
+  data: PendingSyncOperation['data']
+): Promise<void> {
+  const queue = await getPendingSyncQueue();
+
+  const operation: PendingSyncOperation = {
+    id: `${type}-${walletAddress}-${Date.now()}`,
+    type,
+    walletAddress: walletAddress.toLowerCase(),
+    timestamp: Date.now(),
+    retryCount: 0,
+    data,
+  };
+
+  queue.push(operation);
+  await savePendingSyncQueue(queue);
+  debugLog('[DepositTracker] Added to pending sync queue:', operation.id);
+}
+
+/**
+ * Remove operation from pending sync queue
+ */
+async function removeFromPendingSyncQueue(operationId: string): Promise<void> {
+  const queue = await getPendingSyncQueue();
+  const filtered = queue.filter(op => op.id !== operationId);
+  await savePendingSyncQueue(filtered);
+  debugLog('[DepositTracker] Removed from pending sync queue:', operationId);
+}
+
+/**
+ * Update retry count for an operation
+ */
+async function incrementRetryCount(operationId: string): Promise<void> {
+  const queue = await getPendingSyncQueue();
+  const updated = queue.map(op => {
+    if (op.id === operationId) {
+      return { ...op, retryCount: op.retryCount + 1 };
+    }
+    return op;
+  });
+  await savePendingSyncQueue(updated);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -166,8 +267,18 @@ async function syncToBackend(walletAddress: string, totalDeposited: number): Pro
 
 /**
  * Get the total deposited amount for a wallet
- * Fetches from backend first (source of truth), falls back to local storage
- * Returns 0 if no deposits recorded (first-time user)
+ *
+ * ARCHITECTURE (Solution A - prevents race conditions):
+ * 1. Local storage is PRIMARY - written by recordDeposit/recordWithdrawal
+ * 2. Backend is for RECOVERY only - used when local is empty
+ * 3. Backend reads NEVER overwrite local storage
+ *
+ * This prevents the bug where:
+ * - User withdraws all (local=0)
+ * - User deposits $360 (local=360, backend fire-and-forget)
+ * - Screen re-renders, fetches backend (still 0)
+ * - OLD BUG: Backend 0 overwrites local 360 → wrong!
+ * - NEW FIX: Local 360 is trusted, backend ignored
  */
 export async function getTotalDeposited(walletAddress: string): Promise<number> {
   // Validate address format
@@ -177,32 +288,40 @@ export async function getTotalDeposited(walletAddress: string): Promise<number> 
     return 0;
   }
 
-  // Try backend first (source of truth)
-  const backendRecord = await fetchFromBackend(address);
-  if (backendRecord) {
-    debugLog(`[DepositTracker] Got from backend: $${backendRecord.totalDeposited.toFixed(6)}`);
+  // Read local storage FIRST (primary source)
+  const deposits = await getAllDeposits();
+  const localRecord = deposits[address];
 
-    // Update local cache
-    const deposits = await getAllDeposits();
+  // If local has data, trust it (written by recordDeposit/recordWithdrawal)
+  if (localRecord && localRecord.lastUpdated > 0) {
+    debugLog(`[DepositTracker] Using LOCAL: $${localRecord.totalDeposited.toFixed(2)}`);
+
+    // Fire-and-forget sync to backend (don't await, don't block)
+    // This ensures backend eventually catches up for recovery purposes
+    syncToBackend(address, localRecord.totalDeposited).catch(() => {
+      // Ignore sync failures - local is source of truth
+    });
+
+    return localRecord.totalDeposited;
+  }
+
+  // Local is empty - try backend for RECOVERY (app reinstall scenario)
+  debugLog('[DepositTracker] Local empty, checking backend for recovery...');
+  const backendRecord = await fetchFromBackend(address);
+
+  if (backendRecord && backendRecord.totalDeposited > 0) {
+    debugLog(`[DepositTracker] RECOVERY from backend: $${backendRecord.totalDeposited.toFixed(2)}`);
+
+    // Save recovered data to local storage
     deposits[address] = backendRecord;
     await saveDeposits(deposits);
 
     return backendRecord.totalDeposited;
   }
 
-  // Fallback to local storage
-  const deposits = await getAllDeposits();
-  const localRecord = deposits[address];
-  const totalDeposited = localRecord?.totalDeposited || 0;
-
-  // If we have local data but backend doesn't, sync it
-  if (totalDeposited > 0) {
-    debugLog('[DepositTracker] Local data exists but not in backend, syncing...');
-    await syncToBackend(address, totalDeposited);
-  }
-
-  debugLog(`[DepositTracker] getTotalDeposited for ${walletAddress.slice(0, 10)}...: $${totalDeposited.toFixed(6)}`);
-  return totalDeposited;
+  // No data anywhere - first-time user or clean state after full withdrawal
+  debugLog(`[DepositTracker] No deposit data found for ${address.slice(0, 10)}...`);
+  return 0;
 }
 
 /**
@@ -234,12 +353,7 @@ export async function recordDeposit(
   const previousTotal = currentRecord.totalDeposited;
   const newTotal = previousTotal + amount;
 
-  debugLog('[DepositTracker] ══════════════════════════════════════════════════════');
-  debugLog('[DepositTracker] Recording deposit:', amount);
-  debugLog('[DepositTracker] Transaction hash:', txHash || 'N/A');
-  debugLog('[DepositTracker] Previous total:', previousTotal);
-  debugLog('[DepositTracker] New total:', newTotal);
-  debugLog('[DepositTracker] ══════════════════════════════════════════════════════');
+  debugLog('[DepositTracker] Recording deposit:', amount, 'Previous:', previousTotal, 'New:', newTotal);
 
   // Save to local storage first (for immediate access)
   deposits[address] = {
@@ -248,15 +362,15 @@ export async function recordDeposit(
   };
   await saveDeposits(deposits);
 
-  // Sync to backend (fire and forget)
-  recordDepositToBackend(address, amount, txHash).then((success) => {
-    debugLog('[DepositTracker] Backend sync:', success ? 'complete' : 'failed');
+  // Sync to backend (fire and forget, queue on failure)
+  recordDepositToBackend(address, amount, txHash).then(async (success) => {
+    if (success) {
+      debugLog('[DepositTracker] Backend deposit sync: success');
+    } else {
+      debugLog('[DepositTracker] Backend deposit sync: failed, queuing for retry');
+      await addToPendingSyncQueue('deposit', address, { amount, txHash });
+    }
   });
-
-  // Verify it was saved correctly
-  const verifyDeposits = await getAllDeposits();
-  const verifyRecord = verifyDeposits[address];
-  debugLog('[DepositTracker] Verified saved total:', verifyRecord?.totalDeposited);
 }
 
 /**
@@ -295,16 +409,13 @@ export async function recordWithdrawal(
   if (isFullWithdrawal || totalValueBeforeWithdraw <= 0 || currentRecord.totalDeposited <= 0) {
     // Full withdrawal - reset to 0
     newTotalDeposited = 0;
-    debugLog(`[DepositTracker] FULL WITHDRAWAL detected - resetting totalDeposited to 0`);
+    debugLog('[DepositTracker] Full withdrawal - resetting totalDeposited to 0');
   } else {
     // Partial withdrawal - reduce deposits proportionally
     const withdrawalRatio = withdrawnValue / totalValueBeforeWithdraw;
     const depositReduction = currentRecord.totalDeposited * withdrawalRatio;
     newTotalDeposited = Math.max(0, currentRecord.totalDeposited - depositReduction);
-
-    debugLog(`[DepositTracker] Partial withdrawal: $${withdrawnValue.toFixed(2)} (${(withdrawalRatio * 100).toFixed(1)}% of holdings)`);
-    debugLog(`[DepositTracker] Deposit reduction: $${depositReduction.toFixed(2)}`);
-    debugLog(`[DepositTracker] Remaining deposits: $${newTotalDeposited.toFixed(2)}`);
+    debugLog(`[DepositTracker] Partial withdrawal: ${(withdrawalRatio * 100).toFixed(1)}%, new total: $${newTotalDeposited.toFixed(2)}`);
   }
 
   deposits[address] = {
@@ -319,7 +430,11 @@ export async function recordWithdrawal(
   // This ensures the backend has the correct value before user makes another deposit
   const backendSuccess = await recordWithdrawalToBackend(address, withdrawnValue, totalValueBeforeWithdraw);
   if (!backendSuccess) {
-    console.warn('[DepositTracker] Backend withdrawal sync failed - local value may differ from backend');
+    console.warn('[DepositTracker] Backend withdrawal sync failed, queuing for retry');
+    await addToPendingSyncQueue('withdrawal', address, {
+      withdrawnValue,
+      totalValueBeforeWithdraw,
+    });
   }
 }
 
@@ -482,6 +597,110 @@ export async function debugSetDeposit(
   await saveDeposits(deposits);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Retry Sync Pending Operations
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const MAX_RETRY_COUNT = 5;
+const MAX_OPERATION_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/**
+ * Retry all pending sync operations
+ * Call this on app startup and after successful network requests
+ *
+ * @returns Number of operations successfully synced
+ */
+export async function retrySyncPendingOperations(): Promise<number> {
+  const queue = await getPendingSyncQueue();
+
+  if (queue.length === 0) {
+    return 0;
+  }
+
+  debugLog(`[DepositTracker] Retrying ${queue.length} pending sync operations...`);
+
+  let successCount = 0;
+  const now = Date.now();
+
+  for (const operation of queue) {
+    // Skip operations that are too old (stale data)
+    if (now - operation.timestamp > MAX_OPERATION_AGE_MS) {
+      debugLog(`[DepositTracker] Removing stale operation: ${operation.id}`);
+      await removeFromPendingSyncQueue(operation.id);
+      continue;
+    }
+
+    // Skip operations that have exceeded max retries
+    if (operation.retryCount >= MAX_RETRY_COUNT) {
+      debugLog(`[DepositTracker] Max retries exceeded for: ${operation.id}`);
+      await removeFromPendingSyncQueue(operation.id);
+      continue;
+    }
+
+    let success = false;
+
+    try {
+      switch (operation.type) {
+        case 'deposit':
+          if (operation.data.amount !== undefined) {
+            success = await recordDepositToBackend(
+              operation.walletAddress,
+              operation.data.amount,
+              operation.data.txHash
+            );
+          }
+          break;
+
+        case 'withdrawal':
+          if (
+            operation.data.withdrawnValue !== undefined &&
+            operation.data.totalValueBeforeWithdraw !== undefined
+          ) {
+            success = await recordWithdrawalToBackend(
+              operation.walletAddress,
+              operation.data.withdrawnValue,
+              operation.data.totalValueBeforeWithdraw
+            );
+          }
+          break;
+
+        case 'sync':
+          if (operation.data.totalDeposited !== undefined) {
+            success = await syncToBackend(
+              operation.walletAddress,
+              operation.data.totalDeposited
+            );
+          }
+          break;
+      }
+    } catch (error) {
+      debugLog(`[DepositTracker] Retry failed for ${operation.id}:`, error);
+    }
+
+    if (success) {
+      debugLog(`[DepositTracker] Retry successful: ${operation.id}`);
+      await removeFromPendingSyncQueue(operation.id);
+      successCount++;
+    } else {
+      await incrementRetryCount(operation.id);
+    }
+  }
+
+  if (successCount > 0) {
+    debugLog(`[DepositTracker] Successfully synced ${successCount} pending operations`);
+  }
+
+  return successCount;
+}
+
+/**
+ * Get count of pending sync operations (for UI display)
+ */
+export async function getPendingSyncCount(): Promise<number> {
+  const queue = await getPendingSyncQueue();
+  return queue.length;
+}
+
 /** DEBUG: Get all deposit data */
 export async function debugGetAllDeposits(): Promise<DepositData> {
   return getAllDeposits();
@@ -535,7 +754,31 @@ export async function getDepositedAndEarnings(
   deposited: number;
   earnings: number;
 }> {
-  const deposited = await getDeposited(walletAddress);
+  let deposited = await getDeposited(walletAddress);
+
+  // SANITY CHECK: If deposited > currentBalance, data is corrupted
+  // This can happen due to duplicate deposit recordings or sync issues
+  // Fix: Reset to currentBalance (assume no yield yet, safe fallback)
+  if (currentBalance > 0 && deposited > currentBalance * 1.01) {
+    console.warn('[DepositTracker] Data corruption detected: deposited > balance, auto-fixing...');
+
+    // Fix local storage
+    const address = sanitizeAddress(walletAddress);
+    if (address) {
+      const deposits = await getAllDeposits();
+      deposits[address] = {
+        totalDeposited: currentBalance,
+        lastUpdated: Date.now(),
+      };
+      await saveDeposits(deposits);
+
+      // Also sync fix to backend
+      syncToBackend(address, currentBalance).catch(() => {});
+
+      deposited = currentBalance;
+    }
+  }
+
   const earnings = Math.max(0, currentBalance - deposited);
 
   debugLog(`[DepositTracker] Deposited: $${deposited.toFixed(2)}, Balance: $${currentBalance.toFixed(2)}, Earnings: $${earnings.toFixed(2)}`);
