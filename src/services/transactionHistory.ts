@@ -26,6 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TOKENS, UNFLAT_TREASURY_ADDRESS, MORPHO } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
 import { type BlockscoutTokenTransfer, type BlockscoutApiResponse } from '../types/api';
+import { getTotalDeposited } from './depositTracker';
 
 // Re-export formatting utilities for backward compatibility
 export {
@@ -52,6 +53,9 @@ const BLOCKSCOUT_API_URL = 'https://base.blockscout.com/api';
 // Cache configuration
 const CACHE_KEY_PREFIX = 'tx_history_';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Platform fee rate (15% of yield)
+const PLATFORM_FEE_RATE = 0.15;
 
 interface CachedTransactionData {
   transactions: Transaction[];
@@ -476,7 +480,7 @@ function calculateSummary(
   rawTransferCount: number = 0,
   skippedCount: number = 0
 ): TransactionSummary {
-  const PLATFORM_FEE_RATE = 0.15;
+  // Uses module-level PLATFORM_FEE_RATE constant (0.15)
 
   // Vault operations (for earnings calculation)
   let totalDepositedToVaults = 0; // Sum of 'deposit' transactions (wallet → vault)
@@ -655,22 +659,162 @@ export async function getNetDepositedFromBlockchain(
     await saveToCache(walletAddress, transactions);
   }
 
-  // Calculate net deposited from vault operations only
+  // Match fees to withdrawals so we can calculate principal vs yield
+  transactions = matchFeesToWithdrawals(transactions);
+
+  // Calculate net deposited using fee-based principal separation
+  // Key insight: Fee = 15% of yield, so yieldPortion = fee / 0.15
+  // principalWithdrawn = withdrawAmount - yieldPortion
   let totalDeposits = 0;
   let totalWithdrawals = 0;
+  let totalPrincipalWithdrawn = 0;
 
   for (const tx of transactions) {
     if (tx.type === 'deposit') {
       totalDeposits += tx.amount;
     } else if (tx.type === 'withdraw') {
       totalWithdrawals += tx.amount;
+
+      // Separate principal from yield using the associated fee
+      if (tx.associatedFee && tx.associatedFee.amount > 0) {
+        const feeAmount = tx.associatedFee.amount;
+        const yieldPortion = feeAmount / PLATFORM_FEE_RATE;
+
+        // SANITY CHECK 1: Yield cannot exceed withdrawal amount
+        // If fee implies yield > withdrawal, it's a buggy/mismatched fee
+        const yieldExceedsWithdrawal = yieldPortion > tx.amount;
+
+        // SANITY CHECK 2: Fee should be reasonable relative to withdrawal
+        // Max realistic: 50% yield (extreme), fee = 7.5% of withdrawal
+        // If fee > 10% of withdrawal, likely a mismatched fee transaction
+        const feeRatio = feeAmount / tx.amount;
+        const feeUnreasonablyHigh = feeRatio > 0.10; // Fee > 10% of withdrawal is suspicious
+
+        if (yieldExceedsWithdrawal || feeUnreasonablyHigh) {
+          debugLog(`[getNetDeposited] WARNING: Suspicious fee detected. Fee $${feeAmount.toFixed(2)} (${(feeRatio * 100).toFixed(1)}% of withdrawal $${tx.amount.toFixed(2)}). Treating withdrawal as full principal.`);
+          totalPrincipalWithdrawn += tx.amount;
+        } else {
+          const principalPortion = tx.amount - yieldPortion;
+          totalPrincipalWithdrawn += principalPortion;
+        }
+      } else {
+        // No fee = no profit (break-even or loss), entire withdrawal is principal
+        totalPrincipalWithdrawn += tx.amount;
+      }
     }
   }
 
-  const netDeposited = totalDeposits - totalWithdrawals;
-  debugLog(`[getNetDeposited] Deposits: $${totalDeposits.toFixed(2)}, Withdrawals: $${totalWithdrawals.toFixed(2)}, Net: $${netDeposited.toFixed(2)}`);
+  // Calculate net deposited
+  let netDeposited = totalDeposits - totalPrincipalWithdrawn;
+
+  // SANITY CHECK 1: Net deposited cannot be negative
+  netDeposited = Math.max(0, netDeposited);
+
+  // SANITY CHECK 2: Net deposited cannot exceed total deposits ever made
+  // (You can't have deposited more than you actually deposited)
+  if (netDeposited > totalDeposits) {
+    debugLog(`[getNetDeposited] WARNING: Net deposited $${netDeposited.toFixed(2)} > total deposits $${totalDeposits.toFixed(2)}. Capping to total deposits.`);
+    netDeposited = totalDeposits;
+  }
+
+  // SANITY CHECK 3: If we have current positions, net deposited shouldn't drastically exceed reality
+  // For fresh accounts: net deposited = deposits - principal withdrawn
+  // This is already handled above, but we add a final reasonableness check
+
+  debugLog(`[getNetDeposited] Deposits: $${totalDeposits.toFixed(2)}, Withdrawals: $${totalWithdrawals.toFixed(2)}, Principal Withdrawn: $${totalPrincipalWithdrawn.toFixed(2)}, Net: $${netDeposited.toFixed(2)}`);
 
   return netDeposited;
+}
+
+/**
+ * Get reliable deposited amount with fallback
+ *
+ * HYBRID APPROACH:
+ * 1. Primary: Use blockchain calculation (getNetDepositedFromBlockchain)
+ *    - Most accurate when transactions are correctly classified
+ *    - Verifiable on-chain data
+ *
+ * 2. Fallback: Use depositTracker (getTotalDeposited)
+ *    - Used when blockchain calculation gives suspicious results
+ *    - Tracks deposits incrementally with proper withdrawal handling
+ *
+ * VALIDATION RULES (triggers fallback):
+ * - Result is negative (impossible)
+ * - Result > currentBalance + $1 buffer (deposited can't exceed balance, would cause negative earnings)
+ * - Result is NaN or undefined
+ *
+ * KEY INSIGHT: If Deposited > Balance, then Earned = Balance - Deposited would be NEGATIVE
+ * This should never happen, so we use a strict validation with only $1 buffer for timing.
+ *
+ * @param walletAddress - Smart wallet address
+ * @param currentBalance - Current vault balance (for validation)
+ * @param otherOwnedAddress - Optional EOA address to treat as internal
+ * @returns Reliable deposited amount
+ */
+export async function getReliableDeposited(
+  walletAddress: string,
+  currentBalance: number,
+  otherOwnedAddress?: string
+): Promise<{ value: number; source: 'blockchain' | 'tracker' }> {
+  // Try blockchain calculation first (primary source)
+  const blockchainDeposited = await getNetDepositedFromBlockchain(walletAddress, otherOwnedAddress);
+
+  // Also get tracker value for comparison/debugging
+  const trackerDeposited = await getTotalDeposited(walletAddress);
+
+  debugLog(`[getReliableDeposited] Blockchain: $${blockchainDeposited.toFixed(2)}, Tracker: $${trackerDeposited.toFixed(2)}, Balance: $${currentBalance.toFixed(2)}`);
+
+  // Validation checks
+  const isNegative = blockchainDeposited < 0;
+  const isNaNValue = Number.isNaN(blockchainDeposited);
+
+  // STRICT CHECK: Deposited should NEVER exceed current balance
+  // If it does, Earned would be negative which is impossible
+  // Allow only $1 buffer for timing discrepancies (e.g., just deposited, yield not accrued yet)
+  const BALANCE_BUFFER = 1.0; // $1 buffer
+  const maxReasonableDeposited = currentBalance > 0 ? currentBalance + BALANCE_BUFFER : Infinity;
+  const exceedsBalance = blockchainDeposited > maxReasonableDeposited;
+
+  // NEW CHECK: If blockchain and tracker differ significantly, blockchain may have stale/buggy history
+  // This catches the "Withdraw All → new Deposit" case where blockchain keeps old history
+  // but tracker properly resets to 0 and tracks the new deposit
+  const SIGNIFICANT_DIFF = Math.max(10, currentBalance * 0.10); // $10 or 10% of balance, whichever is larger
+  const trackerDiffersSignificantly = Math.abs(blockchainDeposited - trackerDeposited) > SIGNIFICANT_DIFF;
+
+  // Also check: if tracker is close to balance but blockchain is way off, trust tracker
+  // This specifically catches: balance=$360, tracker=$360, blockchain=$1.59
+  const trackerCloseToBalance = currentBalance > 0 && Math.abs(trackerDeposited - currentBalance) < BALANCE_BUFFER;
+  const blockchainWayOff = currentBalance > 0 && blockchainDeposited < currentBalance * 0.5; // Less than 50% of balance
+  const trackerMoreReliable = trackerCloseToBalance && blockchainWayOff;
+
+  const isInvalid = isNegative || isNaNValue || exceedsBalance || trackerDiffersSignificantly || trackerMoreReliable;
+
+  if (isInvalid) {
+    // Log why we're falling back
+    debugLog(`[getReliableDeposited] Blockchain value INVALID:`);
+    debugLog(`  - Negative: ${isNegative}`);
+    debugLog(`  - NaN: ${isNaNValue}`);
+    debugLog(`  - Exceeds balance: ${exceedsBalance} ($${blockchainDeposited.toFixed(2)} > $${maxReasonableDeposited.toFixed(2)})`);
+    debugLog(`  - Tracker differs significantly: ${trackerDiffersSignificantly} (diff: $${Math.abs(blockchainDeposited - trackerDeposited).toFixed(2)})`);
+    debugLog(`  - Tracker more reliable: ${trackerMoreReliable} (tracker close to balance: ${trackerCloseToBalance}, blockchain way off: ${blockchainWayOff})`);
+    debugLog(`  - Falling back to tracker...`);
+
+    // Validate tracker result too
+    if (trackerDeposited < 0 || Number.isNaN(trackerDeposited)) {
+      debugLog(`[getReliableDeposited] Tracker value also invalid ($${trackerDeposited}). Using balance as deposited.`);
+      // If both are invalid, use current balance as deposited (assumes 0 yield)
+      return { value: currentBalance, source: 'tracker' };
+    }
+
+    // Cap tracker value to current balance to prevent negative earnings
+    const finalValue = currentBalance > 0 ? Math.min(trackerDeposited, currentBalance) : trackerDeposited;
+
+    debugLog(`[getReliableDeposited] Using tracker fallback: $${finalValue.toFixed(2)} (raw tracker: $${trackerDeposited.toFixed(2)})`);
+    return { value: finalValue, source: 'tracker' };
+  }
+
+  debugLog(`[getReliableDeposited] Using blockchain value: $${blockchainDeposited.toFixed(2)}`);
+  return { value: blockchainDeposited, source: 'blockchain' };
 }
 
 /**

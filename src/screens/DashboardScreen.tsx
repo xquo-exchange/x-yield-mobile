@@ -32,7 +32,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
-import { getNetDepositedFromBlockchain } from '../services/transactionHistory';
+import { getReliableDeposited } from '../services/transactionHistory';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
 import { useDeepLink } from '../contexts/DeepLinkContext';
@@ -292,19 +292,46 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const savingsBalance = parseFloat(savingsTotal) || 0;
   const totalBalance = cashBalance + savingsBalance;
 
-  // Calculate earnings - show exact value from blockchain
-  const totalEarned = totalDeposited > 0 ? Math.max(0, savingsBalance - totalDeposited) : 0;
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // BULLETPROOF SANITY CHECK - Last line of defense before display
+  // Rules:
+  // 1. Deposited >= 0 (never negative)
+  // 2. Deposited <= balance (can't deposit more than you have)
+  // 3. Earned = balance - deposited (simple math)
+  // If any rule violated: Deposited = balance, Earned = 0 (safest assumption)
+  // ═══════════════════════════════════════════════════════════════════════════════
+  const sanitizeForDisplay = (rawDeposited: number, balance: number): { deposited: number; earned: number } => {
+    // Rule 1: Deposited must be >= 0
+    // Rule 2: Deposited must be <= balance
+    const isValid = rawDeposited >= 0 && rawDeposited <= balance;
+
+    if (!isValid || Number.isNaN(rawDeposited) || Number.isNaN(balance)) {
+      // Invalid: assume all balance is deposited, no earnings
+      return { deposited: Math.max(0, balance), earned: 0 };
+    }
+
+    // Valid: calculate earned as simple difference
+    const earned = balance - rawDeposited;
+    return { deposited: rawDeposited, earned: Math.max(0, earned) };
+  };
+
+  // Apply sanitization to get display values
+  const { deposited: displayDeposited, earned: displayEarned } = sanitizeForDisplay(totalDeposited, savingsBalance);
+
+  // Legacy variable names for compatibility (use sanitized values)
+  const totalEarned = displayEarned;
   const dailyEarnings = (savingsBalance * (parseFloat(displayApy) / 100)) / 365;
 
-  // Load total deposited from blockchain (consistent with Statements screen)
+  // Load total deposited using hybrid approach (blockchain primary, tracker fallback)
   // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
   const otherOwnedAddress = smartWalletAddress && embeddedWalletAddress ? embeddedWalletAddress : undefined;
 
   React.useEffect(() => {
     const loadDeposited = async () => {
       if (displayAddress) {
-        const deposited = await getNetDepositedFromBlockchain(displayAddress, otherOwnedAddress);
-        setTotalDeposited(deposited);
+        // Use reliable deposited which validates blockchain data and falls back to tracker if needed
+        const result = await getReliableDeposited(displayAddress, savingsBalance, otherOwnedAddress);
+        setTotalDeposited(result.value);
       }
     };
     loadDeposited();
@@ -1096,13 +1123,13 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
                     <View style={styles.savingsBreakdown}>
                       <View style={styles.breakdownRow}>
                         <Text style={styles.breakdownLabel}>Added</Text>
-                        <Text style={styles.breakdownValue}>${Math.max(0, totalDeposited).toFixed(2)}</Text>
+                        <Text style={styles.breakdownValue}>${displayDeposited.toFixed(2)}</Text>
                       </View>
                       <View style={styles.breakdownRow}>
                         <Text style={styles.breakdownLabel}>Earned</Text>
                         <AnimatedEarned
                           currentBalance={savingsBalance}
-                          depositedAmount={Math.max(0, totalDeposited)}
+                          depositedAmount={displayDeposited}
                           apy={parseFloat(displayApy)}
                         />
                       </View>

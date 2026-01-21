@@ -43,7 +43,7 @@ import {
   recordWithdrawal,
 } from '../services/depositTracker';
 import {
-  getNetDepositedFromBlockchain,
+  getReliableDeposited,
   clearTransactionCache,
 } from '../services/transactionHistory';
 import { recordDepositMilestone } from '../services/milestoneTracker';
@@ -113,11 +113,20 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     return () => Analytics.trackScreenExit('ManageFunds');
   }, []);
 
-  // Calculate earnings for display - show exact value from blockchain
-  const totalYield = useMemo(() => {
-    if (totalDeposited <= 0) return 0;
-    return Math.max(0, savingsAmount - totalDeposited);
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // BULLETPROOF SANITY CHECK - Last line of defense before display
+  // Rules: Deposited >= 0, Deposited <= balance, Earned = balance - deposited
+  // ═══════════════════════════════════════════════════════════════════════════════
+  const { displayDeposited, displayEarned } = useMemo(() => {
+    const isValid = totalDeposited >= 0 && totalDeposited <= savingsAmount;
+    if (!isValid || Number.isNaN(totalDeposited) || Number.isNaN(savingsAmount)) {
+      return { displayDeposited: Math.max(0, savingsAmount), displayEarned: 0 };
+    }
+    return { displayDeposited: totalDeposited, displayEarned: Math.max(0, savingsAmount - totalDeposited) };
   }, [totalDeposited, savingsAmount]);
+
+  // Legacy variable for compatibility
+  const totalYield = displayEarned;
   const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
 
   // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
@@ -126,9 +135,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   React.useEffect(() => {
     const loadDeposited = async () => {
       if (displayAddress) {
-        // Use blockchain data for consistent display with Statements screen
-        const deposited = await getNetDepositedFromBlockchain(displayAddress, otherOwnedAddress);
-        setTotalDeposited(deposited);
+        // Use reliable deposited (blockchain primary, tracker fallback)
+        const result = await getReliableDeposited(displayAddress, savingsAmount, otherOwnedAddress);
+        setTotalDeposited(result.value);
       }
     };
     loadDeposited();
@@ -270,8 +279,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       return;
     }
 
-    // Use blockchain data for accurate fee calculation (consistent with Statements)
-    const depositedAmount = await getNetDepositedFromBlockchain(displayAddress, otherOwnedAddress);
+    // Use reliable deposited for accurate fee calculation (blockchain primary, tracker fallback)
+    const depositedResult = await getReliableDeposited(displayAddress, savingsAmount, otherOwnedAddress);
+    const depositedAmount = depositedResult.value;
 
     const batch = buildWithdrawBatch(
       positions,
@@ -384,8 +394,8 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     );
   };
 
-  // Calculate earnings - show exact value from blockchain
-  const totalEarned = totalDeposited > 0 ? Math.max(0, savingsAmount - totalDeposited) : 0;
+  // Use sanitized displayEarned (calculated above with bulletproof sanity check)
+  const totalEarned = displayEarned;
 
   return (
     <View style={styles.container}>
@@ -440,13 +450,13 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                 </View>
               )}
 
-              {totalDeposited > 0 && (
+              {displayDeposited > 0 && (
                 <SensitiveView>
                   <View style={styles.earningsDisplay}>
                     <Text style={styles.earningsLabel}>Total earned</Text>
                     <AnimatedEarned
                       currentBalance={savingsAmount}
-                      depositedAmount={totalDeposited}
+                      depositedAmount={displayDeposited}
                       apy={parseFloat(displayApy)}
                     />
                   </View>
@@ -638,7 +648,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
                       <>
                         <View style={styles.previewRow}>
                           <Text style={styles.previewLabel}>Total added</Text>
-                          <Text style={styles.previewValue}>${Math.max(0, totalDeposited).toFixed(2)}</Text>
+                          <Text style={styles.previewValue}>${displayDeposited.toFixed(2)}</Text>
                         </View>
                         <View style={styles.previewRow}>
                           <Text style={styles.previewLabel}>Earnings</Text>
