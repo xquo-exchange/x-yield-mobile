@@ -764,7 +764,7 @@ export async function getReliableDeposited(
 
   debugLog(`[getReliableDeposited] Blockchain: $${blockchainDeposited.toFixed(2)}, Tracker: $${trackerDeposited.toFixed(2)}, Balance: $${currentBalance.toFixed(2)}`);
 
-  // Validation checks
+  // Validation checks for blockchain value
   const isNegative = blockchainDeposited < 0;
   const isNaNValue = Number.isNaN(blockchainDeposited);
 
@@ -775,34 +775,47 @@ export async function getReliableDeposited(
   const maxReasonableDeposited = currentBalance > 0 ? currentBalance + BALANCE_BUFFER : Infinity;
   const exceedsBalance = blockchainDeposited > maxReasonableDeposited;
 
-  // NEW CHECK: If blockchain and tracker differ significantly, blockchain may have stale/buggy history
-  // This catches the "Withdraw All → new Deposit" case where blockchain keeps old history
-  // but tracker properly resets to 0 and tracks the new deposit
+  // Check if tracker has meaningful data (> 0 means user has recorded deposits)
+  // Tracker = 0 means either: (1) new user with no data, or (2) user withdrew everything
+  const trackerHasData = trackerDeposited > 0;
+
+  // Only use tracker comparison if tracker HAS data
+  // This prevents false fallbacks for new users where tracker = 0 but blockchain is correct
   const SIGNIFICANT_DIFF = Math.max(10, currentBalance * 0.10); // $10 or 10% of balance, whichever is larger
-  const trackerDiffersSignificantly = Math.abs(blockchainDeposited - trackerDeposited) > SIGNIFICANT_DIFF;
+  const trackerDiffersSignificantly = trackerHasData && Math.abs(blockchainDeposited - trackerDeposited) > SIGNIFICANT_DIFF;
 
-  // Also check: if tracker is close to balance but blockchain is way off, trust tracker
-  // This specifically catches: balance=$360, tracker=$360, blockchain=$1.59
+  // Trust tracker over blockchain when:
+  // 1. Tracker is close to current balance (within $1)
+  // 2. Blockchain is way off (less than 50% of balance)
+  // This catches: balance=$360, tracker=$360, blockchain=$1.59 (stale blockchain after withdraw/deposit cycle)
   const trackerCloseToBalance = currentBalance > 0 && Math.abs(trackerDeposited - currentBalance) < BALANCE_BUFFER;
-  const blockchainWayOff = currentBalance > 0 && blockchainDeposited < currentBalance * 0.5; // Less than 50% of balance
-  const trackerMoreReliable = trackerCloseToBalance && blockchainWayOff;
+  const blockchainWayOff = currentBalance > 0 && blockchainDeposited < currentBalance * 0.5;
+  const trackerMoreReliable = trackerHasData && trackerCloseToBalance && blockchainWayOff;
 
-  const isInvalid = isNegative || isNaNValue || exceedsBalance || trackerDiffersSignificantly || trackerMoreReliable;
+  // Blockchain is invalid if fundamentally broken OR tracker clearly has better data
+  const blockchainFundamentallyBroken = isNegative || isNaNValue || exceedsBalance;
+  const shouldUseTracker = blockchainFundamentallyBroken || trackerDiffersSignificantly || trackerMoreReliable;
 
-  if (isInvalid) {
-    // Log why we're falling back
-    debugLog(`[getReliableDeposited] Blockchain value INVALID:`);
-    debugLog(`  - Negative: ${isNegative}`);
-    debugLog(`  - NaN: ${isNaNValue}`);
-    debugLog(`  - Exceeds balance: ${exceedsBalance} ($${blockchainDeposited.toFixed(2)} > $${maxReasonableDeposited.toFixed(2)})`);
+  if (shouldUseTracker) {
+    // Log why we're considering fallback
+    debugLog(`[getReliableDeposited] Considering tracker fallback:`);
+    debugLog(`  - Blockchain negative: ${isNegative}`);
+    debugLog(`  - Blockchain NaN: ${isNaNValue}`);
+    debugLog(`  - Blockchain exceeds balance: ${exceedsBalance} ($${blockchainDeposited.toFixed(2)} > $${maxReasonableDeposited.toFixed(2)})`);
+    debugLog(`  - Tracker has data: ${trackerHasData}`);
     debugLog(`  - Tracker differs significantly: ${trackerDiffersSignificantly} (diff: $${Math.abs(blockchainDeposited - trackerDeposited).toFixed(2)})`);
-    debugLog(`  - Tracker more reliable: ${trackerMoreReliable} (tracker close to balance: ${trackerCloseToBalance}, blockchain way off: ${blockchainWayOff})`);
-    debugLog(`  - Falling back to tracker...`);
+    debugLog(`  - Tracker more reliable: ${trackerMoreReliable}`);
 
-    // Validate tracker result too
+    // IMPORTANT: If tracker = 0 (no data) and blockchain is NOT fundamentally broken,
+    // use blockchain value instead of falling back to 0
+    if (!trackerHasData && !blockchainFundamentallyBroken) {
+      debugLog(`[getReliableDeposited] Tracker has no data (0), using blockchain: $${blockchainDeposited.toFixed(2)}`);
+      return { value: blockchainDeposited, source: 'blockchain' };
+    }
+
+    // Validate tracker result
     if (trackerDeposited < 0 || Number.isNaN(trackerDeposited)) {
-      debugLog(`[getReliableDeposited] Tracker value also invalid ($${trackerDeposited}). Using balance as deposited.`);
-      // If both are invalid, use current balance as deposited (assumes 0 yield)
+      debugLog(`[getReliableDeposited] Tracker value invalid ($${trackerDeposited}). Using balance as deposited.`);
       return { value: currentBalance, source: 'tracker' };
     }
 
