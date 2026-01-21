@@ -831,6 +831,109 @@ export async function getReliableDeposited(
 }
 
 /**
+ * Get REALIZED earnings directly from fee transactions
+ *
+ * This is the MOST RELIABLE way to calculate earnings because:
+ * - It's based on actual fee transactions (verifiable on-chain)
+ * - Fee = 15% of yield, so: grossYield = fees / 0.15
+ * - realizedEarnings = grossYield - fees = grossYield * 0.85
+ *
+ * NOTE: This only counts REALIZED earnings (yield that was withdrawn).
+ * Unrealized yield (still in vault) is NOT included.
+ *
+ * @param walletAddress - Smart wallet address
+ * @param otherOwnedAddress - Optional EOA address to treat as internal
+ * @returns Realized earnings breakdown
+ */
+export async function getRealizedEarnings(
+  walletAddress: string,
+  otherOwnedAddress?: string
+): Promise<{
+  totalFees: number;
+  grossYield: number;
+  realizedEarnings: number;
+}> {
+  // Get cached transactions or fetch fresh
+  let transactions = await getCachedTransactions(walletAddress);
+
+  if (!transactions) {
+    const fetchResult = await fetchRawTransactions(walletAddress, otherOwnedAddress);
+    transactions = fetchResult.transactions;
+    await saveToCache(walletAddress, transactions);
+  }
+
+  // Match fees to withdrawals for accurate calculation
+  transactions = matchFeesToWithdrawals(transactions);
+
+  // Sum all fee transactions
+  let totalFees = 0;
+  for (const tx of transactions) {
+    if (tx.type === 'fee') {
+      totalFees += tx.amount;
+    }
+  }
+
+  // Calculate yield from fees (Fee = 15% of gross yield)
+  const grossYield = totalFees > 0 ? totalFees / PLATFORM_FEE_RATE : 0;
+  const realizedEarnings = grossYield - totalFees; // Net after fees (85% of gross)
+
+  debugLog(`[getRealizedEarnings] Fees: $${totalFees.toFixed(2)}, Gross: $${grossYield.toFixed(2)}, Net: $${realizedEarnings.toFixed(2)}`);
+
+  return {
+    totalFees,
+    grossYield,
+    realizedEarnings,
+  };
+}
+
+/**
+ * Get TOTAL earnings (realized + unrealized)
+ *
+ * Total = Realized (withdrawn yield) + Unrealized (still in vault)
+ *
+ * - Realized: Calculated from fees (reliable, verifiable)
+ * - Unrealized: currentBalance - netDeposited (less reliable)
+ *
+ * For display, we prioritize showing the reliable realized portion.
+ *
+ * @param walletAddress - Smart wallet address
+ * @param currentBalance - Current vault balance
+ * @param otherOwnedAddress - Optional EOA address to treat as internal
+ */
+export async function getTotalEarnings(
+  walletAddress: string,
+  currentBalance: number,
+  otherOwnedAddress?: string
+): Promise<{
+  realized: number;
+  unrealized: number;
+  total: number;
+  source: 'fees' | 'estimated';
+}> {
+  // Get realized earnings (reliable - from fees)
+  const { realizedEarnings } = await getRealizedEarnings(walletAddress, otherOwnedAddress);
+
+  // Get deposited amount for unrealized calculation
+  const { value: deposited } = await getReliableDeposited(walletAddress, currentBalance, otherOwnedAddress);
+
+  // Unrealized = current balance - what was deposited (could still be inaccurate)
+  // Only positive unrealized makes sense
+  const unrealized = Math.max(0, currentBalance - deposited);
+
+  // Total earnings
+  const total = realizedEarnings + unrealized;
+
+  debugLog(`[getTotalEarnings] Realized: $${realizedEarnings.toFixed(2)}, Unrealized: $${unrealized.toFixed(2)}, Total: $${total.toFixed(2)}`);
+
+  return {
+    realized: realizedEarnings,
+    unrealized,
+    total,
+    source: realizedEarnings > 0 ? 'fees' : 'estimated',
+  };
+}
+
+/**
  * Date range preset type
  */
 export type DateRangePresetType = 'this_year' | 'last_year' | 'all_time' | 'ytd' | 'custom';

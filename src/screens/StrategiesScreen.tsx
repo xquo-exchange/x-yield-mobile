@@ -44,6 +44,7 @@ import {
 } from '../services/depositTracker';
 import {
   getReliableDeposited,
+  getTotalEarnings,
   clearTransactionCache,
 } from '../services/transactionHistory';
 import { recordDepositMilestone } from '../services/milestoneTracker';
@@ -78,6 +79,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [totalDeposited, setTotalDeposited] = useState(0);
+  const [realizedEarnings, setRealizedEarnings] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>('add');
   const [isInputFocused, setIsInputFocused] = useState(false);
   const amountInputRef = useRef<TextInput>(null);
@@ -114,33 +116,44 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   }, []);
 
   // ═══════════════════════════════════════════════════════════════════════════════
-  // BULLETPROOF SANITY CHECK - Last line of defense before display
-  // Rules: Deposited >= 0, Deposited <= balance, Earned = balance - deposited
+  // DIRECT EARNINGS CALCULATION
+  // Instead of fragile (Balance - Deposited), use direct fee-based calculation:
+  // - Realized: calculated from fees (reliable, verifiable)
+  // - Unrealized: balance - deposited (for users who haven't withdrawn)
   // ═══════════════════════════════════════════════════════════════════════════════
+
+  // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
+  const otherOwnedAddress = smartWalletAddress && embeddedWalletAddress ? embeddedWalletAddress : undefined;
+
+  // Calculate display values using direct earnings
   const { displayDeposited, displayEarned } = useMemo(() => {
-    const isValid = totalDeposited >= 0 && totalDeposited <= savingsAmount;
-    if (!isValid || Number.isNaN(totalDeposited) || Number.isNaN(savingsAmount)) {
-      return { displayDeposited: Math.max(0, savingsAmount), displayEarned: 0 };
-    }
-    return { displayDeposited: totalDeposited, displayEarned: Math.max(0, savingsAmount - totalDeposited) };
-  }, [totalDeposited, savingsAmount]);
+    const unrealizedEarnings = Math.max(0, savingsAmount - totalDeposited);
+    const totalEarnings = realizedEarnings + unrealizedEarnings;
+    return { displayDeposited: totalDeposited, displayEarned: totalEarnings };
+  }, [totalDeposited, realizedEarnings, savingsAmount]);
 
   // Legacy variable for compatibility
   const totalYield = displayEarned;
   const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
 
-  // If using smart wallet, the EOA is "internal" (transfers between them aren't external)
-  const otherOwnedAddress = smartWalletAddress && embeddedWalletAddress ? embeddedWalletAddress : undefined;
-
+  // Load earnings using direct fee-based calculation (most reliable)
   React.useEffect(() => {
-    const loadDeposited = async () => {
-      if (displayAddress) {
-        // Use reliable deposited (blockchain primary, tracker fallback)
-        const result = await getReliableDeposited(displayAddress, savingsAmount, otherOwnedAddress);
-        setTotalDeposited(result.value);
+    const loadEarnings = async () => {
+      if (displayAddress && savingsAmount >= 0) {
+        try {
+          // Get both deposited and realized earnings
+          const earnings = await getTotalEarnings(displayAddress, savingsAmount, otherOwnedAddress);
+          setRealizedEarnings(earnings.realized);
+
+          // Also get deposited for display
+          const deposited = await getReliableDeposited(displayAddress, savingsAmount, otherOwnedAddress);
+          setTotalDeposited(deposited.value);
+        } catch (error) {
+          console.error('[Strategies] Error loading earnings:', error);
+        }
       }
     };
-    loadDeposited();
+    loadEarnings();
   }, [displayAddress, positions, savingsAmount, otherOwnedAddress]);
 
   const onRefresh = useCallback(async () => {
