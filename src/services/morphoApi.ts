@@ -15,11 +15,11 @@ const MORPHO_API_URL = 'https://api.morpho.org/graphql';
 const BASE_CHAIN_ID = 8453;
 
 // Our vault addresses on Base (lowercase for matching)
-// Verified via Morpho GraphQL API
+// Verified: 2026-02-11 via on-chain data
 const VAULT_ADDRESSES = {
-  STEAKHOUSE_HIGH_YIELD: '0xbeeff7ae5e00aae3db302e4b0d8c883810a58100',
-  RE7_USDC: '0x618495ccc4e751178c4914b1e939c0fe0fb07b9b',
-  STEAKHOUSE_PRIME: '0xbeef0e0834849acc03f0089f01f4f1eeb06873c9',
+  STEAKHOUSE_HIGH_YIELD: '0xbeeff7ae5e00aae3db302e4b0d8c883810a58100', // Steakhouse High Yield Instant (~$3.7M TVL)
+  RE7_USDC: '0x618495ccc4e751178c4914b1e939c0fe0fb07b9b',              // Re7 USDC (~$1.3M TVL)
+  STEAKHOUSE_PRIME: '0xbeef0e0834849acc03f0089f01f4f1eeb06873c9',      // Steakhouse Prime Instant (~$7.4M TVL)
 };
 
 // Allocation percentages for weighted APY calculation (must match strategies.ts)

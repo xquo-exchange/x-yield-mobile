@@ -55,20 +55,24 @@ export interface Strategy {
 // You can find more at: https://app.morpho.org/base
 
 export const MORPHO_VAULTS: Record<string, MorphoVault> = {
-  // Steakhouse High Yield Instant (bbqUSDC) - Highest TVL USDC vault
+  // Steakhouse High Yield Instant (bbqUSDC)
+  // On-chain name: "Steakhouse High Yield Instant"
+  // Verified: 2026-02-11, TVL ~$3.7M
   STEAKHOUSE_HIGH_YIELD: {
     id: 'steakhouse-high-yield',
-    name: 'Steakhouse High Yield',
+    name: 'Steakhouse High Yield Instant',
     address: '0xbeeff7aE5E00Aae3Db302e4B0d8C883810a58100',
     asset: TOKENS.USDC as `0x${string}`,
     assetSymbol: 'USDC',
     assetDecimals: 6,
-    apy: 5.4,
-    tvl: '$2M',
+    apy: 3.3, // Fetched live from API, this is fallback
+    tvl: '$3.7M',
     curator: 'Steakhouse Financial',
   },
 
-  // Re7 USDC vault - Second highest TVL
+  // Re7 USDC vault
+  // On-chain name: "Re7 USDC"
+  // Verified: 2026-02-11, TVL ~$1.3M
   RE7_USDC: {
     id: 're7-usdc',
     name: 'Re7 USDC',
@@ -76,21 +80,23 @@ export const MORPHO_VAULTS: Record<string, MorphoVault> = {
     asset: TOKENS.USDC as `0x${string}`,
     assetSymbol: 'USDC',
     assetDecimals: 6,
-    apy: 5.9,
+    apy: 3.1, // Fetched live from API, this is fallback
     tvl: '$1.3M',
     curator: 'Re7 Capital',
   },
 
   // Steakhouse Prime Instant (steakUSDC)
+  // On-chain name: "Steakhouse Prime Instant"
+  // Verified: 2026-02-11, TVL ~$7.4M
   STEAKHOUSE_PRIME: {
     id: 'steakhouse-prime',
-    name: 'Steakhouse Prime',
+    name: 'Steakhouse Prime Instant',
     address: '0xbeef0e0834849aCC03f0089F01f4F1Eeb06873C9',
     asset: TOKENS.USDC as `0x${string}`,
     assetSymbol: 'USDC',
     assetDecimals: 6,
-    apy: 5.4,
-    tvl: '$0.9M',
+    apy: 3.5, // Fetched live from API, this is fallback
+    tvl: '$7.4M',
     curator: 'Steakhouse Financial',
   },
 };
