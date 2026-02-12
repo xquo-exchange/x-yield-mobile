@@ -16,6 +16,8 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isValidEthereumAddress, isValidAmount, sanitizeAddress } from '../utils/validation';
+import { TOKENS } from '../constants/contracts';
+import { MORPHO_VAULTS } from '../constants/strategies';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -25,7 +27,20 @@ const debugLog = (message: string, ...args: unknown[]) => {
 
 const STORAGE_KEY = 'unflat_deposits';
 const PENDING_SYNC_KEY = 'unflat_pending_sync';
+const BLOCKCHAIN_CACHE_KEY = 'unflat_blockchain_deposits';
 const API_BASE_URL = 'https://x-yield-api.vercel.app';
+const BLOCKSCOUT_API_URL = 'https://base.blockscout.com/api';
+
+// Cache TTL for blockchain-calculated deposits
+const BLOCKCHAIN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Vault addresses for matching (lowercase)
+const VAULT_ADDRESSES_SET = new Set(
+  Object.values(MORPHO_VAULTS).map(v => v.address.toLowerCase())
+);
+
+// Full withdrawal threshold - if vault balance goes below this, consider it a full withdrawal
+const FULL_WITHDRAWAL_THRESHOLD = 1.0; // $1
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Pending Sync Queue Types
@@ -53,6 +68,24 @@ export interface DepositRecord {
 
 export interface DepositData {
   [walletAddress: string]: DepositRecord;
+}
+
+// Cached blockchain calculation result
+interface BlockchainDepositCache {
+  walletAddress: string;
+  totalDeposited: number;
+  lastUpdated: number;
+}
+
+// Blockscout API response types
+interface BlockscoutTokenTransfer {
+  blockNumber: string;
+  timeStamp: string;
+  hash: string;
+  from: string;
+  to: string;
+  value: string;
+  tokenDecimal: string;
 }
 
 /**
@@ -86,6 +119,241 @@ async function saveDeposits(data: DepositData): Promise<void> {
   } catch (error) {
     console.error('[DepositTracker] SAVE FAILED:', error);
     throw new Error(`Failed to save deposit data: ${error}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BLOCKCHAIN-BASED DEPOSIT CALCULATION
+// This is the SOURCE OF TRUTH - calculates deposits from on-chain data
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get cached blockchain deposit calculation
+ */
+async function getBlockchainCache(walletAddress: string): Promise<BlockchainDepositCache | null> {
+  try {
+    const data = await AsyncStorage.getItem(BLOCKCHAIN_CACHE_KEY);
+    if (!data) return null;
+
+    const cache: Record<string, BlockchainDepositCache> = JSON.parse(data);
+    const entry = cache[walletAddress.toLowerCase()];
+
+    if (!entry) return null;
+
+    // Check if cache is expired
+    const age = Date.now() - entry.lastUpdated;
+    if (age > BLOCKCHAIN_CACHE_TTL_MS) {
+      debugLog('[DepositTracker] Blockchain cache expired (age:', Math.round(age / 1000), 's)');
+      return null;
+    }
+
+    debugLog('[DepositTracker] Using blockchain cache (age:', Math.round(age / 1000), 's)');
+    return entry;
+  } catch (error) {
+    console.error('[DepositTracker] Error reading blockchain cache:', error);
+    return null;
+  }
+}
+
+/**
+ * Save blockchain deposit calculation to cache
+ */
+async function saveBlockchainCache(walletAddress: string, totalDeposited: number): Promise<void> {
+  try {
+    const data = await AsyncStorage.getItem(BLOCKCHAIN_CACHE_KEY);
+    const cache: Record<string, BlockchainDepositCache> = data ? JSON.parse(data) : {};
+
+    cache[walletAddress.toLowerCase()] = {
+      walletAddress: walletAddress.toLowerCase(),
+      totalDeposited,
+      lastUpdated: Date.now(),
+    };
+
+    await AsyncStorage.setItem(BLOCKCHAIN_CACHE_KEY, JSON.stringify(cache));
+    debugLog('[DepositTracker] Blockchain cache saved: $' + totalDeposited.toFixed(2));
+  } catch (error) {
+    console.error('[DepositTracker] Error saving blockchain cache:', error);
+  }
+}
+
+/**
+ * Fetch ERC20 token transfers from Blockscout API
+ */
+async function fetchTokenTransfersForDeposits(
+  walletAddress: string,
+  tokenAddress: string
+): Promise<BlockscoutTokenTransfer[]> {
+  if (!walletAddress || walletAddress.length < 10) {
+    console.error('[DepositTracker] Invalid wallet address:', walletAddress);
+    return [];
+  }
+
+  try {
+    const url = new URL(BLOCKSCOUT_API_URL);
+    url.searchParams.set('module', 'account');
+    url.searchParams.set('action', 'tokentx');
+    url.searchParams.set('address', walletAddress);
+    url.searchParams.set('contractaddress', tokenAddress);
+    url.searchParams.set('startblock', '0');
+    url.searchParams.set('endblock', '99999999');
+    url.searchParams.set('sort', 'asc'); // CHRONOLOGICAL order (oldest first)
+
+    debugLog('[DepositTracker] Fetching blockchain data for:', walletAddress.slice(0, 10) + '...');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    const response = await fetch(url.toString(), {
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.error('[DepositTracker] Blockscout API error:', response.status);
+      return [];
+    }
+
+    const data = await response.json();
+
+    if (data.status === '1' && Array.isArray(data.result)) {
+      debugLog('[DepositTracker] Found', data.result.length, 'token transfers');
+      return data.result;
+    }
+
+    if (data.status === '0' && data.message === 'No transactions found') {
+      debugLog('[DepositTracker] No transactions found for wallet');
+      return [];
+    }
+
+    console.error('[DepositTracker] Blockscout API returned error:', data.message);
+    return [];
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('[DepositTracker] Blockscout request timed out');
+    } else {
+      console.error('[DepositTracker] Error fetching from Blockscout:', error);
+    }
+    return [];
+  }
+}
+
+/**
+ * CORE ALGORITHM: Calculate deposited amount from blockchain data
+ *
+ * This processes transactions CHRONOLOGICALLY with stateful tracking:
+ * - Deposits to vault: ADD to currentDeposited, ADD to vaultBalance
+ * - Withdrawals from vault: SUBTRACT from vaultBalance
+ * - When vaultBalance drops below threshold: RESET currentDeposited to 0
+ *
+ * The key insight is that a full withdrawal means the user took out
+ * ALL their money (principal + yield), so their "deposited" amount
+ * resets to 0. Any subsequent deposit starts fresh.
+ *
+ * Example:
+ *   1. Deposit $360 → deposited=$360, balance=$360
+ *   2. Yield accrues → deposited=$360, balance=$365
+ *   3. Full withdraw $365 → deposited=0, balance=0 (RESET!)
+ *   4. Deposit $360 → deposited=$360, balance=$360 (FRESH START)
+ */
+export async function calculateDepositedFromChain(
+  walletAddress: string,
+  skipCache: boolean = false
+): Promise<{ deposited: number; fromCache: boolean }> {
+  const address = walletAddress.toLowerCase();
+
+  // Check cache first (unless skipCache is true)
+  if (!skipCache) {
+    const cached = await getBlockchainCache(address);
+    if (cached) {
+      return { deposited: cached.totalDeposited, fromCache: true };
+    }
+  }
+
+  // Fetch all USDC transfers for this wallet
+  const transfers = await fetchTokenTransfersForDeposits(address, TOKENS.USDC);
+
+  if (transfers.length === 0) {
+    debugLog('[DepositTracker] No transfers found, deposited = 0');
+    return { deposited: 0, fromCache: false };
+  }
+
+  // Sort by block number (chronological order)
+  // Blockscout already returns sorted by 'asc' but let's ensure
+  transfers.sort((a, b) => parseInt(a.blockNumber) - parseInt(b.blockNumber));
+
+  // State tracking
+  let currentDeposited = 0;
+  let vaultBalance = 0;
+
+  debugLog('[DepositTracker] Processing', transfers.length, 'transfers chronologically...');
+
+  for (const transfer of transfers) {
+    const from = transfer.from.toLowerCase();
+    const to = transfer.to.toLowerCase();
+    const value = BigInt(transfer.value || '0');
+
+    // Skip zero-value transfers
+    if (value === BigInt(0)) continue;
+
+    // Convert to USD (USDC has 6 decimals)
+    const amount = Number(value) / 1e6;
+
+    const isFromVault = VAULT_ADDRESSES_SET.has(from);
+    const isToVault = VAULT_ADDRESSES_SET.has(to);
+    const isFromWallet = from === address;
+    const isToWallet = to === address;
+
+    // DEPOSIT: wallet → vault
+    if (isFromWallet && isToVault) {
+      currentDeposited += amount;
+      vaultBalance += amount;
+      debugLog(`  [DEPOSIT] +$${amount.toFixed(2)} → deposited=$${currentDeposited.toFixed(2)}, balance=$${vaultBalance.toFixed(2)}`);
+    }
+    // WITHDRAW: vault → wallet
+    else if (isFromVault && isToWallet) {
+      vaultBalance -= amount;
+      debugLog(`  [WITHDRAW] -$${amount.toFixed(2)} → balance=$${vaultBalance.toFixed(2)}`);
+
+      // Check for full withdrawal (balance near zero)
+      if (vaultBalance < FULL_WITHDRAWAL_THRESHOLD) {
+        debugLog(`  [RESET] Full withdrawal detected, balance=$${vaultBalance.toFixed(2)} < $${FULL_WITHDRAWAL_THRESHOLD}`);
+        currentDeposited = 0;
+        vaultBalance = 0; // Reset to exactly 0
+      }
+    }
+  }
+
+  // Sanity check: deposited cannot be negative
+  currentDeposited = Math.max(0, currentDeposited);
+
+  debugLog('[DepositTracker] BLOCKCHAIN RESULT: deposited=$' + currentDeposited.toFixed(2));
+
+  // Save to cache
+  await saveBlockchainCache(address, currentDeposited);
+
+  return { deposited: currentDeposited, fromCache: false };
+}
+
+/**
+ * Invalidate the blockchain cache for a wallet
+ * Call this after a deposit or withdrawal to force a fresh calculation
+ */
+export async function invalidateBlockchainCache(walletAddress: string): Promise<void> {
+  try {
+    const data = await AsyncStorage.getItem(BLOCKCHAIN_CACHE_KEY);
+    if (!data) return;
+
+    const cache: Record<string, BlockchainDepositCache> = JSON.parse(data);
+    delete cache[walletAddress.toLowerCase()];
+    await AsyncStorage.setItem(BLOCKCHAIN_CACHE_KEY, JSON.stringify(cache));
+
+    debugLog('[DepositTracker] Blockchain cache invalidated for:', walletAddress.slice(0, 10) + '...');
+  } catch (error) {
+    console.error('[DepositTracker] Error invalidating blockchain cache:', error);
   }
 }
 
@@ -362,6 +630,10 @@ export async function recordDeposit(
   };
   await saveDeposits(deposits);
 
+  // Invalidate blockchain cache so next fetch gets fresh data
+  // The cache will be repopulated on next getDepositedAndEarnings() call
+  await invalidateBlockchainCache(address);
+
   // Sync to backend (fire and forget, queue on failure)
   recordDepositToBackend(address, amount, txHash).then(async (success) => {
     if (success) {
@@ -425,6 +697,9 @@ export async function recordWithdrawal(
 
   // Save to local storage first
   await saveDeposits(deposits);
+
+  // Invalidate blockchain cache so next fetch gets fresh data
+  await invalidateBlockchainCache(address);
 
   // IMPORTANT: Wait for backend sync to complete (not fire and forget)
   // This ensures the backend has the correct value before user makes another deposit
@@ -573,6 +848,53 @@ export async function resetDeposits(walletAddress: string): Promise<void> {
     debugLog(`[DepositTracker] Reset deposits for ${address} (local + backend)`);
   } catch (error) {
     console.warn('[DepositTracker] Backend reset failed:', error);
+  }
+}
+
+/**
+ * REPAIR: Set deposit amount to match on-chain reality
+ * Use this to fix corrupted deposit data by setting to the correct value
+ * based on actual on-chain deposit history.
+ *
+ * @param walletAddress - User's wallet address
+ * @param correctTotal - The correct total deposited (from on-chain history)
+ * @param reason - Reason for the repair (for logging)
+ */
+export async function repairDepositData(
+  walletAddress: string,
+  correctTotal: number,
+  reason: string = 'manual repair'
+): Promise<void> {
+  const address = walletAddress.toLowerCase();
+  const deposits = await getAllDeposits();
+
+  const oldValue = deposits[address]?.totalDeposited ?? 0;
+
+  console.log('[DepositTracker] REPAIR:', {
+    address: address.slice(0, 10) + '...',
+    oldValue: oldValue.toFixed(6),
+    newValue: correctTotal.toFixed(6),
+    diff: (correctTotal - oldValue).toFixed(6),
+    reason,
+  });
+
+  deposits[address] = {
+    totalDeposited: correctTotal,
+    lastUpdated: Date.now(),
+  };
+
+  await saveDeposits(deposits);
+
+  // Also sync to backend
+  try {
+    await fetch(`${API_BASE_URL}/api/deposits/${address}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ totalDeposited: correctTotal, repair: true, reason }),
+    });
+    console.log(`[DepositTracker] Repair synced to backend`);
+  } catch (error) {
+    console.warn('[DepositTracker] Backend repair sync failed:', error);
     debugLog(`[DepositTracker] Reset deposits for ${address} (local only)`);
   }
 }
@@ -706,6 +1028,38 @@ export async function debugGetAllDeposits(): Promise<DepositData> {
   return getAllDeposits();
 }
 
+/**
+ * DEBUG: Dump all deposit data to console
+ * Call this from the app to see current state
+ */
+export async function debugDumpDepositData(walletAddress?: string): Promise<void> {
+  console.log('\n========== DEPOSIT TRACKER DEBUG DUMP ==========\n');
+
+  // Get all local data
+  const allDeposits = await getAllDeposits();
+  console.log('LOCAL STORAGE DATA:');
+  console.log(JSON.stringify(allDeposits, null, 2));
+
+  // Get pending sync queue
+  const pendingQueue = await getPendingSyncQueue();
+  console.log('\nPENDING SYNC QUEUE:');
+  console.log(JSON.stringify(pendingQueue, null, 2));
+
+  // If wallet address provided, also fetch from backend
+  if (walletAddress) {
+    const address = walletAddress.toLowerCase();
+    console.log(`\nBACKEND DATA for ${address.slice(0, 10)}...:`);
+    try {
+      const backendRecord = await fetchFromBackend(address);
+      console.log(JSON.stringify(backendRecord, null, 2));
+    } catch (error) {
+      console.log('Error fetching from backend:', error);
+    }
+  }
+
+  console.log('\n=================================================\n');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SIMPLE EARNINGS API
 // Clean, simple functions for Dashboard/Strategies display
@@ -744,6 +1098,15 @@ export async function getUnrealizedEarnings(
  * Get both deposited and earnings in one call
  * This is the recommended function for Dashboard/Strategies
  *
+ * ARCHITECTURE: BLOCKCHAIN IS SOURCE OF TRUTH
+ * 1. Calculate deposited from on-chain data (with 5-minute cache)
+ * 2. Earnings = currentBalance - deposited
+ *
+ * The blockchain calculation uses stateful tracking:
+ * - Processes transactions chronologically
+ * - Tracks deposits to vaults
+ * - RESETS when a full withdrawal is detected (balance → 0)
+ *
  * @param walletAddress - User's wallet address
  * @param currentBalance - Current vault balance (from getVaultPositions)
  */
@@ -753,37 +1116,63 @@ export async function getDepositedAndEarnings(
 ): Promise<{
   deposited: number;
   earnings: number;
+  source: 'blockchain' | 'cache' | 'fallback';
 }> {
-  let deposited = await getDeposited(walletAddress);
+  let deposited: number;
+  let source: 'blockchain' | 'cache' | 'fallback';
 
-  // SANITY CHECK: If deposited > currentBalance, data is corrupted
-  // This can happen due to duplicate deposit recordings or sync issues
-  // Fix: Reset to currentBalance (assume no yield yet, safe fallback)
+  try {
+    // PRIMARY: Calculate from blockchain (with 5-minute cache)
+    const result = await calculateDepositedFromChain(walletAddress);
+    deposited = result.deposited;
+    source = result.fromCache ? 'cache' : 'blockchain';
+
+    console.log('[DEPOSIT READ]', {
+      address: walletAddress.slice(0, 10) + '...',
+      source: source.toUpperCase(),
+      totalDeposited: deposited.toFixed(6),
+    });
+  } catch (error) {
+    // FALLBACK: Use stored AsyncStorage value if blockchain fetch fails
+    console.error('[DepositTracker] Blockchain calculation failed, using fallback:', error);
+    deposited = await getDeposited(walletAddress);
+    source = 'fallback';
+
+    console.log('[DEPOSIT READ]', {
+      address: walletAddress.slice(0, 10) + '...',
+      source: 'FALLBACK',
+      totalDeposited: deposited.toFixed(6),
+    });
+  }
+
+  // SANITY CHECK: If deposited > currentBalance, log a warning
+  // This can happen when:
+  // 1. RPC rate limiting returns partial vault data (e.g., 2 of 3 vaults)
+  // 2. There's a timing issue between deposit recording and balance fetch
+  //
+  // We do NOT modify the deposited value - blockchain is source of truth
   if (currentBalance > 0 && deposited > currentBalance * 1.01) {
-    console.warn('[DepositTracker] Data corruption detected: deposited > balance, auto-fixing...');
-
-    // Fix local storage
-    const address = sanitizeAddress(walletAddress);
-    if (address) {
-      const deposits = await getAllDeposits();
-      deposits[address] = {
-        totalDeposited: currentBalance,
-        lastUpdated: Date.now(),
-      };
-      await saveDeposits(deposits);
-
-      // Also sync fix to backend
-      syncToBackend(address, currentBalance).catch(() => {});
-
-      deposited = currentBalance;
-    }
+    console.warn('[DepositTracker] Warning: deposited > balance', {
+      deposited: deposited.toFixed(2),
+      currentBalance: currentBalance.toFixed(2),
+      diff: (deposited - currentBalance).toFixed(2),
+      note: 'Balance may be partial due to RPC issues - not modifying deposited',
+    });
   }
 
   const earnings = Math.max(0, currentBalance - deposited);
 
+  console.log('[EARNINGS DEBUG]', {
+    walletAddress: walletAddress.slice(0, 10) + '...',
+    deposited: deposited.toFixed(6),
+    currentBalance: currentBalance.toFixed(6),
+    earnings: earnings.toFixed(6),
+    formula: `${currentBalance.toFixed(2)} - ${deposited.toFixed(2)} = ${earnings.toFixed(2)}`,
+  });
+
   debugLog(`[DepositTracker] Deposited: $${deposited.toFixed(2)}, Balance: $${currentBalance.toFixed(2)}, Earnings: $${earnings.toFixed(2)}`);
 
-  return { deposited, earnings };
+  return { deposited, earnings, source };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

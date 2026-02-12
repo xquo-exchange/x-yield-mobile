@@ -118,6 +118,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     return () => Analytics.trackScreenExit('ManageFunds');
   }, []);
 
+
   // ═══════════════════════════════════════════════════════════════════════════════
   // SIMPLE EARNINGS CALCULATION
   // Deposited = from depositTracker (backend + local cache)
