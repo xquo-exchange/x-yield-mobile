@@ -33,8 +33,8 @@ export interface VaultApyData {
   address: string;
   name: string;
   symbol: string;
-  avgApy: number;      // Average APY (7-day average, excluding rewards)
-  avgNetApy: number;   // Net APY (7-day average, after fees, including rewards)
+  avgApy: number;      // Average APY (3-month average, excluding rewards)
+  avgNetApy: number;   // Net APY (3-month average, after fees, including rewards)
 }
 
 export interface ApyResult {
@@ -46,7 +46,7 @@ export interface ApyResult {
 
 /**
  * GraphQL query to fetch APY data for our vaults on Base
- * Uses SEVEN_DAYS lookback for more stable APY values (smooths out volatility)
+ * Uses NINETY_DAYS lookback for more stable APY values (smooths out volatility)
  */
 const APY_QUERY = `
   query GetVaultApys($addresses: [String!]!) {
@@ -60,8 +60,8 @@ const APY_QUERY = `
         address
         name
         symbol
-        avgApy(lookback: SEVEN_DAYS)
-        avgNetApy(lookback: SEVEN_DAYS)
+        avgApy(lookback: NINETY_DAYS)
+        avgNetApy(lookback: NINETY_DAYS)
         performanceFee
         totalAssets
       }
@@ -82,8 +82,8 @@ const ALL_VAULTS_QUERY = `
         address
         name
         symbol
-        avgApy(lookback: SEVEN_DAYS)
-        avgNetApy(lookback: SEVEN_DAYS)
+        avgApy(lookback: NINETY_DAYS)
+        avgNetApy(lookback: NINETY_DAYS)
         performanceFee
         totalAssets
       }
@@ -107,8 +107,8 @@ const USDC_MARKET_QUERY = `
         address
         name
         symbol
-        avgApy(lookback: SEVEN_DAYS)
-        avgNetApy(lookback: SEVEN_DAYS)
+        avgApy(lookback: NINETY_DAYS)
+        avgNetApy(lookback: NINETY_DAYS)
         totalAssets
       }
     }
