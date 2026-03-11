@@ -34,6 +34,7 @@ import {
   getDepositedAndEarnings,
 } from '../services/depositTracker';
 import { clearTransactionCache } from '../services/transactionHistory';
+import { verifyCostBasis } from '../services/costBasisVerification';
 import { recordDepositMilestone } from '../services/milestoneTracker';
 import { checkAndAwardBadges } from '../services/badges';
 import CelebrationModal from '../components/CelebrationModal';
@@ -210,6 +211,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       refetchBalances();
       refetchPositions();
 
+      // Verify cost basis after deposit (fire-and-forget)
+      verifyCostBasis(displayAddress).catch(() => {});
+
       Analytics.trackDepositSuccess(depositAmount, STRATEGY.name, txHash, duration);
 
       if (milestoneResult.isFirstDeposit) {
@@ -317,6 +321,9 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
               refetchBalances();
               refetchPositions();
+
+              // Verify cost basis after withdrawal (fire-and-forget)
+              verifyCostBasis(displayAddress).catch(() => {});
 
               Analytics.trackWithdrawCompleted(
                 withdrawAmount,

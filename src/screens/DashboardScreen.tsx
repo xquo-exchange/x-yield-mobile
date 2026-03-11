@@ -26,6 +26,7 @@ import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
 import { getDepositedAndEarnings } from '../services/depositTracker';
+import { verifyCostBasis } from '../services/costBasisVerification';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
 import { useDeepLink } from '../contexts/DeepLinkContext';
@@ -243,6 +244,11 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
         } catch (error) {
           console.error('[Dashboard] Error loading deposited/earnings:', error);
         }
+
+        // Run cost basis verification (fire-and-forget, non-blocking)
+        verifyCostBasis(displayAddress).catch((err) => {
+          console.warn('[Dashboard] Cost basis verification failed (non-blocking):', err);
+        });
       }
     };
     loadDepositedAndEarnings();

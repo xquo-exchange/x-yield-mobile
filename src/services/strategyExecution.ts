@@ -14,7 +14,7 @@ import {
 } from '../constants/contracts';
 import { type VaultPosition } from './blockchain';
 import { sendTransactionNotification } from './notifications';
-import { recordCostBasisDeposit, recordCostBasisWithdrawal } from './costBasis';
+import { recordCostBasisDeposit, recordCostBasisWithdrawal, rollbackCostBasisDeposit } from './costBasis';
 import { type SmartWalletClient } from '../types/wallet';
 import { getErrorMessage } from '../utils/errorHelpers';
 import { rpcCall, hexToBigInt, delay } from './rpc';
@@ -929,6 +929,11 @@ export async function executeStrategyBatch(
     }
   }
 
-  // All retries failed - throw user-friendly error
+  // All retries failed — rollback the write-ahead cost basis record
+  rollbackCostBasisDeposit(walletAddress, depositAmount).catch((rollbackErr) => {
+    console.warn('[Deposit] Cost basis rollback failed (non-blocking):', rollbackErr);
+  });
+
+  // Throw user-friendly error
   throw new Error(parseErrorMessage(lastError));
 }

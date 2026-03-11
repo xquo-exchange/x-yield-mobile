@@ -145,6 +145,37 @@ export async function recordCostBasisDeposit(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DELETE cost basis deposit (rollback write-ahead on failed tx)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Rollback a write-ahead deposit record.
+ * Called when an on-chain transaction FAILS after the cost basis was pre-recorded.
+ * Removes the most recent deposit matching the given amount.
+ */
+export async function rollbackCostBasisDeposit(
+  address: string,
+  amount: number
+): Promise<void> {
+  const addr = sanitizeAddress(address);
+  const url = `${API_BASE_URL}/api/deposits/${addr}/cost-basis/rollback`;
+
+  debugLog('[CostBasis] DELETE rollback', { address: addr, amount });
+
+  const response = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Cost basis rollback failed: ${response.status} ${response.statusText}`);
+  }
+
+  debugLog('[CostBasis] Rollback successful');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST withdrawal record (record AFTER successful on-chain tx)
 // ─────────────────────────────────────────────────────────────────────────────
 

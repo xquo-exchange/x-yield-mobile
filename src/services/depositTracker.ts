@@ -1132,22 +1132,54 @@ export async function getDepositedAndEarnings(
     // If backend has no cost basis (totalCostBasis === 0, no deposits) but user
     // has an on-chain position, this is a pre-existing user who deposited before
     // the cost basis system. Calculate from chain and seed the backend.
+    //
+    // RACE CONDITION GUARD: Use AsyncStorage lock to prevent concurrent calls
+    // from double-seeding the backend. Lock expires after 60 seconds.
     const isEmptyBackend = deposited === 0 && (!costBasis.deposits || costBasis.deposits.length === 0);
     if (isEmptyBackend && currentBalance > 0) {
-      try {
-        const chainResult = await calculateDepositedFromChain(walletAddress);
-        if (chainResult.deposited > 0) {
-          deposited = chainResult.deposited;
-          source = 'blockchain';
-          console.log(`[CostBasis] Auto-initialized for legacy wallet: $${deposited.toFixed(2)}`);
+      const lockKey = `costbasis_init_${walletAddress.toLowerCase().trim()}`;
+      let hasLock = false;
 
-          // Seed the backend (fire-and-forget — next call will read from backend)
-          recordCostBasisDeposit(walletAddress, deposited).catch((err) => {
-            console.warn('[CostBasis] Auto-init backend write failed (non-blocking):', err);
-          });
+      try {
+        // Check for existing lock
+        const lockValue = await AsyncStorage.getItem(lockKey);
+        if (lockValue) {
+          const lockTime = parseInt(lockValue, 10);
+          const elapsed = Date.now() - lockTime;
+          if (elapsed < 60_000) {
+            // Lock is still valid — another call is handling init
+            debugLog('[CostBasis] Auto-init skipped: lock held by another call');
+          } else {
+            // Lock expired — safe to proceed
+            hasLock = true;
+          }
+        } else {
+          hasLock = true;
+        }
+
+        if (hasLock) {
+          // Acquire lock
+          await AsyncStorage.setItem(lockKey, Date.now().toString());
+
+          const chainResult = await calculateDepositedFromChain(walletAddress);
+          if (chainResult.deposited > 0) {
+            deposited = chainResult.deposited;
+            source = 'blockchain';
+            console.log(`[CostBasis] Auto-initialized for legacy wallet: $${deposited.toFixed(2)}`);
+
+            // Seed the backend (fire-and-forget — next call will read from backend)
+            recordCostBasisDeposit(walletAddress, deposited).catch((err) => {
+              console.warn('[CostBasis] Auto-init backend write failed (non-blocking):', err);
+            });
+          }
+
+          // Release lock after successful init
+          await AsyncStorage.removeItem(lockKey);
         }
       } catch (chainError) {
         console.warn('[CostBasis] Auto-init chain calculation failed:', chainError);
+        // Release lock on error so future calls can retry
+        AsyncStorage.removeItem(lockKey).catch(() => {});
         // deposited stays 0, will fall through to sanity check / earnings calc
       }
     }
