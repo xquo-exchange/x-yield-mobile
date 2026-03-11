@@ -26,7 +26,7 @@ import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useNotificationContext } from '../contexts/NotificationContext';
-import { trackLogout } from '../services/analytics';
+import { trackLogout, track } from '../services/analytics';
 import { clearTransactionCache } from '../services/transactionHistory';
 import { resetBadges } from '../services/badges';
 import { resetMilestones } from '../services/milestoneTracker';
@@ -113,6 +113,25 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   // Handle feedback
   const handleFeedback = useCallback(async () => {
     await WebBrowser.openBrowserAsync('https://tally.so/r/5B90vP');
+  }, []);
+
+  // Handle export private key
+  const handleExportPrivateKey = useCallback(() => {
+    Alert.alert(
+      'Export Private Key',
+      'This will show your private key. Never share it with anyone. Your private key gives full control over your wallet and funds.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: async () => {
+            track('export_private_key_initiated');
+            await WebBrowser.openBrowserAsync('https://x-yield-api.vercel.app/api/export-wallet');
+          },
+        },
+      ]
+    );
   }, []);
 
   // Perform the actual logout
@@ -440,6 +459,26 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
                 <View style={styles.settingInfo}>
                   <Text style={styles.settingTitle}>Leave Feedback</Text>
                   <Text style={styles.settingDescription}>Help us improve the app</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
+            </TouchableOpacity>
+
+            <View style={styles.divider} />
+
+            {/* Export Private Key */}
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={handleExportPrivateKey}
+              activeOpacity={0.7}
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.settingIcon, { backgroundColor: COLORS.grey + '20' }]}>
+                  <Ionicons name="key-outline" size={20} color={COLORS.grey} />
+                </View>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingTitle}>Export Private Key</Text>
+                  <Text style={styles.settingDescription}>For advanced users only</Text>
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color={COLORS.grey} />
