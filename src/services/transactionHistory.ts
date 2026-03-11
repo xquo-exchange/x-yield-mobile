@@ -60,6 +60,13 @@ const TRANSFER_EVENT_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a116
 // Base RPC max block range per eth_getLogs query
 const RPC_MAX_BLOCK_RANGE = 10000;
 
+// Dedicated RPC endpoint for eth_getLogs fallback — separate from mainnet.base.org
+// to avoid competing with position-fetching calls and hitting rate limits
+const LOGS_RPC_URLS = [
+  'https://base.publicnode.com',
+  'https://base-mainnet.public.blastapi.io',
+];
+
 // Cache configuration
 const CACHE_KEY_PREFIX = 'tx_history_';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -303,6 +310,40 @@ function addressToTopic(address: string): string {
   return '0x' + address.toLowerCase().replace('0x', '').padStart(64, '0');
 }
 
+/**
+ * RPC call using the dedicated logs endpoint (publicnode.com / blastapi.io).
+ * Avoids rate-limiting on mainnet.base.org which is used by balance/position fetching.
+ */
+async function logsRpcCall(method: string, params: unknown[]): Promise<unknown> {
+  let lastError: unknown;
+
+  for (const rpcUrl of LOGS_RPC_URLS) {
+    try {
+      const response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const json = await response.json();
+      if (json.error) {
+        throw new Error(json.error.message || JSON.stringify(json.error));
+      }
+
+      return json.result;
+    } catch (error) {
+      lastError = error;
+      debugLog(`[TransactionHistory] logsRpcCall failed on ${rpcUrl}:`, error);
+    }
+  }
+
+  throw lastError;
+}
+
 // RPC eth_getLogs log entry
 interface RpcLogEntry {
   address: string;
@@ -329,13 +370,13 @@ async function fetchTransferLogsChunk(
   // We need two queries: one for outgoing (topic1=wallet), one for incoming (topic2=wallet)
   // eth_getLogs doesn't support OR across different topic positions in a single call
   const [outgoing, incoming] = await Promise.all([
-    rpcCall('eth_getLogs', [{
+    logsRpcCall('eth_getLogs', [{
       fromBlock: '0x' + fromBlock.toString(16),
       toBlock: '0x' + toBlock.toString(16),
       address: tokenAddress,
       topics: [TRANSFER_EVENT_TOPIC, walletTopic, null],
     }]),
-    rpcCall('eth_getLogs', [{
+    logsRpcCall('eth_getLogs', [{
       fromBlock: '0x' + fromBlock.toString(16),
       toBlock: '0x' + toBlock.toString(16),
       address: tokenAddress,
@@ -556,7 +597,7 @@ async function enrichTransfersWithTimestamps(transfers: BlockscoutTokenTransfer[
     const results = await Promise.allSettled(
       batch.map(async (bn) => {
         const hexBlock = '0x' + parseInt(bn, 10).toString(16);
-        const block = await rpcCall('eth_getBlockByNumber', [hexBlock, false]) as { timestamp?: string } | null;
+        const block = await logsRpcCall('eth_getBlockByNumber', [hexBlock, false]) as { timestamp?: string } | null;
         if (block?.timestamp) {
           blockTimestamps.set(bn, Number(hexToBigInt(block.timestamp)).toString());
         }
