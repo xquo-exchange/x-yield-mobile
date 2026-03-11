@@ -114,8 +114,8 @@ export async function getCostBasis(
 
 /**
  * Record a deposit to the backend cost basis store.
- * Call this BEFORE sending the on-chain transaction.
- * If the on-chain tx fails, call rollbackDeposit() to undo.
+ * Called BEFORE on-chain execution (write-ahead pattern).
+ * If the backend write fails, the old depositTracker records as fallback.
  */
 export async function recordCostBasisDeposit(
   address: string,

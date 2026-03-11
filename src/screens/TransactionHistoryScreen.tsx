@@ -52,7 +52,7 @@ import {
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { generateTaxReport, isPdfExportAvailable } from '../services/pdfReport';
 import { generateCsvReport, isCsvExportAvailable } from '../services/csvReport';
-import { getWithdrawalRecords, sumRealizedYield, sumTotalFeesPaid } from '../services/costBasis';
+import { getWithdrawalRecords, sumRealizedYield } from '../services/costBasis';
 import * as Analytics from '../services/analytics';
 import { COLORS } from '../constants/colors';
 
