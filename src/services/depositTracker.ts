@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isValidEthereumAddress, isValidAmount, sanitizeAddress } from '../utils/validation';
 import { TOKENS } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
-import { getCostBasis } from './costBasis';
+import { getCostBasis, recordCostBasisDeposit } from './costBasis';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -1128,9 +1128,33 @@ export async function getDepositedAndEarnings(
     deposited = costBasis.totalCostBasis;
     source = 'backend';
 
+    // AUTO-INIT: Legacy user detection
+    // If backend has no cost basis (totalCostBasis === 0, no deposits) but user
+    // has an on-chain position, this is a pre-existing user who deposited before
+    // the cost basis system. Calculate from chain and seed the backend.
+    const isEmptyBackend = deposited === 0 && (!costBasis.deposits || costBasis.deposits.length === 0);
+    if (isEmptyBackend && currentBalance > 0) {
+      try {
+        const chainResult = await calculateDepositedFromChain(walletAddress);
+        if (chainResult.deposited > 0) {
+          deposited = chainResult.deposited;
+          source = 'blockchain';
+          console.log(`[CostBasis] Auto-initialized for legacy wallet: $${deposited.toFixed(2)}`);
+
+          // Seed the backend (fire-and-forget — next call will read from backend)
+          recordCostBasisDeposit(walletAddress, deposited).catch((err) => {
+            console.warn('[CostBasis] Auto-init backend write failed (non-blocking):', err);
+          });
+        }
+      } catch (chainError) {
+        console.warn('[CostBasis] Auto-init chain calculation failed:', chainError);
+        // deposited stays 0, will fall through to sanity check / earnings calc
+      }
+    }
+
     console.log('[DEPOSIT READ]', {
       address: walletAddress.slice(0, 10) + '...',
-      source: 'BACKEND',
+      source: source.toUpperCase(),
       totalDeposited: deposited.toFixed(6),
     });
   } catch (backendError) {
