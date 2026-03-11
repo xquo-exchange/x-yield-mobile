@@ -23,7 +23,6 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
 import { TOKENS, UNFLAT_TREASURY_ADDRESS, MORPHO } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
 import { type BlockscoutTokenTransfer, type BlockscoutApiResponse } from '../types/api';
@@ -51,12 +50,15 @@ const debugLog = (message: string, ...args: unknown[]) => {
 // Blockscout API for Base chain (free, no API key required) — PRIMARY
 const BLOCKSCOUT_API_URL = 'https://base.blockscout.com/api';
 
-// BaseScan API — FALLBACK when Blockscout indexer is behind
-const BASESCAN_API_URL = 'https://api.basescan.org/api';
-const BASESCAN_API_KEY = Constants.expoConfig?.extra?.basescanApiKey ?? '';
-
-// If Blockscout's latest indexed block is more than this many blocks behind chain tip, use BaseScan
+// If Blockscout's latest indexed block is more than this many blocks behind chain tip,
+// fall back to direct RPC eth_getLogs for the missing range
 const BLOCKSCOUT_STALE_THRESHOLD_BLOCKS = 1000;
+
+// ERC-20 Transfer event topic: Transfer(address,address,uint256)
+const TRANSFER_EVENT_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+// Base RPC max block range per eth_getLogs query
+const RPC_MAX_BLOCK_RANGE = 10000;
 
 // Cache configuration
 const CACHE_KEY_PREFIX = 'tx_history_';
@@ -250,28 +252,22 @@ async function getChainTipBlock(): Promise<number> {
 }
 
 /**
- * Fetch ERC20 token transfers from a single Etherscan-compatible API
+ * Fetch ERC20 token transfers from Blockscout API (Etherscan-compatible)
  */
-async function fetchFromExplorerApi(
-  apiUrl: string,
+async function fetchFromBlockscout(
   walletAddress: string,
   tokenAddress: string,
   startBlock: number,
   endBlock: number,
-  sort: string,
-  apiKey?: string,
 ): Promise<BlockscoutTokenTransfer[]> {
-  const url = new URL(apiUrl);
+  const url = new URL(BLOCKSCOUT_API_URL);
   url.searchParams.set('module', 'account');
   url.searchParams.set('action', 'tokentx');
   url.searchParams.set('address', walletAddress);
   url.searchParams.set('contractaddress', tokenAddress);
   url.searchParams.set('startblock', startBlock.toString());
   url.searchParams.set('endblock', endBlock.toString());
-  url.searchParams.set('sort', sort);
-  if (apiKey) {
-    url.searchParams.set('apikey', apiKey);
-  }
+  url.searchParams.set('sort', 'desc');
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000);
@@ -283,7 +279,7 @@ async function fetchFromExplorerApi(
   clearTimeout(timeoutId);
 
   if (!response.ok) {
-    console.error(`[TransactionHistory] Explorer API response not OK: ${response.status}`);
+    console.error(`[TransactionHistory] Blockscout response not OK: ${response.status}`);
     return [];
   }
 
@@ -296,8 +292,145 @@ async function fetchFromExplorerApi(
     return [];
   }
 
-  console.error('[TransactionHistory] Explorer API error:', data.status, data.message);
+  console.error('[TransactionHistory] Blockscout error:', data.status, data.message);
   return [];
+}
+
+/**
+ * Pad an address to 32-byte hex topic (left-padded with zeros)
+ */
+function addressToTopic(address: string): string {
+  return '0x' + address.toLowerCase().replace('0x', '').padStart(64, '0');
+}
+
+// RPC eth_getLogs log entry
+interface RpcLogEntry {
+  address: string;
+  topics: string[];
+  data: string;
+  blockNumber: string;
+  transactionHash: string;
+  logIndex: string;
+  blockHash: string;
+  transactionIndex: string;
+  removed: boolean;
+}
+
+/**
+ * Fetch ERC-20 Transfer logs via eth_getLogs for a single block range chunk.
+ * Returns logs where the wallet is sender (topic1) OR receiver (topic2).
+ */
+async function fetchTransferLogsChunk(
+  tokenAddress: string,
+  walletTopic: string,
+  fromBlock: number,
+  toBlock: number,
+): Promise<RpcLogEntry[]> {
+  // We need two queries: one for outgoing (topic1=wallet), one for incoming (topic2=wallet)
+  // eth_getLogs doesn't support OR across different topic positions in a single call
+  const [outgoing, incoming] = await Promise.all([
+    rpcCall('eth_getLogs', [{
+      fromBlock: '0x' + fromBlock.toString(16),
+      toBlock: '0x' + toBlock.toString(16),
+      address: tokenAddress,
+      topics: [TRANSFER_EVENT_TOPIC, walletTopic, null],
+    }]),
+    rpcCall('eth_getLogs', [{
+      fromBlock: '0x' + fromBlock.toString(16),
+      toBlock: '0x' + toBlock.toString(16),
+      address: tokenAddress,
+      topics: [TRANSFER_EVENT_TOPIC, null, walletTopic],
+    }]),
+  ]);
+
+  const outLogs = (outgoing as RpcLogEntry[]) || [];
+  const inLogs = (incoming as RpcLogEntry[]) || [];
+
+  // Deduplicate (a self-transfer would appear in both)
+  const seen = new Set<string>();
+  const all: RpcLogEntry[] = [];
+  for (const log of [...outLogs, ...inLogs]) {
+    const key = `${log.transactionHash}-${log.logIndex}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      all.push(log);
+    }
+  }
+
+  return all;
+}
+
+/**
+ * Fetch ERC-20 Transfer logs via eth_getLogs for an arbitrary block range.
+ * Automatically batches into RPC_MAX_BLOCK_RANGE chunks.
+ */
+async function fetchTransferLogsViaRpc(
+  tokenAddress: string,
+  walletAddress: string,
+  fromBlock: number,
+  toBlock: number,
+): Promise<RpcLogEntry[]> {
+  const walletTopic = addressToTopic(walletAddress);
+  const totalRange = toBlock - fromBlock + 1;
+
+  if (totalRange <= RPC_MAX_BLOCK_RANGE) {
+    return fetchTransferLogsChunk(tokenAddress, walletTopic, fromBlock, toBlock);
+  }
+
+  // Batch into chunks
+  const chunks: Array<{ from: number; to: number }> = [];
+  let cursor = fromBlock;
+  while (cursor <= toBlock) {
+    const chunkEnd = Math.min(cursor + RPC_MAX_BLOCK_RANGE - 1, toBlock);
+    chunks.push({ from: cursor, to: chunkEnd });
+    cursor = chunkEnd + 1;
+  }
+
+  debugLog(`[TransactionHistory] RPC fallback: ${totalRange} blocks in ${chunks.length} chunks`);
+
+  const allLogs: RpcLogEntry[] = [];
+  for (const chunk of chunks) {
+    try {
+      const logs = await fetchTransferLogsChunk(tokenAddress, walletTopic, chunk.from, chunk.to);
+      allLogs.push(...logs);
+    } catch (error) {
+      console.error(`[TransactionHistory] RPC getLogs failed for blocks ${chunk.from}-${chunk.to}:`, error);
+      // Continue with remaining chunks
+    }
+  }
+
+  return allLogs;
+}
+
+/**
+ * Convert RPC log entries to BlockscoutTokenTransfer format
+ * so the rest of the pipeline works unchanged.
+ */
+function rpcLogsToTransfers(logs: RpcLogEntry[]): BlockscoutTokenTransfer[] {
+  return logs.map(log => {
+    // topics[1] = from (32-byte padded), topics[2] = to (32-byte padded)
+    const from = '0x' + (log.topics[1] ?? '').slice(26);
+    const to = '0x' + (log.topics[2] ?? '').slice(26);
+    // data = uint256 value (hex encoded)
+    const value = hexToBigInt(log.data).toString();
+    const blockNumber = Number(hexToBigInt(log.blockNumber)).toString();
+    // Base has ~2s block time; approximate timestamp from block number
+    // We don't have timestamp from logs, so we use 0 and let the parser handle it
+    const timeStamp = '0';
+
+    return {
+      hash: log.transactionHash,
+      from,
+      to,
+      value,
+      timeStamp,
+      blockNumber,
+      tokenDecimal: '6',
+      tokenName: 'USD Coin',
+      tokenSymbol: 'USDC',
+      contractAddress: log.address,
+    };
+  });
 }
 
 /**
@@ -318,7 +451,7 @@ function maxBlockInTransfers(transfers: BlockscoutTokenTransfer[]): number {
  * Strategy:
  * 1. Fetch from Blockscout (free, primary)
  * 2. Check if Blockscout's latest indexed block is behind chain tip by >1000 blocks
- * 3. If stale, fetch missing range from BaseScan and merge
+ * 3. If stale, fetch missing range via direct RPC eth_getLogs and merge
  */
 async function fetchTokenTransfers(
   walletAddress: string,
@@ -334,8 +467,8 @@ async function fetchTokenTransfers(
   try {
     // PRIMARY: Blockscout
     debugLog('[TransactionHistory] Fetching from Blockscout for:', walletAddress);
-    const blockscoutTransfers = await fetchFromExplorerApi(
-      BLOCKSCOUT_API_URL, walletAddress, tokenAddress, startBlock, endBlock, 'desc',
+    const blockscoutTransfers = await fetchFromBlockscout(
+      walletAddress, tokenAddress, startBlock, endBlock,
     );
     debugLog('[TransactionHistory] Blockscout returned', blockscoutTransfers.length, 'transfers');
 
@@ -346,44 +479,47 @@ async function fetchTokenTransfers(
     if (chainTip > 0 && blockscoutMaxBlock > 0 &&
         (chainTip - blockscoutMaxBlock) > BLOCKSCOUT_STALE_THRESHOLD_BLOCKS) {
 
+      const gap = chainTip - blockscoutMaxBlock;
       debugLog(
-        `[TransactionHistory] Blockscout is behind: latest indexed block ${blockscoutMaxBlock}, chain tip ${chainTip}, gap ${chainTip - blockscoutMaxBlock}`,
+        `[TransactionHistory] Blockscout is behind: latest indexed block ${blockscoutMaxBlock}, chain tip ${chainTip}, gap ${gap}`,
       );
 
-      if (!BASESCAN_API_KEY) {
-        console.warn('[TransactionHistory] BaseScan API key not configured, cannot backfill');
-        return blockscoutTransfers;
-      }
-
-      // FALLBACK: Fetch missing blocks from BaseScan
+      // FALLBACK: Fetch missing blocks via RPC eth_getLogs
       const gapStart = blockscoutMaxBlock + 1;
-      debugLog(`[TransactionHistory] Fetching gap blocks ${gapStart}–${endBlock} from BaseScan`);
+      debugLog(`[TransactionHistory] Fetching gap blocks ${gapStart}–${chainTip} via RPC eth_getLogs`);
 
-      const basescanTransfers = await fetchFromExplorerApi(
-        BASESCAN_API_URL, walletAddress, tokenAddress, gapStart, endBlock, 'desc', BASESCAN_API_KEY,
-      );
-      debugLog('[TransactionHistory] BaseScan returned', basescanTransfers.length, 'transfers for gap');
+      try {
+        const rpcLogs = await fetchTransferLogsViaRpc(tokenAddress, walletAddress, gapStart, chainTip);
+        const rpcTransfers = rpcLogsToTransfers(rpcLogs);
+        debugLog(`[TransactionHistory] RPC returned ${rpcTransfers.length} transfers for gap`);
 
-      if (basescanTransfers.length > 0) {
-        // Merge: BaseScan gap transfers + Blockscout transfers, deduplicate by hash+from+to
-        const seen = new Set<string>();
-        const merged: BlockscoutTokenTransfer[] = [];
+        if (rpcTransfers.length > 0) {
+          // Fetch block timestamps for the RPC transfers so they get correct dates
+          await enrichTransfersWithTimestamps(rpcTransfers);
 
-        for (const t of [...basescanTransfers, ...blockscoutTransfers]) {
-          const key = `${t.hash}-${t.from}-${t.to}-${t.value}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            merged.push(t);
+          // Merge: RPC gap transfers + Blockscout transfers, deduplicate
+          const seen = new Set<string>();
+          const merged: BlockscoutTokenTransfer[] = [];
+
+          for (const t of [...rpcTransfers, ...blockscoutTransfers]) {
+            const key = `${t.hash}-${t.from.toLowerCase()}-${t.to.toLowerCase()}-${t.value}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              merged.push(t);
+            }
           }
+
+          // Sort desc by block number (newest first)
+          merged.sort((a, b) =>
+            parseInt(b.blockNumber ?? '0', 10) - parseInt(a.blockNumber ?? '0', 10)
+          );
+
+          debugLog(`[TransactionHistory] Merged: ${merged.length} transfers (${rpcTransfers.length} from RPC gap)`);
+          return merged;
         }
-
-        // Sort desc by block number (newest first) to match original behavior
-        merged.sort((a, b) =>
-          parseInt(b.blockNumber ?? '0', 10) - parseInt(a.blockNumber ?? '0', 10)
-        );
-
-        debugLog(`[TransactionHistory] Merged: ${merged.length} transfers (${basescanTransfers.length} from BaseScan gap)`);
-        return merged;
+      } catch (rpcError) {
+        console.error('[TransactionHistory] RPC fallback failed (non-fatal):', rpcError);
+        // Return Blockscout data alone — better than nothing
       }
     } else if (chainTip > 0 && blockscoutMaxBlock > 0) {
       debugLog(`[TransactionHistory] Blockscout is fresh: gap=${chainTip - blockscoutMaxBlock} blocks`);
@@ -397,6 +533,48 @@ async function fetchTokenTransfers(
       console.error('[TransactionHistory] Error fetching transfers:', error);
     }
     return [];
+  }
+}
+
+/**
+ * Enrich transfers with block timestamps via eth_getBlockByNumber.
+ * Fetches unique blocks and sets the timeStamp field on each transfer.
+ */
+async function enrichTransfersWithTimestamps(transfers: BlockscoutTokenTransfer[]): Promise<void> {
+  // Collect unique block numbers
+  const blockNumbers = [...new Set(transfers.map(t => t.blockNumber).filter(Boolean))] as string[];
+
+  if (blockNumbers.length === 0) return;
+
+  // Fetch timestamps for each block (batch to avoid too many calls)
+  const blockTimestamps = new Map<string, string>();
+
+  // Limit to 20 concurrent block fetches
+  const batchSize = 20;
+  for (let i = 0; i < blockNumbers.length; i += batchSize) {
+    const batch = blockNumbers.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map(async (bn) => {
+        const hexBlock = '0x' + parseInt(bn, 10).toString(16);
+        const block = await rpcCall('eth_getBlockByNumber', [hexBlock, false]) as { timestamp?: string } | null;
+        if (block?.timestamp) {
+          blockTimestamps.set(bn, Number(hexToBigInt(block.timestamp)).toString());
+        }
+      })
+    );
+    // Log failures but continue
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        debugLog('[TransactionHistory] Block timestamp fetch failed:', r.reason);
+      }
+    }
+  }
+
+  // Apply timestamps to transfers
+  for (const t of transfers) {
+    if (t.blockNumber && blockTimestamps.has(t.blockNumber)) {
+      t.timeStamp = blockTimestamps.get(t.blockNumber)!;
+    }
   }
 }
 
