@@ -1,10 +1,3 @@
-/**
- * ManageFundsScreen (formerly StrategiesScreen)
- *
- * Calm, fintech-first approach to managing deposits and withdrawals.
- * Hides crypto complexity, emphasizes trust and simplicity.
- */
-
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
@@ -14,14 +7,11 @@ import {
   ScrollView,
   RefreshControl,
   TextInput,
-  ActivityIndicator,
   Alert,
   Linking,
-  Platform,
 } from 'react-native';
 import * as Analytics from '../services/analytics';
 import { trackTrustSignalViewed } from '../services/analytics';
-import SensitiveView from '../components/SensitiveView';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useSmartWallets } from '@privy-io/expo/smart-wallets';
@@ -49,7 +39,14 @@ import { checkAndAwardBadges } from '../services/badges';
 import CelebrationModal from '../components/CelebrationModal';
 import { getErrorMessage } from '../utils/errorHelpers';
 import { COLORS } from '../constants/colors';
-import { AnimatedEarned } from '../components/AnimatedBalance';
+import {
+  StrategyCard,
+  AllocationBreakdown,
+  HowItWorksSection,
+  DepositForm,
+  WithdrawConfirmation,
+  FeeAndTrustSection,
+} from '../components/strategies';
 
 type StrategiesScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Strategies'>;
@@ -80,8 +77,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const [activeTab, setActiveTab] = useState<TabType>('add');
   const [isInputFocused, setIsInputFocused] = useState(false);
   const amountInputRef = useRef<TextInput>(null);
-
-  // Celebration modal state
   const [showCelebration, setShowCelebration] = useState(false);
   const [celebrationData, setCelebrationData] = useState<{
     amount: number;
@@ -89,7 +84,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     milestoneReached: number | null;
   } | null>(null);
 
-  // Memoize expensive computations
   const hasPositions = useMemo(
     () => positions.some(p => p.shares > BigInt(0)),
     [positions]
@@ -103,35 +97,21 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     [usdc]
   );
 
-  // User has savings earning yield but no cash available to add
-  // Use threshold of 0.01 to handle tiny dust amounts displayed as $0.00
   const hasNoCashToAdd = availableBalance < 0.01;
   const hasSavingsButNoCash = hasPositions && hasNoCashToAdd;
   const isTrulyEmpty = !hasPositions && hasNoCashToAdd;
 
-  // Analytics: Track screen view on mount
+  const displayDeposited = totalDeposited;
+  const totalYield = totalEarnings;
+  const youReceive = savingsAmount;
+
   useEffect(() => {
     Analytics.trackScreenView('ManageFunds');
-    // Track trust signals viewed on screen mount
     trackTrustSignalViewed('audited_contracts', 'ManageFunds');
     trackTrustSignalViewed('withdraw_anytime', 'ManageFunds');
     return () => Analytics.trackScreenExit('ManageFunds');
   }, []);
 
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // SIMPLE EARNINGS CALCULATION
-  // Deposited = from depositTracker (backend + local cache)
-  // Earned = Balance - Deposited (unrealized yield in vault)
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // Display values (from state, updated by useEffect below)
-  const displayDeposited = totalDeposited;
-  const displayEarned = totalEarnings;
-  const totalYield = totalEarnings;
-  const youReceive = savingsAmount; // Full balance shown, fee calculated at confirmation
-
-  // Load deposited and earnings from depositTracker
   React.useEffect(() => {
     const loadDepositedAndEarnings = async () => {
       if (displayAddress && savingsAmount >= 0) {
@@ -156,7 +136,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     Analytics.trackBalanceFetchDuration(timer.stop());
   }, [refetchBalances, refetchPositions, refetchApy]);
 
-  // Memoized navigation handlers
   const handleGoBack = useCallback(() => {
     Analytics.trackButtonTap('Back', 'ManageFunds');
     navigation.goBack();
@@ -217,17 +196,10 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       const duration = timer.stop();
 
       await recordDeposit(displayAddress, depositAmount, txHash);
-
-      // Clear cache so next fetch gets fresh blockchain data
       await clearTransactionCache(displayAddress);
-
-      // Optimistic update: add deposit to current total (blockchain will catch up)
       setTotalDeposited(prev => prev + depositAmount);
 
-      // Record milestone and check for achievements
       const milestoneResult = await recordDepositMilestone(depositAmount);
-
-      // Award badges for this deposit (walletAddress required for blockchain deposit count)
       await checkAndAwardBadges({
         savingsBalance: savingsAmount + depositAmount,
         walletAddress: displayAddress,
@@ -240,7 +212,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
       Analytics.trackDepositSuccess(depositAmount, STRATEGY.name, txHash, duration);
 
-      // Track milestone events
       if (milestoneResult.isFirstDeposit) {
         Analytics.track('First Deposit Completed', { amount: depositAmount });
       }
@@ -251,7 +222,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         });
       }
 
-      // Show celebration modal
       setCelebrationData({
         amount: depositAmount,
         isFirstDeposit: milestoneResult.isFirstDeposit,
@@ -283,7 +253,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
       return;
     }
 
-    // Get deposited amount for fee calculation
     const { deposited: depositedAmount } = await getDepositedAndEarnings(displayAddress, savingsAmount);
 
     const batch = buildWithdrawBatch(
@@ -343,11 +312,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
 
               const currentValue = parseFloat(batch.currentValue);
               await recordWithdrawal(displayAddress, currentValue, currentValue);
-
-              // Clear cache so next fetch gets fresh blockchain data
               await clearTransactionCache(displayAddress);
-
-              // Reset deposited to 0 (full withdrawal)
               setTotalDeposited(0);
 
               refetchBalances();
@@ -397,9 +362,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     );
   };
 
-  // Legacy variable for compatibility
-  const totalEarned = displayEarned;
-
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
@@ -413,7 +375,6 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
         }
       >
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity testID="strategies-back-button" onPress={handleGoBack} style={styles.backButton}>
             <Ionicons name="chevron-back" size={24} color={COLORS.black} />
@@ -422,62 +383,17 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           <View style={styles.headerSpacer} />
         </View>
 
-        {/* Account Summary Card */}
-        <View style={styles.summaryCard}>
-          {positionsLoading ? (
-            <View style={styles.loadingState}>
-              <ActivityIndicator size="small" color={COLORS.primary} />
-              <Text style={styles.loadingText}>Loading...</Text>
-            </View>
-          ) : positionsError ? (
-            <View style={styles.errorState}>
-              <Ionicons name="alert-circle-outline" size={24} color={COLORS.grey} />
-              <Text style={styles.errorText}>Unable to load account</Text>
-              <TouchableOpacity onPress={handleRetry} style={styles.retryButton}>
-                <Text style={styles.retryButtonText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              <Text style={styles.summaryLabel}>Yield Account Balance</Text>
-              <SensitiveView>
-                <Text style={styles.summaryValue}>${savingsAmount.toFixed(2)}</Text>
-              </SensitiveView>
+        <StrategyCard
+          positionsLoading={positionsLoading}
+          positionsError={positionsError}
+          savingsAmount={savingsAmount}
+          hasPositions={hasPositions}
+          displayApy={displayApy}
+          displayDeposited={displayDeposited}
+          availableBalance={availableBalance}
+          onRetry={handleRetry}
+        />
 
-              {hasPositions && (
-                <View style={styles.earningRow}>
-                  <View style={styles.earningDot} />
-                  <Text style={styles.earningText}>
-                    Earning {displayApy}% APY
-                  </Text>
-                </View>
-              )}
-
-              {displayDeposited > 0 && (
-                <SensitiveView>
-                  <View style={styles.earningsDisplay}>
-                    <Text style={styles.earningsLabel}>Total earned</Text>
-                    <AnimatedEarned
-                      currentBalance={savingsAmount}
-                      depositedAmount={displayDeposited}
-                      apy={parseFloat(displayApy)}
-                    />
-                  </View>
-                </SensitiveView>
-              )}
-            </>
-          )}
-        </View>
-
-        {/* Available Balance */}
-        <View style={styles.availableCard}>
-          <Text style={styles.availableLabel}>Available to add</Text>
-          <SensitiveView>
-            <Text style={styles.availableValue}>${availableBalance.toFixed(2)}</Text>
-          </SensitiveView>
-        </View>
-
-        {/* Tab Selector */}
         <View style={styles.tabContainer}>
           <TouchableOpacity
             testID="strategies-deposit-tab"
@@ -517,335 +433,68 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
           </TouchableOpacity>
         </View>
 
-        {/* Action Area */}
         <View style={styles.actionArea}>
           {activeTab === 'add' ? (
-            // Add Funds Tab
             hasSavingsButNoCash ? (
-              // User has savings earning yield but no cash to add - show their allocation
-              <>
-                <View style={styles.allocationHeader}>
-                  <View style={styles.earningBadgeInline}>
-                    <View style={styles.earningDotInline} />
-                    <Text style={styles.earningTextInline}>Earning {displayApy}% APY</Text>
-                  </View>
-                </View>
-
-                <Text style={styles.allocationDescription}>
-                  Your funds are deposited into regulated DeFi lending protocols where they earn yield from borrowers.
-                  You maintain full ownership at all times.
-                </Text>
-
-                <View style={styles.allocationList}>
-                  <Text style={styles.allocationListLabel}>Current allocation:</Text>
-                  {positions.map((position) => {
-                    const vaultApy = getVaultApy(position.vaultAddress);
-                    const positionValue = parseFloat(position.usdValue);
-                    if (positionValue <= 0) return null;
-                    return (
-                      <View key={position.vaultId} style={styles.allocationRow}>
-                        <Text style={styles.allocationVaultName}>{position.vaultName}</Text>
-                        <View style={styles.allocationRight}>
-                          <SensitiveView>
-                            <Text style={styles.allocationValue}>${positionValue.toFixed(2)}</Text>
-                          </SensitiveView>
-                          {vaultApy && (
-                            <Text style={styles.allocationApy}>{vaultApy}%</Text>
-                          )}
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-
-                <View style={styles.addMoreSection}>
-                  <Text style={styles.addMoreText}>
-                    Add more funds to increase your earnings.
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.addMoreButton}
-                    onPress={() => {
-                      Analytics.trackButtonTap('Add More Funds', 'ManageFunds');
-                      navigation.goBack();
-                    }}
-                  >
-                    <Ionicons name="add-circle-outline" size={18} color={COLORS.pureWhite} />
-                    <Text style={styles.addMoreButtonText}>Add Funds on Dashboard</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : isTrulyEmpty ? (
-              // Truly empty account - show "No funds available" guidance
-              <View style={styles.zeroBalanceGuide}>
-                <View style={styles.zeroBalanceIconContainer}>
-                  <Ionicons name="wallet-outline" size={36} color={COLORS.secondary} />
-                </View>
-                <Text style={styles.zeroBalanceTitle}>No funds available</Text>
-                <Text style={styles.zeroBalanceText}>
-                  First, add USDC to your Cash account. Then come back here to move it to Savings and start earning {displayApy}% APY.
-                </Text>
-
-                <View style={styles.zeroBalanceSteps}>
-                  <View style={styles.zeroBalanceStep}>
-                    <View style={styles.zeroBalanceStepDot} />
-                    <Text style={styles.zeroBalanceStepText}>Buy USDC with card via Coinbase</Text>
-                  </View>
-                  <View style={styles.zeroBalanceStep}>
-                    <View style={styles.zeroBalanceStepDot} />
-                    <Text style={styles.zeroBalanceStepText}>Or transfer USDC from another wallet</Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.zeroBalanceButton}
-                  onPress={() => {
-                    Analytics.trackButtonTap('Go to Dashboard', 'ManageFunds');
-                    navigation.goBack();
-                  }}
-                >
-                  <Ionicons name="arrow-back" size={18} color={COLORS.pureWhite} />
-                  <Text style={styles.zeroBalanceButtonText}>Add Funds on Dashboard</Text>
-                </TouchableOpacity>
-              </View>
+              <AllocationBreakdown
+                positions={positions}
+                displayApy={displayApy}
+                getVaultApy={getVaultApy}
+                onAddMoreFunds={() => {
+                  Analytics.trackButtonTap('Add More Funds', 'ManageFunds');
+                  navigation.goBack();
+                }}
+              />
             ) : (
-              // Normal add funds UI
-              <>
-                <Text style={styles.inputLabel}>Amount to add</Text>
-                <View style={styles.inputRow}>
-                  <View style={styles.inputTouchable}>
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      onPress={() => {
-                        // Focus input when tapping the $ prefix
-                        amountInputRef.current?.focus();
-                      }}
-                    >
-                      <View style={[styles.currencyPrefix, isInputFocused && styles.inputFocused]}>
-                        <Text style={styles.currencyText}>$</Text>
-                      </View>
-                    </TouchableOpacity>
-                    <TextInput
-                      testID="strategies-amount-input"
-                      ref={amountInputRef}
-                      style={[styles.input, isInputFocused && styles.inputFocused]}
-                      value={amount}
-                      onChangeText={handleAmountChange}
-                      placeholder="0.00"
-                      placeholderTextColor={COLORS.grey}
-                      keyboardType="decimal-pad"
-                      autoCorrect={false}
-                      spellCheck={false}
-                      editable={true}
-                      onFocus={() => {
-                        setIsInputFocused(true);
-                        Analytics.trackInputFocus('Amount', 'ManageFunds');
-                      }}
-                      onBlur={() => setIsInputFocused(false)}
-                    />
-                  </View>
-                  <TouchableOpacity style={styles.maxButton} onPress={handleSetMaxAmount}>
-                    <Text style={styles.maxButtonText}>MAX</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Trust Signals */}
-                <View style={styles.depositTrustSignals}>
-                  <View style={styles.depositTrustItem}>
-                    <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.grey} />
-                    <Text style={styles.depositTrustText}>Audited contracts</Text>
-                  </View>
-                  <View style={styles.depositTrustItem}>
-                    <Ionicons name="time-outline" size={14} color={COLORS.grey} />
-                    <Text style={styles.depositTrustText}>Withdraw anytime</Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  testID="strategies-deposit-button"
-                  style={[
-                    styles.actionButton,
-                    (!amount || parseFloat(amount) <= 0 || isDepositing) && styles.actionButtonDisabled,
-                  ]}
-                  onPress={handleDeposit}
-                  disabled={!amount || parseFloat(amount) <= 0 || isDepositing}
-                >
-                  {isDepositing ? (
-                    <ActivityIndicator color={COLORS.pureWhite} />
-                  ) : (
-                    <Text style={styles.actionButtonText}>
-                      {amount && parseFloat(amount) > 0 ? `Add $${parseFloat(amount).toFixed(2)}` : 'Add Funds'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </>
+              <DepositForm
+                amount={amount}
+                isDepositing={isDepositing}
+                isInputFocused={isInputFocused}
+                displayApy={displayApy}
+                isTrulyEmpty={isTrulyEmpty}
+                amountInputRef={amountInputRef}
+                onAmountChange={handleAmountChange}
+                onSetMax={handleSetMaxAmount}
+                onDeposit={handleDeposit}
+                onGoToDashboard={() => {
+                  Analytics.trackButtonTap('Go to Dashboard', 'ManageFunds');
+                  navigation.goBack();
+                }}
+                onInputFocus={() => {
+                  setIsInputFocused(true);
+                  Analytics.trackInputFocus('Amount', 'ManageFunds');
+                }}
+                onInputBlur={() => setIsInputFocused(false)}
+              />
             )
           ) : (
-            // Withdraw Tab - Full withdrawal only
-            <>
-              {!hasPositions ? (
-                <View style={styles.noFundsState}>
-                  <Ionicons name="wallet-outline" size={40} color={COLORS.primary} />
-                  <Text style={styles.noFundsText}>No funds to withdraw</Text>
-                  <Text style={styles.noFundsSubtext}>
-                    Add funds first to start earning yield
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  <Text style={styles.withdrawTitle}>Withdraw all funds</Text>
-
-                  {/* Withdrawal Summary */}
-                  <View style={styles.withdrawPreview}>
-                    <View style={styles.previewRow}>
-                      <Text style={styles.previewLabel}>Account balance</Text>
-                      <Text style={styles.previewValue}>${savingsAmount.toFixed(2)}</Text>
-                    </View>
-                    {totalYield > 0.001 && (
-                      <>
-                        <View style={styles.previewRow}>
-                          <Text style={styles.previewLabel}>Total added</Text>
-                          <Text style={styles.previewValue}>${displayDeposited.toFixed(2)}</Text>
-                        </View>
-                        <View style={styles.previewRow}>
-                          <Text style={styles.previewLabel}>Earnings</Text>
-                          <Text style={[styles.previewValue, { color: COLORS.success }]}>+${totalYield.toFixed(2)}</Text>
-                        </View>
-                      </>
-                    )}
-                    <View style={[styles.previewRow, styles.previewRowTotal]}>
-                      <Text style={styles.previewLabelBold}>You receive</Text>
-                      <Text style={styles.previewValueBold}>${youReceive.toFixed(2)}</Text>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    testID="strategies-withdraw-button"
-                    style={[
-                      styles.actionButton,
-                      isWithdrawing && styles.actionButtonDisabled,
-                    ]}
-                    onPress={handleWithdraw}
-                    disabled={isWithdrawing}
-                  >
-                    {isWithdrawing ? (
-                      <ActivityIndicator color={COLORS.pureWhite} />
-                    ) : (
-                      <Text style={styles.actionButtonText}>Withdraw All</Text>
-                    )}
-                  </TouchableOpacity>
-
-                  <Text style={styles.withdrawNote}>
-                    Funds arrive instantly in your Cash account.
-                  </Text>
-                </>
-              )}
-            </>
+            <WithdrawConfirmation
+              hasPositions={hasPositions}
+              savingsAmount={savingsAmount}
+              displayDeposited={displayDeposited}
+              totalYield={totalYield}
+              youReceive={youReceive}
+              isWithdrawing={isWithdrawing}
+              onWithdraw={handleWithdraw}
+            />
           )}
         </View>
 
-        {/* How It Works - Expandable (hidden when allocation shown inline) */}
         {!(hasSavingsButNoCash && activeTab === 'add') && (
-          <>
-            <TouchableOpacity
-              style={styles.howItWorksHeader}
-              onPress={() => {
-                Analytics.trackButtonTap('How It Works', 'ManageFunds', { expanded: !showHowItWorks });
-                setShowHowItWorks(!showHowItWorks);
-              }}
-            >
-              <View style={styles.howItWorksLeft}>
-                <Ionicons name="help-circle-outline" size={20} color={COLORS.secondary} />
-                <Text style={styles.howItWorksTitle}>Where do my funds go?</Text>
-              </View>
-              <Ionicons
-                name={showHowItWorks ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color={COLORS.grey}
-              />
-            </TouchableOpacity>
-
-            {showHowItWorks && (
-              <View style={styles.howItWorksContent}>
-                <Text style={styles.howItWorksText}>
-                  Your funds are deposited into regulated DeFi lending protocols where they earn yield from borrowers.
-                  You maintain full ownership at all times.
-                </Text>
-
-                <View style={styles.protocolsList}>
-                  <Text style={styles.protocolsLabel}>Current allocation:</Text>
-                  {positions.map((position) => {
-                    const vaultApy = getVaultApy(position.vaultAddress);
-                    const positionValue = parseFloat(position.usdValue);
-                    if (positionValue <= 0) return null;
-                    return (
-                      <View key={position.vaultId} style={styles.protocolRow}>
-                        <Text style={styles.protocolName}>{position.vaultName}</Text>
-                        <View style={styles.protocolRight}>
-                          <Text style={styles.protocolValue}>${positionValue.toFixed(2)}</Text>
-                          {vaultApy && (
-                            <Text style={styles.protocolApy}>{vaultApy}%</Text>
-                          )}
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
-          </>
+          <HowItWorksSection
+            positions={positions}
+            getVaultApy={getVaultApy}
+            showHowItWorks={showHowItWorks}
+            onToggleHowItWorks={() => {
+              Analytics.trackButtonTap('How It Works', 'ManageFunds', { expanded: !showHowItWorks });
+              setShowHowItWorks(!showHowItWorks);
+            }}
+          />
         )}
 
-        {/* Fee Transparency */}
-        <View style={styles.feeSection}>
-          <Text style={styles.feeSectionTitle}>Fee Structure</Text>
-
-          <View style={styles.feeRow}>
-            <View style={styles.feeLeft}>
-              <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
-              <Text style={styles.feeLabel}>Deposit & Withdraw</Text>
-            </View>
-            <Text style={styles.feeValue}>Free</Text>
-          </View>
-
-          <View style={styles.feeRow}>
-            <View style={styles.feeLeft}>
-              <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
-              <Text style={styles.feeLabel}>Gas fees</Text>
-            </View>
-            <Text style={styles.feeValue}>Covered</Text>
-          </View>
-
-          <View style={styles.feeRow}>
-            <View style={styles.feeLeft}>
-              <Ionicons name="information-circle" size={18} color={COLORS.secondary} />
-              <Text style={styles.feeLabel}>Performance fee</Text>
-            </View>
-            <Text style={styles.feeValue}>15% of earnings</Text>
-          </View>
-
-          <Text style={styles.feeNote}>
-            You only pay fees on profits. No profit = no fee.
-          </Text>
-        </View>
-
-        {/* Trust Indicators */}
-        <View style={styles.trustSection}>
-          <View style={styles.trustRow}>
-            <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.trustText}>Non-custodial - you control your funds</Text>
-          </View>
-          <View style={styles.trustRow}>
-            <Ionicons name="time-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.trustText}>Exit anytime - no lock-up period</Text>
-          </View>
-          <View style={styles.trustRow}>
-            <Ionicons name="eye-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.trustText}>Fully transparent - all transactions on-chain</Text>
-          </View>
-        </View>
+        <FeeAndTrustSection />
       </ScrollView>
 
-      {/* Celebration Modal */}
       {celebrationData && (
         <CelebrationModal
           visible={showCelebration}
@@ -877,7 +526,6 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 40,
   },
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -905,123 +553,6 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 44,
   },
-  // Summary Card
-  summaryCard: {
-    backgroundColor: COLORS.pureWhite,
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: COLORS.grey,
-    marginBottom: 8,
-  },
-  summaryValue: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: COLORS.black,
-    fontVariant: ['tabular-nums'],
-  },
-  earningRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    gap: 8,
-  },
-  earningDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.success,
-  },
-  earningText: {
-    fontSize: 14,
-    color: COLORS.secondary,
-    fontWeight: '500',
-  },
-  earningsDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: `${COLORS.success}15`,
-    borderRadius: 8,
-    gap: 8,
-  },
-  earningsLabel: {
-    fontSize: 13,
-    color: COLORS.grey,
-  },
-  loadingState: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 24,
-    gap: 10,
-  },
-  loadingText: {
-    color: COLORS.grey,
-    fontSize: 15,
-  },
-  errorState: {
-    alignItems: 'center',
-    paddingVertical: 24,
-    gap: 12,
-  },
-  errorText: {
-    color: COLORS.grey,
-    fontSize: 15,
-  },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    backgroundColor: COLORS.white,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  retryButtonText: {
-    color: COLORS.black,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  // Available Card
-  availableCard: {
-    backgroundColor: COLORS.pureWhite,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  availableLabel: {
-    fontSize: 14,
-    color: COLORS.grey,
-  },
-  availableValue: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: COLORS.black,
-  },
-  // Tab Selector
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: COLORS.pureWhite,
@@ -1051,7 +582,6 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: COLORS.pureWhite,
   },
-  // Action Area
   actionArea: {
     backgroundColor: COLORS.pureWhite,
     borderRadius: 16,
@@ -1064,475 +594,5 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 3,
-  },
-  inputLabel: {
-    fontSize: 14,
-    color: COLORS.grey,
-    marginBottom: 12,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  inputTouchable: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  currencyPrefix: {
-    backgroundColor: COLORS.pureWhite,
-    borderRadius: 12,
-    borderTopRightRadius: 0,
-    borderBottomRightRadius: 0,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRightWidth: 0,
-  },
-  currencyText: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: COLORS.grey,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: COLORS.pureWhite,
-    borderRadius: 12,
-    borderTopLeftRadius: 0,
-    borderBottomLeftRadius: 0,
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    fontSize: 22,
-    fontWeight: '600',
-    color: COLORS.black,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderLeftWidth: 0,
-  },
-  inputFocused: {
-    borderColor: COLORS.secondary,
-  },
-  maxButton: {
-    backgroundColor: COLORS.secondary,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginLeft: 12,
-  },
-  maxButtonText: {
-    color: COLORS.pureWhite,
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  depositTrustSignals: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 20,
-    marginBottom: 16,
-  },
-  depositTrustItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  depositTrustText: {
-    fontSize: 12,
-    color: COLORS.grey,
-  },
-  actionButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  withdrawButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: COLORS.primary,
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  actionButtonDisabled: {
-    backgroundColor: COLORS.border,
-    borderColor: COLORS.border,
-  },
-  actionButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: COLORS.pureWhite,
-  },
-  withdrawButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
-  withdrawInfo: {
-    fontSize: 15,
-    color: COLORS.black,
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  withdrawTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.black,
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  withdrawNote: {
-    fontSize: 13,
-    color: COLORS.grey,
-    textAlign: 'center',
-    marginTop: 16,
-  },
-  withdrawPreview: {
-    backgroundColor: 'rgba(32, 1, 145, 0.05)',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    gap: 10,
-  },
-  previewRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  previewRowTotal: {
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(32, 1, 145, 0.1)',
-    paddingTop: 10,
-    marginTop: 4,
-  },
-  previewLabel: {
-    fontSize: 14,
-    color: COLORS.grey,
-  },
-  previewValue: {
-    fontSize: 14,
-    color: COLORS.black,
-    fontWeight: '500',
-  },
-  previewLabelBold: {
-    fontSize: 15,
-    color: COLORS.black,
-    fontWeight: '600',
-  },
-  previewValueBold: {
-    fontSize: 15,
-    color: COLORS.primary,
-    fontWeight: '700',
-  },
-  noFundsState: {
-    alignItems: 'center',
-    paddingVertical: 24,
-    gap: 8,
-  },
-  noFundsText: {
-    fontSize: 16,
-    color: COLORS.black,
-    fontWeight: '500',
-    marginTop: 8,
-  },
-  noFundsSubtext: {
-    fontSize: 14,
-    color: COLORS.grey,
-  },
-  // Zero Balance Guide
-  zeroBalanceGuide: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  zeroBalanceIconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: `${COLORS.secondary}15`,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  zeroBalanceTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.black,
-    marginBottom: 8,
-  },
-  zeroBalanceText: {
-    fontSize: 14,
-    color: COLORS.grey,
-    textAlign: 'center',
-    lineHeight: 21,
-    marginBottom: 20,
-    paddingHorizontal: 8,
-  },
-  zeroBalanceSteps: {
-    width: '100%',
-    gap: 12,
-    marginBottom: 24,
-    paddingHorizontal: 8,
-  },
-  zeroBalanceStep: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  zeroBalanceStepDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.secondary,
-  },
-  zeroBalanceStepText: {
-    fontSize: 14,
-    color: COLORS.grey,
-    flex: 1,
-  },
-  zeroBalanceButton: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  zeroBalanceButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.pureWhite,
-  },
-  // Inline Allocation (shown when user has savings but no cash to add)
-  allocationHeader: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  earningBadgeInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: `${COLORS.success}15`,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 8,
-  },
-  earningDotInline: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.success,
-  },
-  earningTextInline: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.success,
-  },
-  allocationDescription: {
-    fontSize: 14,
-    color: COLORS.grey,
-    lineHeight: 22,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  allocationList: {
-    backgroundColor: COLORS.white,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-  },
-  allocationListLabel: {
-    fontSize: 13,
-    color: COLORS.grey,
-    marginBottom: 12,
-  },
-  allocationRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  allocationVaultName: {
-    fontSize: 14,
-    color: COLORS.black,
-    fontWeight: '500',
-    flex: 1,
-  },
-  allocationRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  allocationValue: {
-    fontSize: 14,
-    color: COLORS.black,
-    fontWeight: '600',
-  },
-  allocationApy: {
-    fontSize: 12,
-    color: COLORS.secondary,
-    backgroundColor: `${COLORS.secondary}15`,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-    fontWeight: '600',
-  },
-  addMoreSection: {
-    alignItems: 'center',
-    paddingTop: 4,
-    gap: 16,
-  },
-  addMoreText: {
-    fontSize: 14,
-    color: COLORS.grey,
-    textAlign: 'center',
-  },
-  addMoreButton: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.secondary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  addMoreButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.pureWhite,
-  },
-  // How It Works
-  howItWorksHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  howItWorksLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  howItWorksTitle: {
-    fontSize: 15,
-    color: COLORS.grey,
-  },
-  howItWorksContent: {
-    backgroundColor: COLORS.pureWhite,
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 12,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  howItWorksText: {
-    fontSize: 14,
-    color: COLORS.grey,
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  protocolsList: {
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingTop: 16,
-  },
-  protocolsLabel: {
-    fontSize: 13,
-    color: COLORS.grey,
-    marginBottom: 12,
-  },
-  protocolRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  protocolName: {
-    fontSize: 14,
-    color: COLORS.black,
-    flex: 1,
-  },
-  protocolRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  protocolValue: {
-    fontSize: 14,
-    color: COLORS.black,
-    fontWeight: '500',
-  },
-  protocolApy: {
-    fontSize: 12,
-    color: COLORS.secondary,
-    backgroundColor: `${COLORS.secondary}15`,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  // Fee Section
-  feeSection: {
-    backgroundColor: COLORS.pureWhite,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  feeSectionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.black,
-    marginBottom: 16,
-  },
-  feeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  feeLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  feeLabel: {
-    fontSize: 14,
-    color: COLORS.grey,
-  },
-  feeValue: {
-    fontSize: 14,
-    color: COLORS.black,
-    fontWeight: '500',
-  },
-  feeNote: {
-    fontSize: 13,
-    color: COLORS.grey,
-    marginTop: 12,
-    fontStyle: 'italic',
-  },
-  // Trust Section
-  trustSection: {
-    gap: 14,
-    paddingBottom: 20,
-  },
-  trustRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  trustText: {
-    fontSize: 13,
-    color: COLORS.grey,
   },
 });
