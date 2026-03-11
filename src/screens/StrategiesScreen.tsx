@@ -29,9 +29,12 @@ import {
   executeWithdrawBatch,
 } from '../services/strategyExecution';
 import {
-  recordDeposit,
+  writeAheadDeposit,
+  confirmDeposit,
+  rollbackDeposit,
   recordWithdrawal,
   getDepositedAndEarnings,
+  invalidateBlockchainCache,
 } from '../services/depositTracker';
 import { clearTransactionCache } from '../services/transactionHistory';
 import { recordDepositMilestone } from '../services/milestoneTracker';
@@ -131,10 +134,13 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
     Analytics.trackButtonTap('Pull to Refresh', 'ManageFunds');
     const timer = Analytics.createTimer();
     setRefreshing(true);
+    if (displayAddress) {
+      await invalidateBlockchainCache(displayAddress);
+    }
     await Promise.all([refetchBalances(), refetchPositions(), refetchApy()]);
     setRefreshing(false);
     Analytics.trackBalanceFetchDuration(timer.stop());
-  }, [refetchBalances, refetchPositions, refetchApy]);
+  }, [refetchBalances, refetchPositions, refetchApy, displayAddress]);
 
   const handleGoBack = useCallback(() => {
     Analytics.trackButtonTap('Back', 'ManageFunds');
@@ -192,10 +198,21 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
         displayAddress as `0x${string}`
       );
 
-      const txHash = await executeStrategyBatch(smartWalletClient, batch);
-      const duration = timer.stop();
+      // WRITE-AHEAD: record deposit BEFORE sending on-chain tx
+      const depositId = await writeAheadDeposit(displayAddress, depositAmount);
 
-      await recordDeposit(displayAddress, depositAmount, txHash);
+      let txHash: string;
+      try {
+        txHash = await executeStrategyBatch(smartWalletClient, batch);
+      } catch (txError) {
+        // Tx failed — rollback the write-ahead deposit
+        await rollbackDeposit(displayAddress, depositId, depositAmount);
+        throw txError;
+      }
+
+      // Tx succeeded — confirm and sync to backend
+      const duration = timer.stop();
+      await confirmDeposit(displayAddress, depositId, txHash, depositAmount);
       await clearTransactionCache(displayAddress);
       setTotalDeposited(prev => prev + depositAmount);
 

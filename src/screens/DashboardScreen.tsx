@@ -25,7 +25,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useWalletBalance } from '../hooks/useWalletBalance';
 import { usePositions } from '../hooks/usePositions';
 import { useVaultApy } from '../hooks/useVaultApy';
-import { getDepositedAndEarnings } from '../services/depositTracker';
+import { getDepositedAndEarnings, invalidateBlockchainCache } from '../services/depositTracker';
 import { openCoinbaseOnramp, getOnrampSessionUrl } from '../services/coinbaseOnramp';
 import { openCoinbaseOfframp } from '../services/coinbaseOfframp';
 import { useDeepLink } from '../contexts/DeepLinkContext';
@@ -81,6 +81,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const [showHowItWorks, setShowHowItWorks] = React.useState(false);
   const [totalDeposited, setTotalDeposited] = React.useState(0);
   const [totalEarnings, setTotalEarnings] = React.useState(0);
+  const [earningsRefreshKey, setEarningsRefreshKey] = React.useState(0);
   const [showWithdrawModal, setShowWithdrawModal] = React.useState(false);
   const [withdrawMethod, setWithdrawMethod] = React.useState<'select' | 'wallet' | 'bank'>('select');
   const [withdrawAddress, setWithdrawAddress] = React.useState('');
@@ -246,7 +247,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
       }
     };
     loadDepositedAndEarnings();
-  }, [displayAddress, savingsBalance]);
+  }, [displayAddress, savingsBalance, earningsRefreshKey]);
 
   const handleGoalReached = () => _handleGoalReached(savingsBalance, displayAddress, checkBadgesForGoal);
 
@@ -341,12 +342,19 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     const timer = Analytics.createTimer();
+    // Invalidate deposit cache so earnings are recalculated fresh from chain
+    // (the useEffect on savingsBalance will re-trigger getDepositedAndEarnings)
+    if (displayAddress) {
+      await invalidateBlockchainCache(displayAddress);
+    }
     await Promise.all([refetchBalances(), refetchPositions(), refetchApy()]);
+    // Force earnings re-calculation even if savingsBalance didn't change
+    setEarningsRefreshKey(k => k + 1);
     Analytics.trackBalanceFetchDuration(timer.stop());
     Analytics.trackBalanceRefreshed(cashBalance, savingsBalance, totalEarnings);
     setRefreshing(false);
     showRefreshToast();
-  }, [refetchBalances, refetchPositions, refetchApy, cashBalance, savingsBalance, totalEarnings, showRefreshToast]);
+  }, [refetchBalances, refetchPositions, refetchApy, displayAddress, cashBalance, savingsBalance, totalEarnings, showRefreshToast]);
 
   const handleSettings = useCallback(() => {
     Analytics.trackButtonTap('Settings', 'Dashboard');

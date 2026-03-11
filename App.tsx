@@ -12,7 +12,7 @@ import { AnalyticsProvider } from './src/contexts/AnalyticsContext';
 import { NotificationProvider } from './src/contexts/NotificationContext';
 import SplashScreen from './src/components/SplashScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
-import { retrySyncPendingOperations } from './src/services/depositTracker';
+import { retrySyncPendingOperations, verifyCostBasisOnStartup } from './src/services/depositTracker';
 
 // Mantieni visibile la splash nativa fino a quando non la nascondiamo manualmente
 ExpoSplashScreen.preventAutoHideAsync();
@@ -62,6 +62,7 @@ function AppContent({ onLoadingStateChange }: { onLoadingStateChange: (state: Lo
   const { wallets, isReady: walletsReady } = useEmbeddedEthereumWallet();
   const { client: smartWalletClient } = useSmartWallets();
   const hasRetriedSync = useRef(false);
+  const hasVerifiedCostBasis = useRef(false);
 
   const embeddedWallet = wallets?.[0];
   const smartWalletAddress = smartWalletClient?.account?.address;
@@ -103,6 +104,21 @@ function AppContent({ onLoadingStateChange }: { onLoadingStateChange: (state: Lo
       return () => clearTimeout(timer);
     }
   }, [privyReady]);
+
+  // On-chain cost basis verification on cold start
+  // Runs once per session after auth + wallet are ready
+  useEffect(() => {
+    if (privyReady && walletAddress && !hasVerifiedCostBasis.current) {
+      hasVerifiedCostBasis.current = true;
+      // Delay to not block initial render
+      const timer = setTimeout(() => {
+        verifyCostBasisOnStartup(walletAddress).catch((error) => {
+          console.warn('[App] Cost basis verification failed (non-fatal):', error);
+        });
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [privyReady, walletAddress]);
 
   return (
     <NotificationProvider
