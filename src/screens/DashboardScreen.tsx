@@ -13,6 +13,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { encodeFunctionData, parseUnits } from 'viem';
+import { TOKENS } from '../constants/contracts';
 import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
@@ -275,7 +276,6 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
     setIsOfframpProcessing(true);
 
     try {
-      const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
       const amountInUnits = parseUnits(offrampParams.amount, 6);
 
       const data = encodeFunctionData({
@@ -293,7 +293,7 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
       });
 
       await smartWalletClient.sendTransaction({
-        to: USDC_ADDRESS as `0x${string}`,
+        to: TOKENS.USDC as `0x${string}`,
         data,
       });
 
@@ -497,10 +497,8 @@ export default function DashboardScreen({ navigation, route }: DashboardScreenPr
         args: [withdrawAddress as `0x${string}`, amountRaw],
       });
 
-      const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-
       const hash = await smartWalletClient.sendTransaction({
-        to: USDC_ADDRESS as `0x${string}`,
+        to: TOKENS.USDC as `0x${string}`,
         data: transferData,
         value: BigInt(0),
       });

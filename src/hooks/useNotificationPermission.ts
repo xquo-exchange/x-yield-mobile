@@ -108,7 +108,7 @@ export function useNotificationPermission(): UseNotificationPermissionResult {
         projectId: EXPO_PROJECT_ID,
       });
       const token = tokenData.data;
-      console.log('[NotificationPermission] Expo Push Token:', token);
+      if (__DEV__) console.log('[NotificationPermission] Expo Push Token:', token);
       return token;
     } catch (error) {
       console.error('[NotificationPermission] Error getting Expo push token:', error);
