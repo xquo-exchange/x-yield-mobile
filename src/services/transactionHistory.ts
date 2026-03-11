@@ -23,10 +23,12 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { TOKENS, UNFLAT_TREASURY_ADDRESS, MORPHO } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
 import { type BlockscoutTokenTransfer, type BlockscoutApiResponse } from '../types/api';
 import { getTotalDeposited } from './depositTracker';
+import { rpcCall, hexToBigInt } from './rpc';
 
 // Re-export formatting utilities for backward compatibility
 export {
@@ -46,9 +48,15 @@ const debugLog = (message: string, ...args: unknown[]) => {
   if (DEBUG) console.log(message, ...args);
 };
 
-// Blockscout API for Base chain (free, no API key required)
-// BaseScan V1 is deprecated, V2 requires paid plan - using Blockscout instead
+// Blockscout API for Base chain (free, no API key required) — PRIMARY
 const BLOCKSCOUT_API_URL = 'https://base.blockscout.com/api';
+
+// BaseScan API — FALLBACK when Blockscout indexer is behind
+const BASESCAN_API_URL = 'https://api.basescan.org/api';
+const BASESCAN_API_KEY = Constants.expoConfig?.extra?.basescanApiKey ?? '';
+
+// If Blockscout's latest indexed block is more than this many blocks behind chain tip, use BaseScan
+const BLOCKSCOUT_STALE_THRESHOLD_BLOCKS = 1000;
 
 // Cache configuration
 const CACHE_KEY_PREFIX = 'tx_history_';
@@ -229,8 +237,88 @@ function isInternalAddress(address: string): boolean {
 
 
 /**
- * Fetch ERC20 token transfers for a wallet from Blockscout API
- * Blockscout API is free and doesn't require an API key
+ * Get the current chain tip block number via RPC
+ */
+async function getChainTipBlock(): Promise<number> {
+  try {
+    const result = await rpcCall('eth_blockNumber', []);
+    return Number(hexToBigInt(result as string));
+  } catch (error) {
+    debugLog('[TransactionHistory] Failed to get chain tip block:', error);
+    return 0;
+  }
+}
+
+/**
+ * Fetch ERC20 token transfers from a single Etherscan-compatible API
+ */
+async function fetchFromExplorerApi(
+  apiUrl: string,
+  walletAddress: string,
+  tokenAddress: string,
+  startBlock: number,
+  endBlock: number,
+  sort: string,
+  apiKey?: string,
+): Promise<BlockscoutTokenTransfer[]> {
+  const url = new URL(apiUrl);
+  url.searchParams.set('module', 'account');
+  url.searchParams.set('action', 'tokentx');
+  url.searchParams.set('address', walletAddress);
+  url.searchParams.set('contractaddress', tokenAddress);
+  url.searchParams.set('startblock', startBlock.toString());
+  url.searchParams.set('endblock', endBlock.toString());
+  url.searchParams.set('sort', sort);
+  if (apiKey) {
+    url.searchParams.set('apikey', apiKey);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  const response = await fetch(url.toString(), {
+    signal: controller.signal,
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+  });
+  clearTimeout(timeoutId);
+
+  if (!response.ok) {
+    console.error(`[TransactionHistory] Explorer API response not OK: ${response.status}`);
+    return [];
+  }
+
+  const data: BlockscoutApiResponse<BlockscoutTokenTransfer[]> = await response.json();
+
+  if (data.status === '1' && Array.isArray(data.result)) {
+    return data.result;
+  }
+  if (data.status === '0' && data.message === 'No transactions found') {
+    return [];
+  }
+
+  console.error('[TransactionHistory] Explorer API error:', data.status, data.message);
+  return [];
+}
+
+/**
+ * Find the highest block number in a set of transfers
+ */
+function maxBlockInTransfers(transfers: BlockscoutTokenTransfer[]): number {
+  let max = 0;
+  for (const t of transfers) {
+    const bn = parseInt(t.blockNumber ?? '0', 10);
+    if (bn > max) max = bn;
+  }
+  return max;
+}
+
+/**
+ * Fetch ERC20 token transfers for a wallet.
+ *
+ * Strategy:
+ * 1. Fetch from Blockscout (free, primary)
+ * 2. Check if Blockscout's latest indexed block is behind chain tip by >1000 blocks
+ * 3. If stale, fetch missing range from BaseScan and merge
  */
 async function fetchTokenTransfers(
   walletAddress: string,
@@ -238,60 +326,70 @@ async function fetchTokenTransfers(
   startBlock: number = 0,
   endBlock: number = 99999999
 ): Promise<BlockscoutTokenTransfer[]> {
-  // Validate wallet address
   if (!walletAddress || walletAddress.length < 10) {
     console.error('[TransactionHistory] Invalid wallet address:', walletAddress);
     return [];
   }
 
   try {
-    // Blockscout uses same API format as Etherscan
-    const url = new URL(BLOCKSCOUT_API_URL);
-    url.searchParams.set('module', 'account');
-    url.searchParams.set('action', 'tokentx');
-    url.searchParams.set('address', walletAddress);
-    url.searchParams.set('contractaddress', tokenAddress);
-    url.searchParams.set('startblock', startBlock.toString());
-    url.searchParams.set('endblock', endBlock.toString());
-    url.searchParams.set('sort', 'desc');
-
+    // PRIMARY: Blockscout
     debugLog('[TransactionHistory] Fetching from Blockscout for:', walletAddress);
+    const blockscoutTransfers = await fetchFromExplorerApi(
+      BLOCKSCOUT_API_URL, walletAddress, tokenAddress, startBlock, endBlock, 'desc',
+    );
+    debugLog('[TransactionHistory] Blockscout returned', blockscoutTransfers.length, 'transfers');
 
-    // Add timeout for production reliability
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    // Check if Blockscout is stale
+    const blockscoutMaxBlock = maxBlockInTransfers(blockscoutTransfers);
+    const chainTip = await getChainTipBlock();
 
-    const response = await fetch(url.toString(), {
-      signal: controller.signal,
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-    });
-    clearTimeout(timeoutId);
+    if (chainTip > 0 && blockscoutMaxBlock > 0 &&
+        (chainTip - blockscoutMaxBlock) > BLOCKSCOUT_STALE_THRESHOLD_BLOCKS) {
 
-    if (!response.ok) {
-      console.error('[TransactionHistory] API response not OK:', response.status);
-      // Don't throw, just return empty to allow graceful degradation
-      return [];
+      debugLog(
+        `[TransactionHistory] Blockscout is behind: latest indexed block ${blockscoutMaxBlock}, chain tip ${chainTip}, gap ${chainTip - blockscoutMaxBlock}`,
+      );
+
+      if (!BASESCAN_API_KEY) {
+        console.warn('[TransactionHistory] BaseScan API key not configured, cannot backfill');
+        return blockscoutTransfers;
+      }
+
+      // FALLBACK: Fetch missing blocks from BaseScan
+      const gapStart = blockscoutMaxBlock + 1;
+      debugLog(`[TransactionHistory] Fetching gap blocks ${gapStart}–${endBlock} from BaseScan`);
+
+      const basescanTransfers = await fetchFromExplorerApi(
+        BASESCAN_API_URL, walletAddress, tokenAddress, gapStart, endBlock, 'desc', BASESCAN_API_KEY,
+      );
+      debugLog('[TransactionHistory] BaseScan returned', basescanTransfers.length, 'transfers for gap');
+
+      if (basescanTransfers.length > 0) {
+        // Merge: BaseScan gap transfers + Blockscout transfers, deduplicate by hash+from+to
+        const seen = new Set<string>();
+        const merged: BlockscoutTokenTransfer[] = [];
+
+        for (const t of [...basescanTransfers, ...blockscoutTransfers]) {
+          const key = `${t.hash}-${t.from}-${t.to}-${t.value}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            merged.push(t);
+          }
+        }
+
+        // Sort desc by block number (newest first) to match original behavior
+        merged.sort((a, b) =>
+          parseInt(b.blockNumber ?? '0', 10) - parseInt(a.blockNumber ?? '0', 10)
+        );
+
+        debugLog(`[TransactionHistory] Merged: ${merged.length} transfers (${basescanTransfers.length} from BaseScan gap)`);
+        return merged;
+      }
+    } else if (chainTip > 0 && blockscoutMaxBlock > 0) {
+      debugLog(`[TransactionHistory] Blockscout is fresh: gap=${chainTip - blockscoutMaxBlock} blocks`);
     }
 
-    const data: BlockscoutApiResponse<BlockscoutTokenTransfer[]> = await response.json();
-
-    if (data.status === '1' && Array.isArray(data.result)) {
-      debugLog('[TransactionHistory] Found', data.result.length, 'token transfers');
-      return data.result;
-    }
-
-    // API returned no results - this is valid (new wallet with no history)
-    if (data.status === '0' && data.message === 'No transactions found') {
-      debugLog('[TransactionHistory] No transactions found for wallet');
-      return [];
-    }
-
-    // API returned an error
-    console.error('[TransactionHistory] API error:', data.status, data.message);
-    return [];
+    return blockscoutTransfers;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       console.error('[TransactionHistory] Request timed out');
