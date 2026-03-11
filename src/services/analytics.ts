@@ -9,6 +9,7 @@ import RNUxcam from 'react-native-ux-cam';
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { getErrorMessage } from '../utils/errorHelpers';
 
 // Debug mode - set to false for production
@@ -17,14 +18,12 @@ const DEBUG = __DEV__ ?? false;
 // Simulator detection - UXCam doesn't work on simulators
 const isSimulator = !Device.isDevice;
 
-// Mixpanel Project Token
-const MIXPANEL_TOKEN = 'b8d711cabf77f254b965383fa15f7302';
+// Analytics configuration from app.json extra
+const MIXPANEL_TOKEN = Constants.expoConfig?.extra?.mixpanelToken ?? '';
+const UXCAM_APP_KEY = Constants.expoConfig?.extra?.uxcamAppKey ?? '';
 
 // Mixpanel EU Server (project is configured for EU data residency)
 const MIXPANEL_SERVER_URL = 'https://api-eu.mixpanel.com';
-
-// UXCam App Key (EU region)
-const UXCAM_APP_KEY = 'ls3gxyg4a8lzkdj-eu';
 
 // Debug logging helper
 function debugLog(message: string, ...args: unknown[]): void {

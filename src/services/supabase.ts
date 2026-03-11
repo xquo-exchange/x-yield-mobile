@@ -8,16 +8,9 @@
 import { createClient } from '@supabase/supabase-js';
 import Constants from 'expo-constants';
 
-// Supabase configuration from environment variables or constants
-const SUPABASE_URL =
-  Constants.expoConfig?.extra?.supabaseUrl ||
-  process.env.EXPO_PUBLIC_SUPABASE_URL ||
-  'https://oitrgjteywgmlonfdmhe.supabase.co';
-
-const SUPABASE_ANON_KEY =
-  Constants.expoConfig?.extra?.supabaseAnonKey ||
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pdHJnanRleXdnbWxvbmZkbWhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg3NTU5NjAsImV4cCI6MjA4NDMzMTk2MH0.bNUUYAWd5K-_nfTjFiQb-ZJhZ_p98Fy8AjNOt5k8aYc';
+// Supabase configuration from app.json extra
+const SUPABASE_URL = Constants.expoConfig?.extra?.supabaseUrl ?? '';
+const SUPABASE_ANON_KEY = Constants.expoConfig?.extra?.supabaseAnonKey ?? '';
 
 // Create and export the Supabase client
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);

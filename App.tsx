@@ -5,6 +5,7 @@ import { PrivyProvider, usePrivy, useEmbeddedEthereumWallet } from '@privy-io/ex
 import { SmartWalletsProvider, useSmartWallets } from '@privy-io/expo/smart-wallets';
 import { PrivyElements } from '@privy-io/expo/ui';
 import * as ExpoSplashScreen from 'expo-splash-screen';
+import Constants from 'expo-constants';
 import AppNavigator from './src/navigation/AppNavigator';
 import { DeepLinkProvider } from './src/contexts/DeepLinkContext';
 import { AnalyticsProvider } from './src/contexts/AnalyticsContext';
@@ -141,8 +142,8 @@ function PrivyWrapper({
 
   return (
     <PrivyProvider
-      appId="cmk1awjuj002ri60dlbm7ot7y"
-      clientId="client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1"
+      appId={Constants.expoConfig?.extra?.privyAppId}
+      clientId={Constants.expoConfig?.extra?.privyClientId}
       supportedChains={[base]}
       config={{
         embedded: {
