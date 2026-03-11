@@ -319,11 +319,16 @@ async function logsRpcCall(method: string, params: unknown[]): Promise<unknown> 
 
   for (const rpcUrl of LOGS_RPC_URLS) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for heavy queries
+
       const response = await fetch(rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -343,6 +348,8 @@ async function logsRpcCall(method: string, params: unknown[]): Promise<unknown> 
 
   throw lastError;
 }
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // RPC eth_getLogs log entry
 interface RpcLogEntry {
@@ -404,6 +411,8 @@ async function fetchTransferLogsChunk(
 /**
  * Fetch ERC-20 Transfer logs via eth_getLogs for an arbitrary block range.
  * Automatically batches into RPC_MAX_BLOCK_RANGE chunks.
+ * Runs at most 3 chunks concurrently with 500ms delay between batches
+ * to avoid overwhelming free RPC endpoints.
  */
 async function fetchTransferLogsViaRpc(
   tokenAddress: string,
@@ -418,7 +427,7 @@ async function fetchTransferLogsViaRpc(
     return fetchTransferLogsChunk(tokenAddress, walletTopic, fromBlock, toBlock);
   }
 
-  // Batch into chunks
+  // Split into chunks
   const chunks: Array<{ from: number; to: number }> = [];
   let cursor = fromBlock;
   while (cursor <= toBlock) {
@@ -427,16 +436,33 @@ async function fetchTransferLogsViaRpc(
     cursor = chunkEnd + 1;
   }
 
-  debugLog(`[TransactionHistory] RPC fallback: ${totalRange} blocks in ${chunks.length} chunks`);
+  debugLog(`[TransactionHistory] RPC fallback: ${totalRange} blocks in ${chunks.length} chunks (batches of 3)`);
 
+  // Run chunks in batches of 3 with 500ms delay between batches
+  const CONCURRENCY = 3;
   const allLogs: RpcLogEntry[] = [];
-  for (const chunk of chunks) {
-    try {
-      const logs = await fetchTransferLogsChunk(tokenAddress, walletTopic, chunk.from, chunk.to);
-      allLogs.push(...logs);
-    } catch (error) {
-      console.error(`[TransactionHistory] RPC getLogs failed for blocks ${chunk.from}-${chunk.to}:`, error);
-      // Continue with remaining chunks
+
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    if (i > 0) {
+      await delay(500);
+    }
+
+    const batch = chunks.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(chunk =>
+        fetchTransferLogsChunk(tokenAddress, walletTopic, chunk.from, chunk.to)
+      )
+    );
+
+    for (let j = 0; j < results.length; j++) {
+      const result = results[j];
+      if (result.status === 'fulfilled') {
+        allLogs.push(...result.value);
+      } else {
+        const chunk = batch[j];
+        debugLog(`[TransactionHistory] RPC getLogs failed for blocks ${chunk.from}-${chunk.to}: ${result.reason}`);
+        // Skip this chunk gracefully, continue with the rest
+      }
     }
   }
 
@@ -526,6 +552,7 @@ async function fetchTokenTransfers(
       );
 
       // FALLBACK: Fetch missing blocks via RPC eth_getLogs
+      // Blockscout data is ALWAYS the base — RPC only adds new transfers it missed
       const gapStart = blockscoutMaxBlock + 1;
       debugLog(`[TransactionHistory] Fetching gap blocks ${gapStart}–${chainTip} via RPC eth_getLogs`);
 
@@ -538,11 +565,19 @@ async function fetchTokenTransfers(
           // Fetch block timestamps for the RPC transfers so they get correct dates
           await enrichTransfersWithTimestamps(rpcTransfers);
 
-          // Merge: RPC gap transfers + Blockscout transfers, deduplicate
+          // Start with ALL Blockscout transfers, then add any new ones from RPC
           const seen = new Set<string>();
           const merged: BlockscoutTokenTransfer[] = [];
 
-          for (const t of [...rpcTransfers, ...blockscoutTransfers]) {
+          // Blockscout first — always included
+          for (const t of blockscoutTransfers) {
+            const key = `${t.hash}-${t.from.toLowerCase()}-${t.to.toLowerCase()}-${t.value}`;
+            seen.add(key);
+            merged.push(t);
+          }
+
+          // Add RPC transfers that Blockscout missed
+          for (const t of rpcTransfers) {
             const key = `${t.hash}-${t.from.toLowerCase()}-${t.to.toLowerCase()}-${t.value}`;
             if (!seen.has(key)) {
               seen.add(key);
@@ -555,13 +590,17 @@ async function fetchTokenTransfers(
             parseInt(b.blockNumber ?? '0', 10) - parseInt(a.blockNumber ?? '0', 10)
           );
 
-          debugLog(`[TransactionHistory] Merged: ${merged.length} transfers (${rpcTransfers.length} from RPC gap)`);
+          debugLog(`[TransactionHistory] Merged: ${merged.length} transfers (${rpcTransfers.length} new from RPC gap)`);
           return merged;
+        } else {
+          debugLog('[TransactionHistory] RPC returned 0 transfers for gap — no new activity');
         }
       } catch (rpcError) {
         console.error('[TransactionHistory] RPC fallback failed (non-fatal):', rpcError);
-        // Return Blockscout data alone — better than nothing
       }
+
+      // Always return Blockscout data even if RPC found nothing or failed
+      debugLog(`[TransactionHistory] Returning ${blockscoutTransfers.length} Blockscout transfers`)
     } else if (chainTip > 0 && blockscoutMaxBlock > 0) {
       debugLog(`[TransactionHistory] Blockscout is fresh: gap=${chainTip - blockscoutMaxBlock} blocks`);
     }
@@ -590,8 +629,8 @@ async function enrichTransfersWithTimestamps(transfers: BlockscoutTokenTransfer[
   // Fetch timestamps for each block (batch to avoid too many calls)
   const blockTimestamps = new Map<string, string>();
 
-  // Limit to 20 concurrent block fetches
-  const batchSize = 20;
+  // Fetch in small batches to avoid rate limits on free endpoints
+  const batchSize = 5;
   for (let i = 0; i < blockNumbers.length; i += batchSize) {
     const batch = blockNumbers.slice(i, i + batchSize);
     const results = await Promise.allSettled(
