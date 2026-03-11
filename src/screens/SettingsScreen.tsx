@@ -121,13 +121,24 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       'Export Private Key',
       'This will show your private key. Never share it with anyone. Your private key gives full control over your wallet and funds.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => {
+            track('export_private_key_cancelled');
+          },
+        },
         {
           text: 'Continue',
           style: 'destructive',
           onPress: async () => {
             track('export_private_key_initiated');
-            await WebBrowser.openBrowserAsync('https://x-yield-api.vercel.app/api/export-wallet');
+            try {
+              await WebBrowser.openBrowserAsync('https://x-yield-api-beta.vercel.app/api/export-wallet');
+            } catch (error) {
+              console.error('[Settings] Failed to open export wallet page:', error);
+              Alert.alert('Error', 'Could not open the export page. Please try again.');
+            }
           },
         },
       ]

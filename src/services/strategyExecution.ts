@@ -3,12 +3,10 @@
  * Builds and executes deposit and withdraw transactions for DeFi strategies
  */
 
-import { type Address, encodeFunctionData, parseUnits, maxUint256 } from 'viem';
+import { type Address, encodeFunctionData, parseUnits } from 'viem';
 import { Strategy, MORPHO_VAULT_ABI } from '../constants/strategies';
 import {
   ERC20_ABI,
-  BASE_RPC_URL,
-  BASE_RPC_FALLBACK,
   TOKENS,
   UNFLAT_FEE_PERCENT,
   UNFLAT_TREASURY_ADDRESS,
@@ -18,6 +16,7 @@ import { type VaultPosition } from './blockchain';
 import { sendTransactionNotification } from './notifications';
 import { type SmartWalletClient } from '../types/wallet';
 import { getErrorMessage } from '../utils/errorHelpers';
+import { rpcCall, hexToBigInt } from './rpc';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -66,49 +65,6 @@ export interface WithdrawBatch {
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-function hexToBigInt(hex: string): bigint {
-  if (!hex || hex === '0x' || hex === '0x0') return BigInt(0);
-  try {
-    return BigInt(hex);
-  } catch {
-    return BigInt(0);
-  }
-}
-
-async function rpcCall(method: string, params: unknown[] = []): Promise<unknown> {
-  const rpcs = [BASE_RPC_URL, BASE_RPC_FALLBACK];
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const rpcUrl = rpcs[Math.min(attempt, rpcs.length - 1)];
-
-    try {
-      const response = await fetch(rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      });
-
-      const data = await response.json();
-
-      if (data.error) {
-        if (attempt < 2) {
-          await delay(1000);
-          continue;
-        }
-        throw new Error(data.error.message);
-      }
-
-      return data.result;
-    } catch (error) {
-      if (attempt < 2) {
-        await delay(1000);
-        continue;
-      }
-      throw error;
-    }
-  }
-}
 
 interface TransactionReceipt {
   status: string;
@@ -209,11 +165,11 @@ async function waitForTransaction(
   return { found: false, status: 'timeout', blockNumber: null };
 }
 
-function buildApproveCall(tokenAddress: Address, spenderAddress: Address): TransactionCall {
+function buildApproveCall(tokenAddress: Address, spenderAddress: Address, amount: bigint): TransactionCall {
   const data = encodeFunctionData({
     abi: ERC20_ABI,
     functionName: 'approve',
-    args: [spenderAddress, maxUint256],
+    args: [spenderAddress, amount],
   });
 
   return {
@@ -677,14 +633,24 @@ export function buildStrategyBatch(
 ): StrategyBatch {
   const calls: TransactionCall[] = [];
   const allocations = calculateAllocations(strategy, amount);
-  const approvedVaults = new Set<string>();
 
+  // Accumulate total deposit amount per vault for scoped approvals
+  const amountPerVault = new Map<string, bigint>();
+  for (const allocation of allocations) {
+    if (allocation.amountRaw <= BigInt(0)) continue;
+    const current = amountPerVault.get(allocation.vault.address) ?? BigInt(0);
+    amountPerVault.set(allocation.vault.address, current + allocation.amountRaw);
+  }
+
+  // Build approve + deposit calls per vault
+  const approvedVaults = new Set<string>();
   for (const allocation of allocations) {
     if (allocation.amountRaw <= BigInt(0)) continue;
 
     if (!approvedVaults.has(allocation.vault.address)) {
       approvedVaults.add(allocation.vault.address);
-      calls.push(buildApproveCall(strategy.asset, allocation.vault.address as Address));
+      const totalForVault = amountPerVault.get(allocation.vault.address)!;
+      calls.push(buildApproveCall(strategy.asset, allocation.vault.address as Address, totalForVault));
     }
 
     calls.push(

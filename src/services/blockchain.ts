@@ -4,8 +4,9 @@
  */
 
 import { formatEther, formatUnits, type Address, encodeFunctionData } from 'viem';
-import { BASE_RPC_URL, BASE_RPC_FALLBACK, TOKENS } from '../constants/contracts';
+import { TOKENS } from '../constants/contracts';
 import { MORPHO_VAULTS, MORPHO_VAULT_ABI } from '../constants/strategies';
+import { rpcCall, hexToBigInt } from './rpc';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -13,15 +14,39 @@ const debugLog = (message: string, ...args: unknown[]) => {
   if (DEBUG) console.log(message, ...args);
 };
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// ETH price cache (5 minutes)
+let cachedEthPrice: number | null = null;
+let ethPriceFetchedAt = 0;
+const ETH_PRICE_CACHE_MS = 5 * 60 * 1000;
 
-function hexToBigInt(hex: string): bigint {
-  if (!hex || hex === '0x' || hex === '0x0') return BigInt(0);
-  try {
-    return BigInt(hex);
-  } catch {
-    return BigInt(0);
+/**
+ * Fetch ETH price in USD from CoinGecko
+ * Caches for 5 minutes, returns 0 on failure
+ */
+async function getEthPriceUsd(): Promise<number> {
+  const now = Date.now();
+  if (cachedEthPrice !== null && (now - ethPriceFetchedAt) < ETH_PRICE_CACHE_MS) {
+    return cachedEthPrice;
   }
+
+  try {
+    const response = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
+    );
+    const data = await response.json();
+    const price = data?.ethereum?.usd;
+    if (typeof price === 'number' && price > 0) {
+      cachedEthPrice = price;
+      ethPriceFetchedAt = now;
+      debugLog(`[Blockchain] ETH price fetched: $${price}`);
+      return price;
+    }
+  } catch (error) {
+    debugLog('[Blockchain] Failed to fetch ETH price:', error);
+  }
+
+  // Return cached value if available, otherwise 0
+  return cachedEthPrice ?? 0;
 }
 
 export interface TokenBalance {
@@ -56,47 +81,6 @@ export interface PositionsResult {
   totalUsdValue: string;
   isLoading: boolean;
   error: string | null;
-}
-
-/**
- * RPC call with retry and fallback
- */
-async function rpcCall(method: string, params: unknown[] = []): Promise<unknown> {
-  const rpcs = [BASE_RPC_URL, BASE_RPC_FALLBACK];
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const rpcUrl = rpcs[Math.min(attempt, rpcs.length - 1)];
-
-    try {
-      const response = await fetch(rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      });
-
-      const data = await response.json();
-
-      if (data.error) {
-        if (data.error.message?.includes('rate') || data.error.code === -32005) {
-          debugLog(`[RPC] Rate limited on ${rpcUrl}, retrying...`);
-        }
-        if (attempt < 2) {
-          await delay(1000 * (attempt + 1)); // Exponential backoff
-          continue;
-        }
-        throw new Error(data.error.message);
-      }
-
-      return data.result;
-    } catch (error) {
-      if (attempt < 2) {
-        debugLog(`[RPC] Attempt ${attempt + 1} failed, retrying...`);
-        await delay(1000 * (attempt + 1));
-        continue;
-      }
-      throw error;
-    }
-  }
 }
 
 /**
@@ -144,7 +128,8 @@ export async function getAllBalances(address: Address): Promise<WalletBalances> 
     const ethBalance = formatEther(ethRaw);
     const usdcBalance = formatUnits(usdcRaw, 6);
 
-    const ethUsd = parseFloat(ethBalance) * 3500;
+    const ethPrice = await getEthPriceUsd();
+    const ethUsd = parseFloat(ethBalance) * ethPrice;
     const usdcUsd = parseFloat(usdcBalance);
 
     return {
