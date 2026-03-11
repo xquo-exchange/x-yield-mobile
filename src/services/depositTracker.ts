@@ -18,6 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isValidEthereumAddress, isValidAmount, sanitizeAddress } from '../utils/validation';
 import { TOKENS } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
+import { getCostBasis } from './costBasis';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -1116,33 +1117,48 @@ export async function getDepositedAndEarnings(
 ): Promise<{
   deposited: number;
   earnings: number;
-  source: 'blockchain' | 'cache' | 'fallback';
+  source: 'backend' | 'blockchain' | 'cache' | 'fallback';
 }> {
   let deposited: number;
-  let source: 'blockchain' | 'cache' | 'fallback';
+  let source: 'backend' | 'blockchain' | 'cache' | 'fallback';
 
   try {
-    // PRIMARY: Calculate from blockchain (with 5-minute cache)
-    const result = await calculateDepositedFromChain(walletAddress);
-    deposited = result.deposited;
-    source = result.fromCache ? 'cache' : 'blockchain';
+    // PRIMARY: Fetch cost basis from backend
+    const costBasis = await getCostBasis(walletAddress);
+    deposited = costBasis.totalCostBasis;
+    source = 'backend';
 
     console.log('[DEPOSIT READ]', {
       address: walletAddress.slice(0, 10) + '...',
-      source: source.toUpperCase(),
+      source: 'BACKEND',
       totalDeposited: deposited.toFixed(6),
     });
-  } catch (error) {
-    // FALLBACK: Use stored AsyncStorage value if blockchain fetch fails
-    console.error('[DepositTracker] Blockchain calculation failed, using fallback:', error);
-    deposited = await getDeposited(walletAddress);
-    source = 'fallback';
+  } catch (backendError) {
+    // FALLBACK 1: Calculate from blockchain (with 5-minute cache)
+    console.warn('[DepositTracker] Backend cost basis failed, trying blockchain:', backendError);
 
-    console.log('[DEPOSIT READ]', {
-      address: walletAddress.slice(0, 10) + '...',
-      source: 'FALLBACK',
-      totalDeposited: deposited.toFixed(6),
-    });
+    try {
+      const result = await calculateDepositedFromChain(walletAddress);
+      deposited = result.deposited;
+      source = result.fromCache ? 'cache' : 'blockchain';
+
+      console.log('[DEPOSIT READ]', {
+        address: walletAddress.slice(0, 10) + '...',
+        source: source.toUpperCase(),
+        totalDeposited: deposited.toFixed(6),
+      });
+    } catch (chainError) {
+      // FALLBACK 2: Use stored AsyncStorage value
+      console.error('[DepositTracker] Blockchain calculation also failed, using AsyncStorage:', chainError);
+      deposited = await getDeposited(walletAddress);
+      source = 'fallback';
+
+      console.log('[DEPOSIT READ]', {
+        address: walletAddress.slice(0, 10) + '...',
+        source: 'FALLBACK',
+        totalDeposited: deposited.toFixed(6),
+      });
+    }
   }
 
   // SANITY CHECK: If deposited > currentBalance, log a warning
@@ -1150,7 +1166,7 @@ export async function getDepositedAndEarnings(
   // 1. RPC rate limiting returns partial vault data (e.g., 2 of 3 vaults)
   // 2. There's a timing issue between deposit recording and balance fetch
   //
-  // We do NOT modify the deposited value - blockchain is source of truth
+  // We do NOT modify the deposited value - backend/blockchain is source of truth
   if (currentBalance > 0 && deposited > currentBalance * 1.01) {
     console.warn('[DepositTracker] Warning: deposited > balance', {
       deposited: deposited.toFixed(2),

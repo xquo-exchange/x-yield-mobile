@@ -52,6 +52,7 @@ import {
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { generateTaxReport, isPdfExportAvailable } from '../services/pdfReport';
 import { generateCsvReport, isCsvExportAvailable } from '../services/csvReport';
+import { getWithdrawalRecords, sumRealizedYield, sumTotalFeesPaid } from '../services/costBasis';
 import * as Analytics from '../services/analytics';
 import { COLORS } from '../constants/colors';
 
@@ -97,6 +98,23 @@ export default function TransactionHistoryScreen({
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [datePickerMode, setDatePickerMode] = useState<'start' | 'end'>('start');
+
+  // Backend-sourced realized yield (preferred over fee-based reverse-engineering)
+  const [backendRealizedYield, setBackendRealizedYield] = useState<number | null>(null);
+
+  // Fetch backend withdrawal records for realized yield
+  useEffect(() => {
+    if (!walletAddress) return;
+    getWithdrawalRecords(walletAddress)
+      .then((records) => {
+        if (records.length > 0) {
+          setBackendRealizedYield(sumRealizedYield(records));
+        }
+      })
+      .catch((err) => {
+        console.warn('[Statements] Backend withdrawal records unavailable:', err);
+      });
+  }, [walletAddress]);
 
   // Memoize grouped transactions for display - expensive grouping operation
   const displayItems = useMemo(
@@ -508,9 +526,11 @@ export default function TransactionHistoryScreen({
     // Check if data is still loading (no transactions yet)
     const isDataLoading = summary.transactionCount === 0 && currentBalance === 0;
 
-    // Use pre-calculated values from summary (ensures consistency with PDF export)
+    // Use backend withdrawal records for REALIZED if available,
+    // otherwise fall back to fee-based reverse-engineering from summary.
     // - INVESTED: summary.totalDeposited (net deposited to vaults)
-    // - REALIZED: summary.realizedEarnings (gross yield - fees)
+    // - REALIZED: backendRealizedYield ?? summary.realizedEarnings
+    const realizedAmount = backendRealizedYield ?? summary.realizedEarnings;
 
     // Format realized earnings with + sign if positive
     const formatRealized = (amount: number): string => {
@@ -521,7 +541,7 @@ export default function TransactionHistoryScreen({
     // Get realized color: green if positive, neutral if zero
     const getRealizedStyle = () => {
       if (isDataLoading) return {}; // neutral while loading
-      if (summary.realizedEarnings > 0) return styles.positive;
+      if (realizedAmount > 0) return styles.positive;
       return {}; // neutral color (default black) for $0
     };
 
@@ -537,7 +557,7 @@ export default function TransactionHistoryScreen({
         <View style={styles.summaryBarItem}>
           <Text style={styles.summaryBarLabel}>Realized</Text>
           <Text style={[styles.summaryBarValue, getRealizedStyle()]}>
-            {isDataLoading ? '---' : formatRealized(summary.realizedEarnings)}
+            {isDataLoading ? '---' : formatRealized(realizedAmount)}
           </Text>
         </View>
       </View>

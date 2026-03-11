@@ -14,6 +14,7 @@ import {
 } from '../constants/contracts';
 import { type VaultPosition } from './blockchain';
 import { sendTransactionNotification } from './notifications';
+import { recordCostBasisDeposit, recordCostBasisWithdrawal } from './costBasis';
 import { type SmartWalletClient } from '../types/wallet';
 import { getErrorMessage } from '../utils/errorHelpers';
 import { rpcCall, hexToBigInt, delay } from './rpc';
@@ -571,6 +572,21 @@ export async function executeWithdrawBatch(
 
       debugLog(`[Withdraw] SUCCESS! Confirmed in block ${confirmation.blockNumber}`);
 
+      // Record withdrawal to cost basis backend (fire-and-forget)
+      const yieldAmt = parseFloat(batch.yieldAmount);
+      const feeAmt = parseFloat(batch.feeAmount);
+      const currentVal = parseFloat(batch.currentValue);
+      const depositedVal = parseFloat(batch.totalDeposited);
+      recordCostBasisWithdrawal(walletAddress, {
+        withdrawnAmount: currentVal,
+        costBasisPortion: depositedVal,
+        yieldPortion: Math.max(0, yieldAmt),
+        feePaid: feeAmt,
+        txHash: hash,
+      }).catch((err) => {
+        console.warn('[Withdraw] Cost basis withdrawal record failed (non-blocking):', err);
+      });
+
       // Send push notification for successful withdrawal
       sendTransactionNotification({
         type: 'withdrawal',
@@ -829,6 +845,16 @@ export async function executeStrategyBatch(
       throw new Error(`Simulation failed: ${simulation.error}`);
     }
     debugLog('[Deposit] Simulation passed!');
+  }
+
+  // Record cost basis BEFORE on-chain execution (write-ahead)
+  const depositAmount = parseFloat(batch.totalAmount);
+  try {
+    await recordCostBasisDeposit(walletAddress, depositAmount);
+    debugLog(`[Deposit] Cost basis recorded: $${depositAmount}`);
+  } catch (costBasisError) {
+    // Log but don't block — the old depositTracker still records as fallback
+    console.warn('[Deposit] Cost basis pre-record failed (non-blocking):', costBasisError);
   }
 
   // Retry logic for nonce errors

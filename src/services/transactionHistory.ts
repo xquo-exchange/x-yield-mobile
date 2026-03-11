@@ -27,6 +27,7 @@ import { TOKENS, UNFLAT_TREASURY_ADDRESS, MORPHO } from '../constants/contracts'
 import { MORPHO_VAULTS } from '../constants/strategies';
 import { type BlockscoutTokenTransfer, type BlockscoutApiResponse } from '../types/api';
 import { getTotalDeposited } from './depositTracker';
+import { getWithdrawalRecords, sumRealizedYield, sumTotalFeesPaid } from './costBasis';
 
 // Re-export formatting utilities for backward compatibility
 export {
@@ -831,12 +832,13 @@ export async function getReliableDeposited(
 }
 
 /**
- * Get REALIZED earnings directly from fee transactions
+ * Get REALIZED earnings from backend withdrawal records (primary)
+ * or from fee transactions (fallback).
  *
- * This is the MOST RELIABLE way to calculate earnings because:
- * - It's based on actual fee transactions (verifiable on-chain)
- * - Fee = 15% of yield, so: grossYield = fees / 0.15
- * - realizedEarnings = grossYield - fees = grossYield * 0.85
+ * Primary source: Backend withdrawal records store exact yield breakdown
+ * per withdrawal — no reverse-engineering needed.
+ *
+ * Fallback: Fee-based calculation (fee / 0.15 = gross yield).
  *
  * NOTE: This only counts REALIZED earnings (yield that was withdrawn).
  * Unrealized yield (still in vault) is NOT included.
@@ -853,7 +855,23 @@ export async function getRealizedEarnings(
   grossYield: number;
   realizedEarnings: number;
 }> {
-  // Get cached transactions or fetch fresh
+  // PRIMARY: Use backend withdrawal records (exact yield data)
+  try {
+    const records = await getWithdrawalRecords(walletAddress);
+    if (records.length > 0) {
+      const realizedEarnings = sumRealizedYield(records);
+      const totalFees = sumTotalFeesPaid(records);
+      const grossYield = realizedEarnings + totalFees;
+
+      debugLog(`[getRealizedEarnings] Backend: Fees: $${totalFees.toFixed(2)}, Gross: $${grossYield.toFixed(2)}, Net: $${realizedEarnings.toFixed(2)}`);
+
+      return { totalFees, grossYield, realizedEarnings };
+    }
+  } catch (error) {
+    console.warn('[getRealizedEarnings] Backend withdrawal records failed, using fee fallback:', error);
+  }
+
+  // FALLBACK: Reverse-engineer from fee transactions
   let transactions = await getCachedTransactions(walletAddress);
 
   if (!transactions) {
@@ -877,7 +895,7 @@ export async function getRealizedEarnings(
   const grossYield = totalFees > 0 ? totalFees / PLATFORM_FEE_RATE : 0;
   const realizedEarnings = grossYield - totalFees; // Net after fees (85% of gross)
 
-  debugLog(`[getRealizedEarnings] Fees: $${totalFees.toFixed(2)}, Gross: $${grossYield.toFixed(2)}, Net: $${realizedEarnings.toFixed(2)}`);
+  debugLog(`[getRealizedEarnings] Fallback: Fees: $${totalFees.toFixed(2)}, Gross: $${grossYield.toFixed(2)}, Net: $${realizedEarnings.toFixed(2)}`);
 
   return {
     totalFees,
