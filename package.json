@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "node --localstorage-file=/tmp/jest-localstorage ./node_modules/.bin/jest"
   },
   "dependencies": {
     "@ethersproject/shims": "^5.8.0",
@@ -58,7 +59,10 @@
     "viem": "^2.43.5"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/react": "~19.1.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
     "typescript": "~5.9.2"
   },
   "private": true
