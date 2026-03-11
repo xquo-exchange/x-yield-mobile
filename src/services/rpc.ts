@@ -11,7 +11,7 @@ const debugLog = (message: string, ...args: unknown[]) => {
   if (DEBUG) console.log(message, ...args);
 };
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+export const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export function hexToBigInt(hex: string): bigint {
   if (!hex || hex === '0x' || hex === '0x0') return BigInt(0);

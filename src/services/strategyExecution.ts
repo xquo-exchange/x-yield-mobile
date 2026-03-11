@@ -16,7 +16,7 @@ import { type VaultPosition } from './blockchain';
 import { sendTransactionNotification } from './notifications';
 import { type SmartWalletClient } from '../types/wallet';
 import { getErrorMessage } from '../utils/errorHelpers';
-import { rpcCall, hexToBigInt } from './rpc';
+import { rpcCall, hexToBigInt, delay } from './rpc';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -63,8 +63,6 @@ export interface WithdrawBatch {
   feePercent: number;
   hasProfits: boolean;
 }
-
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 interface TransactionReceipt {
   status: string;

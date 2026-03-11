@@ -3,9 +3,9 @@
  * Fetches wallet balances and vault positions from Base chain
  */
 
-import { formatEther, formatUnits, type Address, encodeFunctionData } from 'viem';
+import { formatEther, formatUnits, type Address } from 'viem';
 import { TOKENS } from '../constants/contracts';
-import { MORPHO_VAULTS, MORPHO_VAULT_ABI } from '../constants/strategies';
+import { MORPHO_VAULTS } from '../constants/strategies';
 import { rpcCall, hexToBigInt } from './rpc';
 
 // Debug mode - controlled by __DEV__
@@ -33,6 +33,10 @@ async function getEthPriceUsd(): Promise<number> {
     const response = await fetch(
       'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
     );
+    if (!response.ok) {
+      debugLog(`[Blockchain] ETH price API returned ${response.status}`);
+      return cachedEthPrice ?? 0;
+    }
     const data = await response.json();
     const price = data?.ethereum?.usd;
     if (typeof price === 'number' && price > 0) {
