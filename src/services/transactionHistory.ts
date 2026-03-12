@@ -23,6 +23,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { TOKENS, UNFLAT_TREASURY_ADDRESS, MORPHO } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
 import { type BlockscoutTokenTransfer, type BlockscoutApiResponse } from '../types/api';
@@ -60,12 +61,11 @@ const TRANSFER_EVENT_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a116
 // Base RPC max block range per eth_getLogs query
 const RPC_MAX_BLOCK_RANGE = 10000;
 
-// Dedicated RPC endpoint for eth_getLogs fallback — separate from mainnet.base.org
-// to avoid competing with position-fetching calls and hitting rate limits
-const LOGS_RPC_URLS = [
-  'https://base.publicnode.com',
-  'https://base-mainnet.public.blastapi.io',
-];
+// Coinbase Developer Platform RPC — primary endpoint for eth_getLogs (50 RPS, reliable)
+const CDP_RPC_URL = Constants.expoConfig?.extra?.cdpRpcUrl ?? '';
+
+// RPC endpoints for eth_getLogs fallback: CDP primary, publicnode.com as backup
+const LOGS_RPC_URLS = [CDP_RPC_URL, 'https://base.publicnode.com'].filter(Boolean);
 
 // Cache configuration
 const CACHE_KEY_PREFIX = 'tx_history_';

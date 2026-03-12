@@ -3,6 +3,7 @@
  * Handles JSON-RPC calls to Base chain with retry logic and fallback URLs
  */
 
+import Constants from 'expo-constants';
 import { BASE_RPC_URL, BASE_RPC_FALLBACK } from '../constants/contracts';
 
 // Debug mode - controlled by __DEV__
@@ -10,6 +11,9 @@ const DEBUG = __DEV__ ?? false;
 const debugLog = (message: string, ...args: unknown[]) => {
   if (DEBUG) console.log(message, ...args);
 };
+
+// Coinbase Developer Platform RPC — primary endpoint (50 RPS, reliable)
+const CDP_RPC_URL = Constants.expoConfig?.extra?.cdpRpcUrl ?? '';
 
 export const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -24,10 +28,11 @@ export function hexToBigInt(hex: string): bigint {
 
 /**
  * RPC call with retry and fallback
- * Retries up to 3 times with exponential backoff, falling back to secondary RPC
+ * Retries up to 3 times with exponential backoff, falling back to secondary RPCs
+ * Order: CDP (Coinbase) → mainnet.base.org → base.publicnode.com
  */
 export async function rpcCall(method: string, params: unknown[] = []): Promise<unknown> {
-  const rpcs = [BASE_RPC_URL, BASE_RPC_FALLBACK];
+  const rpcs = [CDP_RPC_URL, BASE_RPC_URL, BASE_RPC_FALLBACK].filter(Boolean);
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const rpcUrl = rpcs[Math.min(attempt, rpcs.length - 1)];
