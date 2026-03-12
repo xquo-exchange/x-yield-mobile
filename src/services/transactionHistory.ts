@@ -2,8 +2,10 @@
  * Transaction History Service
  * Fetches and aggregates transaction data from blockchain only
  *
- * Data source: Blockscout API (on-chain ERC20 transfers)
- * - All data is verifiable on-chain via BaseScan/Blockscout
+ * Data source: CDP Address History API (primary), Blockscout API (fallback)
+ * - CDP is Coinbase's indexer — always up-to-date, no lag
+ * - Blockscout is free but can be 100K+ blocks behind chain tip
+ * - All data is verifiable on-chain
  * - No backend dependency - pure blockchain data
  *
  * Calculations (vault-based):
@@ -28,7 +30,6 @@ import { TOKENS, UNFLAT_TREASURY_ADDRESS, MORPHO } from '../constants/contracts'
 import { MORPHO_VAULTS } from '../constants/strategies';
 import { type BlockscoutTokenTransfer, type BlockscoutApiResponse } from '../types/api';
 import { getTotalDeposited } from './depositTracker';
-import { rpcCall, hexToBigInt } from './rpc';
 
 // Re-export formatting utilities for backward compatibility
 export {
@@ -48,30 +49,12 @@ const debugLog = (message: string, ...args: unknown[]) => {
   if (DEBUG) console.log(message, ...args);
 };
 
-// Blockscout API for Base chain (free, no API key required) — PRIMARY
-const BLOCKSCOUT_API_URL = 'https://base.blockscout.com/api';
-
-// If Blockscout's latest indexed block is more than this many blocks behind chain tip,
-// fall back to direct RPC eth_getLogs for the missing range
-const BLOCKSCOUT_STALE_THRESHOLD_BLOCKS = 1000;
-
-// Maximum gap (in blocks) we'll attempt to fill via RPC eth_getLogs.
-// Beyond this, Blockscout data alone is sufficient — gap-fill would be too slow.
-// 50K blocks ÷ 1000 per chunk = 50 chunks × 2 queries = ~100 RPC calls (~10s at 10 concurrency)
-const MAX_RPC_GAP_BLOCKS = 50000;
-
-// ERC-20 Transfer event topic: Transfer(address,address,uint256)
-const TRANSFER_EVENT_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-
-// Base RPC max block range per eth_getLogs query
-// CDP (Coinbase) limits to 1000 blocks per eth_getLogs call
-const RPC_MAX_BLOCK_RANGE = 1000;
-
-// Coinbase Developer Platform RPC — primary endpoint for eth_getLogs (50 RPS, reliable)
+// CDP Address History API — PRIMARY transaction history source
+// Uses the same RPC URL as other CDP calls (API key included in URL)
 const CDP_RPC_URL = Constants.expoConfig?.extra?.cdpRpcUrl ?? '';
 
-// RPC endpoints for eth_getLogs fallback: CDP primary, publicnode.com as backup
-const LOGS_RPC_URLS = [CDP_RPC_URL, 'https://base.publicnode.com'].filter(Boolean);
+// Blockscout API for Base chain (free, no API key required) — FALLBACK
+const BLOCKSCOUT_API_URL = 'https://base.blockscout.com/api';
 
 // Cache configuration
 const CACHE_KEY_PREFIX = 'tx_history_';
@@ -252,20 +235,7 @@ function isInternalAddress(address: string): boolean {
 
 
 /**
- * Get the current chain tip block number via RPC
- */
-async function getChainTipBlock(): Promise<number> {
-  try {
-    const result = await rpcCall('eth_blockNumber', []);
-    return Number(hexToBigInt(result as string));
-  } catch (error) {
-    debugLog('[TransactionHistory] Failed to get chain tip block:', error);
-    return 0;
-  }
-}
-
-/**
- * Fetch ERC20 token transfers from Blockscout API (Etherscan-compatible)
+ * Fetch ERC20 token transfers from Blockscout API (Etherscan-compatible) — FALLBACK
  */
 async function fetchFromBlockscout(
   walletAddress: string,
@@ -309,216 +279,167 @@ async function fetchFromBlockscout(
   return [];
 }
 
-/**
- * Pad an address to 32-byte hex topic (left-padded with zeros)
- */
-function addressToTopic(address: string): string {
-  return '0x' + address.toLowerCase().replace('0x', '').padStart(64, '0');
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// CDP ADDRESS HISTORY API — PRIMARY SOURCE
+// ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * RPC call using the dedicated logs endpoint (publicnode.com / blastapi.io).
- * Avoids rate-limiting on mainnet.base.org which is used by balance/position fetching.
- */
-async function logsRpcCall(method: string, params: unknown[]): Promise<unknown> {
-  let lastError: unknown;
-
-  for (const rpcUrl of LOGS_RPC_URLS) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for heavy queries
-
-      const response = await fetch(rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const json = await response.json();
-      if (json.error) {
-        throw new Error(json.error.message || JSON.stringify(json.error));
-      }
-
-      return json.result;
-    } catch (error) {
-      lastError = error;
-      debugLog(`[TransactionHistory] logsRpcCall failed on ${rpcUrl}:`, error);
-    }
-  }
-
-  throw lastError;
-}
-
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// RPC eth_getLogs log entry
-interface RpcLogEntry {
-  address: string;
-  topics: string[];
-  data: string;
-  blockNumber: string;
+/** CDP token transfer within a transaction */
+interface CdpTokenTransfer {
+  tokenAddress: string;
+  fromAddress: string;
+  toAddress: string;
+  value: string;
   transactionHash: string;
-  logIndex: string;
-  blockHash: string;
-  transactionIndex: string;
-  removed: boolean;
+  blockNumber: number | string;
+  logIndex: number | string;
+  erc20?: {
+    fromAddress: string;
+    toAddress: string;
+    value: string;
+  };
+}
+
+/** CDP transaction response */
+interface CdpTransaction {
+  hash: string;
+  blockHeight: string;
+  status: string;
+  ethereum: {
+    blockNumber: string;
+    blockTimestamp: string; // ISO 8601: "2026-03-12T09:16:51Z"
+    from: string;
+    to: string;
+    tokenTransfers?: CdpTokenTransfer[];
+  };
+}
+
+/** CDP API response */
+interface CdpListAddressTransactionsResult {
+  addressTransactions: CdpTransaction[];
+  nextPageToken?: string;
 }
 
 /**
- * Fetch ERC-20 Transfer logs via eth_getLogs for a single block range chunk.
- * Returns logs where the wallet is sender (topic1) OR receiver (topic2).
+ * Fetch all USDC token transfers from CDP Address History API.
+ * Uses paginated cdp_listAddressTransactions with adaptive page sizing
+ * to handle gRPC message size limits on large transactions.
  */
-async function fetchTransferLogsChunk(
-  tokenAddress: string,
-  walletTopic: string,
-  fromBlock: number,
-  toBlock: number,
-): Promise<RpcLogEntry[]> {
-  // We need two queries: one for outgoing (topic1=wallet), one for incoming (topic2=wallet)
-  // eth_getLogs doesn't support OR across different topic positions in a single call
-  const [outgoing, incoming] = await Promise.all([
-    logsRpcCall('eth_getLogs', [{
-      fromBlock: '0x' + fromBlock.toString(16),
-      toBlock: '0x' + toBlock.toString(16),
-      address: tokenAddress,
-      topics: [TRANSFER_EVENT_TOPIC, walletTopic, null],
-    }]),
-    logsRpcCall('eth_getLogs', [{
-      fromBlock: '0x' + fromBlock.toString(16),
-      toBlock: '0x' + toBlock.toString(16),
-      address: tokenAddress,
-      topics: [TRANSFER_EVENT_TOPIC, null, walletTopic],
-    }]),
-  ]);
-
-  const outLogs = (outgoing as RpcLogEntry[]) || [];
-  const inLogs = (incoming as RpcLogEntry[]) || [];
-
-  // Deduplicate (a self-transfer would appear in both)
-  const seen = new Set<string>();
-  const all: RpcLogEntry[] = [];
-  for (const log of [...outLogs, ...inLogs]) {
-    const key = `${log.transactionHash}-${log.logIndex}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      all.push(log);
-    }
-  }
-
-  return all;
-}
-
-/**
- * Fetch ERC-20 Transfer logs via eth_getLogs for an arbitrary block range.
- * Automatically batches into RPC_MAX_BLOCK_RANGE chunks.
- * Runs at most 10 chunks concurrently (CDP supports 50 RPS).
- */
-async function fetchTransferLogsViaRpc(
-  tokenAddress: string,
+async function fetchFromCdp(
   walletAddress: string,
-  fromBlock: number,
-  toBlock: number,
-): Promise<RpcLogEntry[]> {
-  const walletTopic = addressToTopic(walletAddress);
-  const totalRange = toBlock - fromBlock + 1;
-
-  if (totalRange <= RPC_MAX_BLOCK_RANGE) {
-    return fetchTransferLogsChunk(tokenAddress, walletTopic, fromBlock, toBlock);
+  tokenAddress: string,
+): Promise<BlockscoutTokenTransfer[]> {
+  if (!CDP_RPC_URL) {
+    debugLog('[TransactionHistory] CDP RPC URL not configured, skipping CDP');
+    return [];
   }
 
-  // Split into chunks
-  const chunks: Array<{ from: number; to: number }> = [];
-  let cursor = fromBlock;
-  while (cursor <= toBlock) {
-    const chunkEnd = Math.min(cursor + RPC_MAX_BLOCK_RANGE - 1, toBlock);
-    chunks.push({ from: cursor, to: chunkEnd });
-    cursor = chunkEnd + 1;
-  }
+  const walletLower = walletAddress.toLowerCase();
+  const tokenLower = tokenAddress.toLowerCase();
+  const transfers: BlockscoutTokenTransfer[] = [];
+  let pageToken = '';
+  let page = 0;
+  const MAX_PAGES = 100; // Safety limit
 
-  debugLog(`[TransactionHistory] RPC fallback: ${totalRange} blocks in ${chunks.length} chunks (batches of 10)`);
+  debugLog('[TransactionHistory] Fetching from CDP Address History API for:', walletAddress);
 
-  // CDP supports 50 RPS — run 10 chunks concurrently (each chunk = 2 queries)
-  const CONCURRENCY = 10;
-  const allLogs: RpcLogEntry[] = [];
+  while (page < MAX_PAGES) {
+    page++;
 
-  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
-    const batch = chunks.slice(i, i + CONCURRENCY);
-    const results = await Promise.allSettled(
-      batch.map(chunk =>
-        fetchTransferLogsChunk(tokenAddress, walletTopic, chunk.from, chunk.to)
-      )
-    );
+    // Try decreasing page sizes to handle gRPC overflow on large transactions
+    let result: CdpListAddressTransactionsResult | null = null;
+    for (const pageSize of [10, 5, 3, 1]) {
+      try {
+        const params: Record<string, unknown> = {
+          address: walletLower,
+          pageSize,
+        };
+        if (pageToken) params.pageToken = pageToken;
 
-    for (let j = 0; j < results.length; j++) {
-      const result = results[j];
-      if (result.status === 'fulfilled') {
-        allLogs.push(...result.value);
-      } else {
-        const chunk = batch[j];
-        debugLog(`[TransactionHistory] RPC getLogs failed for blocks ${chunk.from}-${chunk.to}: ${result.reason}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+        const response = await fetch(CDP_RPC_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: 1,
+            jsonrpc: '2.0',
+            method: 'cdp_listAddressTransactions',
+            params: [params],
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const json = await response.json();
+
+        // gRPC overflow returns { result: { code: 8, message: "grpc: ..." } }
+        if (json.result?.code || json.error) {
+          debugLog(`[TransactionHistory] CDP page ${page} pageSize=${pageSize} overflow, reducing...`);
+          continue;
+        }
+
+        result = json.result as CdpListAddressTransactionsResult;
+        break;
+      } catch (error) {
+        debugLog(`[TransactionHistory] CDP page ${page} pageSize=${pageSize} failed:`, error);
+        if (pageSize === 1) throw error;
       }
     }
+
+    if (!result) {
+      console.error(`[TransactionHistory] CDP page ${page} failed at all page sizes`);
+      break;
+    }
+
+    // Extract USDC transfers involving the wallet from each transaction
+    for (const tx of result.addressTransactions) {
+      const blockTimestamp = tx.ethereum?.blockTimestamp;
+      // Convert ISO 8601 to unix timestamp seconds
+      const unixTimestamp = blockTimestamp
+        ? Math.floor(new Date(blockTimestamp).getTime() / 1000).toString()
+        : '0';
+
+      for (const tt of tx.ethereum?.tokenTransfers || []) {
+        if (tt.tokenAddress?.toLowerCase() !== tokenLower) continue;
+
+        const from = (tt.fromAddress || tt.erc20?.fromAddress || '').toLowerCase();
+        const to = (tt.toAddress || tt.erc20?.toAddress || '').toLowerCase();
+
+        // Only include transfers where wallet is sender or receiver
+        if (from !== walletLower && to !== walletLower) continue;
+
+        transfers.push({
+          hash: tx.hash,
+          from,
+          to,
+          value: (tt.erc20?.value || tt.value || '0').toString(),
+          timeStamp: unixTimestamp,
+          blockNumber: tx.blockHeight,
+          tokenDecimal: '6',
+          tokenName: 'USD Coin',
+          tokenSymbol: 'USDC',
+          contractAddress: tt.tokenAddress,
+        });
+      }
+    }
+
+    debugLog(`[TransactionHistory] CDP page ${page}: ${result.addressTransactions.length} txs, ${transfers.length} USDC transfers total`);
+
+    pageToken = result.nextPageToken || '';
+    if (!pageToken) break;
   }
 
-  return allLogs;
-}
-
-/**
- * Convert RPC log entries to BlockscoutTokenTransfer format
- * so the rest of the pipeline works unchanged.
- */
-function rpcLogsToTransfers(logs: RpcLogEntry[]): BlockscoutTokenTransfer[] {
-  return logs.map(log => {
-    // topics[1] = from (32-byte padded), topics[2] = to (32-byte padded)
-    const from = '0x' + (log.topics[1] ?? '').slice(26);
-    const to = '0x' + (log.topics[2] ?? '').slice(26);
-    // data = uint256 value (hex encoded)
-    const value = hexToBigInt(log.data).toString();
-    const blockNumber = Number(hexToBigInt(log.blockNumber)).toString();
-    // Base has ~2s block time; approximate timestamp from block number
-    // We don't have timestamp from logs, so we use 0 and let the parser handle it
-    const timeStamp = '0';
-
-    return {
-      hash: log.transactionHash,
-      from,
-      to,
-      value,
-      timeStamp,
-      blockNumber,
-      tokenDecimal: '6',
-      tokenName: 'USD Coin',
-      tokenSymbol: 'USDC',
-      contractAddress: log.address,
-    };
-  });
-}
-
-/**
- * Find the highest block number in a set of transfers
- */
-function maxBlockInTransfers(transfers: BlockscoutTokenTransfer[]): number {
-  let max = 0;
-  for (const t of transfers) {
-    const bn = parseInt(t.blockNumber ?? '0', 10);
-    if (bn > max) max = bn;
-  }
-  return max;
+  debugLog(`[TransactionHistory] CDP finished: ${transfers.length} USDC transfers in ${page} pages`);
+  return transfers;
 }
 
 /**
  * Fetch ERC20 token transfers for a wallet.
  *
  * Strategy:
- * 1. Fetch from Blockscout (free, primary)
- * 2. Check if Blockscout's latest indexed block is behind chain tip by >1000 blocks
- * 3. If stale, fetch missing range via direct RPC eth_getLogs and merge
+ * 1. Try CDP Address History API (Coinbase indexer — always up-to-date)
+ * 2. Fall back to Blockscout if CDP fails or is not configured
  */
 async function fetchTokenTransfers(
   walletAddress: string,
@@ -531,137 +452,33 @@ async function fetchTokenTransfers(
     return [];
   }
 
+  // PRIMARY: CDP Address History API
   try {
-    // PRIMARY: Blockscout
+    const cdpTransfers = await fetchFromCdp(walletAddress, tokenAddress);
+    if (cdpTransfers.length > 0) {
+      debugLog(`[TransactionHistory] Using CDP data: ${cdpTransfers.length} transfers`);
+      return cdpTransfers;
+    }
+    debugLog('[TransactionHistory] CDP returned 0 transfers, trying Blockscout...');
+  } catch (error) {
+    console.error('[TransactionHistory] CDP failed, falling back to Blockscout:', error);
+  }
+
+  // FALLBACK: Blockscout
+  try {
     debugLog('[TransactionHistory] Fetching from Blockscout for:', walletAddress);
     const blockscoutTransfers = await fetchFromBlockscout(
       walletAddress, tokenAddress, startBlock, endBlock,
     );
     debugLog('[TransactionHistory] Blockscout returned', blockscoutTransfers.length, 'transfers');
-
-    // Check if Blockscout is stale
-    const blockscoutMaxBlock = maxBlockInTransfers(blockscoutTransfers);
-    const chainTip = await getChainTipBlock();
-
-    if (chainTip > 0 && blockscoutMaxBlock > 0 &&
-        (chainTip - blockscoutMaxBlock) > BLOCKSCOUT_STALE_THRESHOLD_BLOCKS) {
-
-      const gap = chainTip - blockscoutMaxBlock;
-      debugLog(
-        `[TransactionHistory] Blockscout is behind: latest indexed block ${blockscoutMaxBlock}, chain tip ${chainTip}, gap ${gap}`,
-      );
-
-      // If gap is too large, skip RPC gap-fill entirely — it would be too slow
-      // and Blockscout has all historical data anyway
-      if (gap > MAX_RPC_GAP_BLOCKS) {
-        debugLog(`[TransactionHistory] Gap ${gap} exceeds max ${MAX_RPC_GAP_BLOCKS} blocks — skipping RPC gap-fill`);
-        return blockscoutTransfers;
-      }
-
-      // FALLBACK: Fetch missing blocks via RPC eth_getLogs
-      // Blockscout data is ALWAYS the base — RPC only adds new transfers it missed
-      const gapStart = blockscoutMaxBlock + 1;
-      debugLog(`[TransactionHistory] Fetching gap blocks ${gapStart}–${chainTip} via RPC eth_getLogs`);
-
-      try {
-        const rpcLogs = await fetchTransferLogsViaRpc(tokenAddress, walletAddress, gapStart, chainTip);
-        const rpcTransfers = rpcLogsToTransfers(rpcLogs);
-        debugLog(`[TransactionHistory] RPC returned ${rpcTransfers.length} transfers for gap`);
-
-        if (rpcTransfers.length > 0) {
-          // Fetch block timestamps for the RPC transfers so they get correct dates
-          await enrichTransfersWithTimestamps(rpcTransfers);
-
-          // Start with ALL Blockscout transfers, then add any new ones from RPC
-          const seen = new Set<string>();
-          const merged: BlockscoutTokenTransfer[] = [];
-
-          // Blockscout first — always included
-          for (const t of blockscoutTransfers) {
-            const key = `${t.hash}-${t.from.toLowerCase()}-${t.to.toLowerCase()}-${t.value}`;
-            seen.add(key);
-            merged.push(t);
-          }
-
-          // Add RPC transfers that Blockscout missed
-          for (const t of rpcTransfers) {
-            const key = `${t.hash}-${t.from.toLowerCase()}-${t.to.toLowerCase()}-${t.value}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              merged.push(t);
-            }
-          }
-
-          // Sort desc by block number (newest first)
-          merged.sort((a, b) =>
-            parseInt(b.blockNumber ?? '0', 10) - parseInt(a.blockNumber ?? '0', 10)
-          );
-
-          debugLog(`[TransactionHistory] Merged: ${merged.length} transfers (${rpcTransfers.length} new from RPC gap)`);
-          return merged;
-        } else {
-          debugLog('[TransactionHistory] RPC returned 0 transfers for gap — no new activity');
-        }
-      } catch (rpcError) {
-        console.error('[TransactionHistory] RPC fallback failed (non-fatal):', rpcError);
-      }
-
-      // Always return Blockscout data even if RPC found nothing or failed
-      debugLog(`[TransactionHistory] Returning ${blockscoutTransfers.length} Blockscout transfers`)
-    } else if (chainTip > 0 && blockscoutMaxBlock > 0) {
-      debugLog(`[TransactionHistory] Blockscout is fresh: gap=${chainTip - blockscoutMaxBlock} blocks`);
-    }
-
     return blockscoutTransfers;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      console.error('[TransactionHistory] Request timed out');
+      console.error('[TransactionHistory] Blockscout request timed out');
     } else {
-      console.error('[TransactionHistory] Error fetching transfers:', error);
+      console.error('[TransactionHistory] Blockscout error:', error);
     }
     return [];
-  }
-}
-
-/**
- * Enrich transfers with block timestamps via eth_getBlockByNumber.
- * Fetches unique blocks and sets the timeStamp field on each transfer.
- */
-async function enrichTransfersWithTimestamps(transfers: BlockscoutTokenTransfer[]): Promise<void> {
-  // Collect unique block numbers
-  const blockNumbers = [...new Set(transfers.map(t => t.blockNumber).filter(Boolean))] as string[];
-
-  if (blockNumbers.length === 0) return;
-
-  // Fetch timestamps for each block (batch to avoid too many calls)
-  const blockTimestamps = new Map<string, string>();
-
-  // Fetch in small batches to avoid rate limits on free endpoints
-  const batchSize = 5;
-  for (let i = 0; i < blockNumbers.length; i += batchSize) {
-    const batch = blockNumbers.slice(i, i + batchSize);
-    const results = await Promise.allSettled(
-      batch.map(async (bn) => {
-        const hexBlock = '0x' + parseInt(bn, 10).toString(16);
-        const block = await logsRpcCall('eth_getBlockByNumber', [hexBlock, false]) as { timestamp?: string } | null;
-        if (block?.timestamp) {
-          blockTimestamps.set(bn, Number(hexToBigInt(block.timestamp)).toString());
-        }
-      })
-    );
-    // Log failures but continue
-    for (const r of results) {
-      if (r.status === 'rejected') {
-        debugLog('[TransactionHistory] Block timestamp fetch failed:', r.reason);
-      }
-    }
-  }
-
-  // Apply timestamps to transfers
-  for (const t of transfers) {
-    if (t.blockNumber && blockTimestamps.has(t.blockNumber)) {
-      t.timeStamp = blockTimestamps.get(t.blockNumber)!;
-    }
   }
 }
 
