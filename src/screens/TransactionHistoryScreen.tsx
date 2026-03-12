@@ -515,7 +515,7 @@ export default function TransactionHistoryScreen({
     // Format realized earnings with + sign if positive
     const formatRealized = (amount: number): string => {
       if (amount === 0) return '$0.00';
-      return `+${formatCurrency(amount)}`;
+      return `+${formatCurrency(amount, 2)}`;
     };
 
     // Get realized color: green if positive, neutral if zero
@@ -530,7 +530,7 @@ export default function TransactionHistoryScreen({
         <View style={styles.summaryBarItem}>
           <Text style={styles.summaryBarLabel}>Invested</Text>
           <Text style={styles.summaryBarValue}>
-            {isDataLoading ? '---' : formatCurrency(summary.totalDeposited)}
+            {isDataLoading ? '---' : formatCurrency(summary.totalDeposited, 2)}
           </Text>
         </View>
         <View style={styles.summaryBarDivider} />

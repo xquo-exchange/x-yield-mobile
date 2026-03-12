@@ -199,7 +199,12 @@ async function saveBlockchainCache(walletAddress: string, totalDeposited: number
 }
 
 /**
- * Fetch ERC20 token transfers from Blockscout API
+ * Fetch ERC20 token transfers for deposit tracking.
+ *
+ * Uses CDP transfer cache from transactionHistory (shared AsyncStorage key)
+ * as the primary source — this avoids a redundant Blockscout API call since
+ * transactionHistory already fetches and caches all USDC transfers via CDP.
+ * Falls back to Blockscout if CDP cache is empty.
  */
 async function fetchTokenTransfersForDeposits(
   walletAddress: string,
@@ -210,6 +215,23 @@ async function fetchTokenTransfersForDeposits(
     return [];
   }
 
+  // Try CDP cache first (written by transactionHistory.ts fetchFromCdp)
+  try {
+    const cdpCacheKey = 'cdp_transfers_' + walletAddress.toLowerCase();
+    const cdpData = await AsyncStorage.getItem(cdpCacheKey);
+    if (cdpData) {
+      const cache = JSON.parse(cdpData);
+      // Check TTL (5 minutes, same as transactionHistory)
+      if (cache.transfers && Date.now() - cache.timestamp < 5 * 60 * 1000) {
+        debugLog(`[DepositTracker] Using CDP cache: ${cache.transfers.length} transfers`);
+        return cache.transfers;
+      }
+    }
+  } catch {
+    // CDP cache read failure, fall through to Blockscout
+  }
+
+  // Fallback: fetch from Blockscout directly
   try {
     const url = new URL(BLOCKSCOUT_API_URL);
     url.searchParams.set('module', 'account');
@@ -218,9 +240,9 @@ async function fetchTokenTransfersForDeposits(
     url.searchParams.set('contractaddress', tokenAddress);
     url.searchParams.set('startblock', '0');
     url.searchParams.set('endblock', '99999999');
-    url.searchParams.set('sort', 'asc'); // CHRONOLOGICAL order (oldest first)
+    url.searchParams.set('sort', 'asc');
 
-    debugLog('[DepositTracker] Fetching blockchain data for:', walletAddress.slice(0, 10) + '...');
+    debugLog('[DepositTracker] CDP cache miss, fetching from Blockscout for:', walletAddress.slice(0, 10) + '...');
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);

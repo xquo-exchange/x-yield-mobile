@@ -105,7 +105,7 @@ export default function StrategiesScreen({ navigation }: StrategiesScreenProps) 
   const isTrulyEmpty = !hasPositions && hasNoCashToAdd;
 
   const displayDeposited = totalDeposited;
-  const totalYield = totalEarnings;
+  const totalYield = Math.max(0, savingsAmount - totalDeposited);
   const youReceive = savingsAmount;
 
   useEffect(() => {

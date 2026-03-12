@@ -63,6 +63,48 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // Platform fee rate (15% of yield)
 const PLATFORM_FEE_RATE = 0.15;
 
+// CDP raw transfer cache — stores the complete set of USDC transfers fetched from CDP.
+// Since historical transactions are immutable, we only re-fetch when:
+// 1. Cache doesn't exist yet (first load)
+// 2. Cache TTL expired and we want to pick up new transactions
+// The cache stores raw BlockscoutTokenTransfer[] which is reused by depositTracker too.
+const CDP_CACHE_KEY_PREFIX = 'cdp_transfers_';
+const CDP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+interface CdpTransferCache {
+  transfers: BlockscoutTokenTransfer[];
+  timestamp: number;
+  walletAddress: string;
+  transferCount: number;
+}
+
+async function getCdpCache(walletAddress: string): Promise<CdpTransferCache | null> {
+  try {
+    const key = CDP_CACHE_KEY_PREFIX + walletAddress.toLowerCase();
+    const data = await AsyncStorage.getItem(key);
+    if (!data) return null;
+    const cache: CdpTransferCache = JSON.parse(data);
+    if (Date.now() - cache.timestamp > CDP_CACHE_TTL_MS) return null;
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+async function saveCdpCache(walletAddress: string, transfers: BlockscoutTokenTransfer[]): Promise<void> {
+  try {
+    const key = CDP_CACHE_KEY_PREFIX + walletAddress.toLowerCase();
+    const cache: CdpTransferCache = {
+      transfers,
+      timestamp: Date.now(),
+      walletAddress: walletAddress.toLowerCase(),
+      transferCount: transfers.length,
+    };
+    await AsyncStorage.setItem(key, JSON.stringify(cache));
+  } catch {
+    // Cache save failure is non-critical
+  }
+}
 
 interface CachedTransactionData {
   transactions: Transaction[];
@@ -324,6 +366,9 @@ interface CdpListAddressTransactionsResult {
  * Fetch all USDC token transfers from CDP Address History API.
  * Uses paginated cdp_listAddressTransactions with adaptive page sizing
  * to handle gRPC message size limits on large transactions.
+ *
+ * Performance: caches the full transfer set in AsyncStorage. On subsequent
+ * calls within 5 minutes, returns cached data instantly (0 network calls).
  */
 async function fetchFromCdp(
   walletAddress: string,
@@ -332,6 +377,13 @@ async function fetchFromCdp(
   if (!CDP_RPC_URL) {
     debugLog('[TransactionHistory] CDP RPC URL not configured, skipping CDP');
     return [];
+  }
+
+  // Check cache first — returns immediately if fresh
+  const cached = await getCdpCache(walletAddress);
+  if (cached) {
+    debugLog(`[TransactionHistory] CDP cache hit: ${cached.transferCount} transfers`);
+    return cached.transfers;
   }
 
   const walletLower = walletAddress.toLowerCase();
@@ -405,9 +457,6 @@ async function fetchFromCdp(
         if (tt.tokenAddress?.toLowerCase() !== tokenLower) continue;
 
         // Prefer erc20 decoded fields — they reflect the actual ERC-20 Transfer event
-        // (from/to of the token movement). Top-level fromAddress/toAddress may reflect
-        // the transaction sender (e.g. the smart wallet) rather than the token sender
-        // (e.g. the vault contract during a redeem).
         const from = (tt.erc20?.fromAddress || tt.fromAddress || '').toLowerCase();
         const to = (tt.erc20?.toAddress || tt.toAddress || '').toLowerCase();
 
@@ -434,6 +483,9 @@ async function fetchFromCdp(
     pageToken = result.nextPageToken || '';
     if (!pageToken) break;
   }
+
+  // Cache the complete transfer set for subsequent calls
+  await saveCdpCache(walletAddress, transfers);
 
   debugLog(`[TransactionHistory] CDP finished: ${transfers.length} USDC transfers in ${page} pages`);
   return transfers;
@@ -699,13 +751,13 @@ function calculateSummary(
   const totalEarnings = currentBalance - netDeposited;
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // REALIZED EARNINGS CALCULATION
-  // Realized gains = total withdrawn from vaults minus total deposited to vaults.
-  // When withdrawals > deposits, the surplus is yield that was extracted.
+  // REALIZED EARNINGS CALCULATION (fee-based)
+  // Fee = 15% of yield per withdrawal cycle → gross yield = fees / 0.15
+  // This correctly accumulates across multiple deposit/withdraw cycles,
+  // unlike (withdrawals - deposits) which cancels out reinvested yield.
   // ═══════════════════════════════════════════════════════════════════════════
-  const realizedGains = totalWithdrawnFromVaults - totalDepositedToVaults;
-  const grossYieldRealized = realizedGains > 0 ? realizedGains : 0;
-  const realizedEarnings = grossYieldRealized - totalFees;
+  const grossYieldRealized = totalFeesExternal > 0 ? totalFeesExternal / PLATFORM_FEE_RATE : 0;
+  const realizedEarnings = grossYieldRealized - totalFeesExternal;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // COMPREHENSIVE SANITY CHECKS
@@ -767,7 +819,7 @@ function calculateSummary(
     allPassed,
   };
 
-  debugLog(`[Sanity] INVESTED: $${totalDepositedToVaults.toFixed(2)} | REALIZED: $${grossYieldRealized.toFixed(2)} | ${allPassed ? '✅ All checks passed' : '❌ Some checks failed'}`);
+  debugLog(`[Sanity] INVESTED: $${totalDepositedToVaults.toFixed(2)} | REALIZED: $${realizedEarnings.toFixed(2)} | FEES: $${totalFeesExternal.toFixed(2)} | ${allPassed ? '✅ All checks passed' : '❌ Some checks failed'}`);
 
   if (!allPassed) {
     if (!netDepositedCheck.passed) {
