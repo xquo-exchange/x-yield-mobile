@@ -4,6 +4,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getSecureItem, setSecureItem, removeSecureItem } from './secureStorage';
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -34,13 +35,12 @@ export interface DepositMilestoneResult {
  */
 export async function getMilestoneState(): Promise<MilestoneState> {
   try {
-    const [firstDeposit, depositsCount, totalDeposited, milestonesReached] =
-      await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.FIRST_DEPOSIT),
-        AsyncStorage.getItem(STORAGE_KEYS.DEPOSITS_COUNT),
-        AsyncStorage.getItem(STORAGE_KEYS.TOTAL_DEPOSITED),
-        AsyncStorage.getItem(STORAGE_KEYS.MILESTONES_REACHED),
-      ]);
+    const [firstDeposit, depositsCount, totalDeposited, milestonesReached] = await Promise.all([
+      getSecureItem(STORAGE_KEYS.FIRST_DEPOSIT),
+      getSecureItem(STORAGE_KEYS.DEPOSITS_COUNT),
+      getSecureItem(STORAGE_KEYS.TOTAL_DEPOSITED),
+      getSecureItem(STORAGE_KEYS.MILESTONES_REACHED),
+    ]);
 
     return {
       isFirstDeposit: firstDeposit !== 'true',
@@ -64,7 +64,7 @@ export async function getMilestoneState(): Promise<MilestoneState> {
  * Returns celebration data if first deposit or milestone reached
  */
 export async function recordDepositMilestone(
-  depositAmount: number
+  depositAmount: number,
 ): Promise<DepositMilestoneResult> {
   try {
     const currentState = await getMilestoneState();
@@ -91,23 +91,20 @@ export async function recordDepositMilestone(
 
     // Update storage
     const updates: Promise<void>[] = [
-      AsyncStorage.setItem(STORAGE_KEYS.DEPOSITS_COUNT, newDepositsCount.toString()),
-      AsyncStorage.setItem(STORAGE_KEYS.TOTAL_DEPOSITED, newTotalDeposited.toString()),
+      setSecureItem(STORAGE_KEYS.DEPOSITS_COUNT, newDepositsCount.toString()),
+      setSecureItem(STORAGE_KEYS.TOTAL_DEPOSITED, newTotalDeposited.toString()),
     ];
 
     // Mark first deposit as done
     if (isFirstDeposit) {
-      updates.push(AsyncStorage.setItem(STORAGE_KEYS.FIRST_DEPOSIT, 'true'));
+      updates.push(setSecureItem(STORAGE_KEYS.FIRST_DEPOSIT, 'true'));
     }
 
     // Record new milestone
     if (newMilestoneReached) {
       const updatedMilestones = [...previousMilestones, newMilestoneReached];
       updates.push(
-        AsyncStorage.setItem(
-          STORAGE_KEYS.MILESTONES_REACHED,
-          JSON.stringify(updatedMilestones)
-        )
+        setSecureItem(STORAGE_KEYS.MILESTONES_REACHED, JSON.stringify(updatedMilestones)),
       );
     }
 
@@ -163,10 +160,9 @@ export async function getMilestoneProgress(): Promise<{
   }
 
   // Find previous milestone for progress calculation
-  const previousMilestones = MILESTONE_AMOUNTS.filter(m => m < nextMilestone);
-  const previousMilestone = previousMilestones.length > 0
-    ? previousMilestones[previousMilestones.length - 1]
-    : 0;
+  const previousMilestones = MILESTONE_AMOUNTS.filter((m) => m < nextMilestone);
+  const previousMilestone =
+    previousMilestones.length > 0 ? previousMilestones[previousMilestones.length - 1] : 0;
 
   const rangeStart = previousMilestone;
   const rangeEnd = nextMilestone;
@@ -186,10 +182,10 @@ export async function getMilestoneProgress(): Promise<{
 export async function resetMilestones(): Promise<void> {
   try {
     await Promise.all([
-      AsyncStorage.removeItem(STORAGE_KEYS.FIRST_DEPOSIT),
-      AsyncStorage.removeItem(STORAGE_KEYS.DEPOSITS_COUNT),
-      AsyncStorage.removeItem(STORAGE_KEYS.TOTAL_DEPOSITED),
-      AsyncStorage.removeItem(STORAGE_KEYS.MILESTONES_REACHED),
+      removeSecureItem(STORAGE_KEYS.FIRST_DEPOSIT),
+      removeSecureItem(STORAGE_KEYS.DEPOSITS_COUNT),
+      removeSecureItem(STORAGE_KEYS.TOTAL_DEPOSITED),
+      removeSecureItem(STORAGE_KEYS.MILESTONES_REACHED),
     ]);
   } catch (error) {
     console.error('[MilestoneTracker] Error resetting milestones:', error);

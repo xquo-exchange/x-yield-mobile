@@ -6,7 +6,11 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { savePushToken as savePushTokenToSupabase, deletePushToken as deletePushTokenFromSupabase } from './supabase';
+import {
+  savePushToken as savePushTokenToSupabase,
+  deletePushToken as deletePushTokenFromSupabase,
+} from './supabase';
+import { getSecureItem, setSecureItem, removeSecureItem } from './secureStorage';
 
 const STORAGE_KEYS = {
   PUSH_TOKEN: '@notifications/push_token',
@@ -62,7 +66,7 @@ export const getDeviceId = async (): Promise<string> => {
  */
 export const savePushToken = async (token: string): Promise<void> => {
   try {
-    await AsyncStorage.setItem(STORAGE_KEYS.PUSH_TOKEN, token);
+    await setSecureItem(STORAGE_KEYS.PUSH_TOKEN, token);
   } catch (error) {
     console.error('Error saving push token:', error);
   }
@@ -73,7 +77,7 @@ export const savePushToken = async (token: string): Promise<void> => {
  */
 export const getSavedPushToken = async (): Promise<string | null> => {
   try {
-    return await AsyncStorage.getItem(STORAGE_KEYS.PUSH_TOKEN);
+    return await getSecureItem(STORAGE_KEYS.PUSH_TOKEN);
   } catch (error) {
     console.error('Error getting push token:', error);
     return null;
@@ -85,7 +89,7 @@ export const getSavedPushToken = async (): Promise<string | null> => {
  */
 export const removePushToken = async (): Promise<void> => {
   try {
-    await AsyncStorage.removeItem(STORAGE_KEYS.PUSH_TOKEN);
+    await removeSecureItem(STORAGE_KEYS.PUSH_TOKEN);
   } catch (error) {
     console.error('Error removing push token:', error);
   }
@@ -122,13 +126,13 @@ export const loadPreferences = async (): Promise<NotificationPreferences> => {
  * Register push token with Supabase
  */
 export const registerPushToken = async (
-  registration: DeviceRegistration
+  registration: DeviceRegistration,
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     // Save to Supabase
     const supabaseResult = await savePushTokenToSupabase(
       registration.walletAddress,
-      registration.expoPushToken
+      registration.expoPushToken,
     );
 
     if (!supabaseResult.success) {
@@ -150,7 +154,7 @@ export const registerPushToken = async (
  * Unregister push token from Supabase
  */
 export const unregisterPushToken = async (
-  walletAddress: string
+  walletAddress: string,
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     // Remove from Supabase
@@ -175,7 +179,7 @@ export const unregisterPushToken = async (
  */
 export const updatePreferencesOnServer = async (
   _walletAddress: string,
-  preferences: NotificationPreferences
+  preferences: NotificationPreferences,
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     await savePreferences(preferences);
@@ -199,7 +203,7 @@ export interface TransactionNotificationParams {
  * Respects user preferences for deposits/withdrawals
  */
 export const sendTransactionNotification = async (
-  params: TransactionNotificationParams
+  params: TransactionNotificationParams,
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     const { type, amount, txHash } = params;

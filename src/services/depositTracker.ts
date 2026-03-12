@@ -18,6 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isValidEthereumAddress, isValidAmount, sanitizeAddress } from '../utils/validation';
 import { TOKENS } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
+import { getSecureItem, setSecureItem } from './secureStorage';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -46,7 +47,7 @@ let getTotalDepositedLock: Promise<number> | null = null;
 
 // Vault addresses for matching (lowercase)
 const VAULT_ADDRESSES_SET = new Set(
-  Object.values(MORPHO_VAULTS).map(v => v.address.toLowerCase())
+  Object.values(MORPHO_VAULTS).map((v) => v.address.toLowerCase()),
 );
 
 // Full withdrawal threshold - if vault balance goes below this, consider it a full withdrawal
@@ -113,7 +114,7 @@ interface BlockscoutTokenTransfer {
  */
 async function getAllDeposits(): Promise<DepositData> {
   try {
-    const data = await AsyncStorage.getItem(STORAGE_KEY);
+    const data = await getSecureItem(STORAGE_KEY);
     if (!data) {
       debugLog('[DepositTracker] No existing deposit data found (first deposit)');
       return {};
@@ -134,7 +135,7 @@ async function saveDeposits(data: DepositData): Promise<void> {
   try {
     const jsonData = JSON.stringify(data);
     debugLog('[DepositTracker] Saving deposits:', jsonData);
-    await AsyncStorage.setItem(STORAGE_KEY, jsonData);
+    await setSecureItem(STORAGE_KEY, jsonData);
     debugLog('[DepositTracker] Save successful');
   } catch (error) {
     console.error('[DepositTracker] SAVE FAILED:', error);
@@ -178,7 +179,12 @@ async function getBlockchainCache(walletAddress: string): Promise<BlockchainDepo
 /**
  * Save blockchain deposit calculation to cache
  */
-async function saveBlockchainCache(walletAddress: string, totalDeposited: number, totalWithdrawn: number = 0, cumulativeDeposited: number = 0): Promise<void> {
+async function saveBlockchainCache(
+  walletAddress: string,
+  totalDeposited: number,
+  totalWithdrawn: number = 0,
+  cumulativeDeposited: number = 0,
+): Promise<void> {
   try {
     const data = await AsyncStorage.getItem(BLOCKCHAIN_CACHE_KEY);
     const cache: Record<string, BlockchainDepositCache> = data ? JSON.parse(data) : {};
@@ -192,7 +198,12 @@ async function saveBlockchainCache(walletAddress: string, totalDeposited: number
     };
 
     await AsyncStorage.setItem(BLOCKCHAIN_CACHE_KEY, JSON.stringify(cache));
-    debugLog('[DepositTracker] Blockchain cache saved: deposited=$' + totalDeposited.toFixed(2) + ', withdrawn=$' + totalWithdrawn.toFixed(2));
+    debugLog(
+      '[DepositTracker] Blockchain cache saved: deposited=$' +
+        totalDeposited.toFixed(2) +
+        ', withdrawn=$' +
+        totalWithdrawn.toFixed(2),
+    );
   } catch (error) {
     console.error('[DepositTracker] Error saving blockchain cache:', error);
   }
@@ -208,7 +219,7 @@ async function saveBlockchainCache(walletAddress: string, totalDeposited: number
  */
 async function fetchTokenTransfersForDeposits(
   walletAddress: string,
-  tokenAddress: string
+  tokenAddress: string,
 ): Promise<BlockscoutTokenTransfer[]> {
   if (!walletAddress || walletAddress.length < 10) {
     console.error('[DepositTracker] Invalid wallet address:', walletAddress);
@@ -242,7 +253,10 @@ async function fetchTokenTransfersForDeposits(
     url.searchParams.set('endblock', '99999999');
     url.searchParams.set('sort', 'asc');
 
-    debugLog('[DepositTracker] CDP cache miss, fetching from Blockscout for:', walletAddress.slice(0, 10) + '...');
+    debugLog(
+      '[DepositTracker] CDP cache miss, fetching from Blockscout for:',
+      walletAddress.slice(0, 10) + '...',
+    );
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
@@ -250,7 +264,7 @@ async function fetchTokenTransfersForDeposits(
     const response = await fetch(url.toString(), {
       signal: controller.signal,
       headers: {
-        'Accept': 'application/json',
+        Accept: 'application/json',
         'Content-Type': 'application/json',
       },
     });
@@ -305,15 +319,25 @@ async function fetchTokenTransfersForDeposits(
  */
 export async function calculateDepositedFromChain(
   walletAddress: string,
-  skipCache: boolean = false
-): Promise<{ deposited: number; cumulativeDeposited: number; totalWithdrawn: number; fromCache: boolean }> {
+  skipCache: boolean = false,
+): Promise<{
+  deposited: number;
+  cumulativeDeposited: number;
+  totalWithdrawn: number;
+  fromCache: boolean;
+}> {
   const address = walletAddress.toLowerCase();
 
   // Check cache first (unless skipCache is true)
   if (!skipCache) {
     const cached = await getBlockchainCache(address);
     if (cached) {
-      return { deposited: cached.totalDeposited, cumulativeDeposited: cached.cumulativeDeposited ?? cached.totalDeposited, totalWithdrawn: cached.totalWithdrawn ?? 0, fromCache: true };
+      return {
+        deposited: cached.totalDeposited,
+        cumulativeDeposited: cached.cumulativeDeposited ?? cached.totalDeposited,
+        totalWithdrawn: cached.totalWithdrawn ?? 0,
+        fromCache: true,
+      };
     }
   }
 
@@ -358,7 +382,9 @@ export async function calculateDepositedFromChain(
       currentDeposited += amount;
       vaultBalance += amount;
       cumulativeDeposited += amount;
-      debugLog(`  [DEPOSIT] +$${amount.toFixed(2)} → deposited=$${currentDeposited.toFixed(2)}, balance=$${vaultBalance.toFixed(2)}`);
+      debugLog(
+        `  [DEPOSIT] +$${amount.toFixed(2)} → deposited=$${currentDeposited.toFixed(2)}, balance=$${vaultBalance.toFixed(2)}`,
+      );
     }
     // WITHDRAW: vault → wallet
     else if (isFromVault && isToWallet) {
@@ -368,7 +394,9 @@ export async function calculateDepositedFromChain(
 
       // Check for full withdrawal (balance near zero)
       if (vaultBalance < FULL_WITHDRAWAL_THRESHOLD) {
-        debugLog(`  [RESET] Full withdrawal detected, balance=$${vaultBalance.toFixed(2)} < $${FULL_WITHDRAWAL_THRESHOLD}`);
+        debugLog(
+          `  [RESET] Full withdrawal detected, balance=$${vaultBalance.toFixed(2)} < $${FULL_WITHDRAWAL_THRESHOLD}`,
+        );
         currentDeposited = 0;
         vaultBalance = 0; // Reset to exactly 0
       }
@@ -378,12 +406,24 @@ export async function calculateDepositedFromChain(
   // Sanity check: deposited cannot be negative
   currentDeposited = Math.max(0, currentDeposited);
 
-  debugLog('[DepositTracker] BLOCKCHAIN RESULT: deposited=$' + currentDeposited.toFixed(2) + ', cumulativeDeposited=$' + cumulativeDeposited.toFixed(2) + ', totalWithdrawn=$' + cumulativeWithdrawn.toFixed(2));
+  debugLog(
+    '[DepositTracker] BLOCKCHAIN RESULT: deposited=$' +
+      currentDeposited.toFixed(2) +
+      ', cumulativeDeposited=$' +
+      cumulativeDeposited.toFixed(2) +
+      ', totalWithdrawn=$' +
+      cumulativeWithdrawn.toFixed(2),
+  );
 
   // Save to cache
   await saveBlockchainCache(address, currentDeposited, cumulativeWithdrawn, cumulativeDeposited);
 
-  return { deposited: currentDeposited, cumulativeDeposited, totalWithdrawn: cumulativeWithdrawn, fromCache: false };
+  return {
+    deposited: currentDeposited,
+    cumulativeDeposited,
+    totalWithdrawn: cumulativeWithdrawn,
+    fromCache: false,
+  };
 }
 
 /**
@@ -399,7 +439,10 @@ export async function invalidateBlockchainCache(walletAddress: string): Promise<
     delete cache[walletAddress.toLowerCase()];
     await AsyncStorage.setItem(BLOCKCHAIN_CACHE_KEY, JSON.stringify(cache));
 
-    debugLog('[DepositTracker] Blockchain cache invalidated for:', walletAddress.slice(0, 10) + '...');
+    debugLog(
+      '[DepositTracker] Blockchain cache invalidated for:',
+      walletAddress.slice(0, 10) + '...',
+    );
   } catch (error) {
     console.error('[DepositTracker] Error invalidating blockchain cache:', error);
   }
@@ -440,7 +483,7 @@ async function savePendingSyncQueue(queue: PendingSyncOperation[]): Promise<void
 async function addToPendingSyncQueue(
   type: PendingSyncOperation['type'],
   walletAddress: string,
-  data: PendingSyncOperation['data']
+  data: PendingSyncOperation['data'],
 ): Promise<void> {
   const queue = await getPendingSyncQueue();
 
@@ -463,7 +506,7 @@ async function addToPendingSyncQueue(
  */
 async function removeFromPendingSyncQueue(operationId: string): Promise<void> {
   const queue = await getPendingSyncQueue();
-  const filtered = queue.filter(op => op.id !== operationId);
+  const filtered = queue.filter((op) => op.id !== operationId);
   await savePendingSyncQueue(filtered);
   debugLog('[DepositTracker] Removed from pending sync queue:', operationId);
 }
@@ -473,7 +516,7 @@ async function removeFromPendingSyncQueue(operationId: string): Promise<void> {
  */
 async function incrementRetryCount(operationId: string): Promise<void> {
   const queue = await getPendingSyncQueue();
-  const updated = queue.map(op => {
+  const updated = queue.map((op) => {
     if (op.id === operationId) {
       return { ...op, retryCount: op.retryCount + 1 };
     }
@@ -514,7 +557,11 @@ async function fetchFromBackend(walletAddress: string): Promise<DepositRecord | 
  * Record deposit to backend
  * @param txHash - Transaction hash for idempotency (prevents duplicate deposits)
  */
-async function recordDepositToBackend(walletAddress: string, amount: number, txHash?: string): Promise<boolean> {
+async function recordDepositToBackend(
+  walletAddress: string,
+  amount: number,
+  txHash?: string,
+): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/deposits/${walletAddress.toLowerCase()}`, {
       method: 'POST',
@@ -539,14 +586,17 @@ async function recordDepositToBackend(walletAddress: string, amount: number, txH
 async function recordWithdrawalToBackend(
   walletAddress: string,
   withdrawnValue: number,
-  totalValueBeforeWithdraw: number
+  totalValueBeforeWithdraw: number,
 ): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/deposits/${walletAddress.toLowerCase()}/withdraw`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ withdrawnValue, totalValueBeforeWithdraw }),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/api/deposits/${walletAddress.toLowerCase()}/withdraw`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ withdrawnValue, totalValueBeforeWithdraw }),
+      },
+    );
     if (!response.ok) {
       console.error('[DepositTracker] Backend withdrawal failed:', response.status);
       return false;
@@ -675,7 +725,7 @@ async function getTotalDepositedInner(walletAddress: string): Promise<number> {
 export async function recordDeposit(
   walletAddress: string,
   amount: number,
-  txHash?: string
+  txHash?: string,
 ): Promise<void> {
   // Validate inputs
   const address = sanitizeAddress(walletAddress);
@@ -695,7 +745,14 @@ export async function recordDeposit(
   const previousTotal = currentRecord.totalDeposited;
   const newTotal = previousTotal + amount;
 
-  debugLog('[DepositTracker] Recording deposit:', amount, 'Previous:', previousTotal, 'New:', newTotal);
+  debugLog(
+    '[DepositTracker] Recording deposit:',
+    amount,
+    'Previous:',
+    previousTotal,
+    'New:',
+    newTotal,
+  );
 
   // Save to local storage first (for immediate access)
   deposits[address] = {
@@ -735,10 +792,7 @@ function pendingDepositKey(walletAddress: string, id: string): string {
  * STEP 1: Write-ahead — record deposit to local + backend BEFORE sending tx
  * Returns an ID used to confirm or rollback later.
  */
-export async function writeAheadDeposit(
-  walletAddress: string,
-  amount: number,
-): Promise<string> {
+export async function writeAheadDeposit(walletAddress: string, amount: number): Promise<string> {
   const address = sanitizeAddress(walletAddress);
   if (!address) throw new Error('Invalid wallet address');
   if (!isValidAmount(amount)) throw new Error('Invalid deposit amount');
@@ -827,7 +881,7 @@ export async function rollbackDeposit(
 export async function rollbackStalePendingDeposits(): Promise<number> {
   try {
     const allKeys = await AsyncStorage.getAllKeys();
-    const pendingKeys = allKeys.filter(k => k.startsWith(PENDING_DEPOSIT_PREFIX));
+    const pendingKeys = allKeys.filter((k) => k.startsWith(PENDING_DEPOSIT_PREFIX));
 
     if (pendingKeys.length === 0) return 0;
 
@@ -846,7 +900,9 @@ export async function rollbackStalePendingDeposits(): Promise<number> {
         const age = now - pending.timestamp;
 
         if (age > STALE_PENDING_DEPOSIT_MS) {
-          debugLog(`[DepositTracker] Rolling back stale pending deposit: $${pending.amount}, age=${Math.round(age / 1000)}s`);
+          debugLog(
+            `[DepositTracker] Rolling back stale pending deposit: $${pending.amount}, age=${Math.round(age / 1000)}s`,
+          );
 
           // Subtract the optimistic amount
           const deposits = await getAllDeposits();
@@ -896,7 +952,7 @@ export async function rollbackStalePendingDeposits(): Promise<number> {
 export async function recordWithdrawal(
   walletAddress: string,
   withdrawnValue: number,
-  totalValueBeforeWithdraw: number
+  totalValueBeforeWithdraw: number,
 ): Promise<void> {
   const deposits = await getAllDeposits();
   const address = walletAddress.toLowerCase();
@@ -904,8 +960,8 @@ export async function recordWithdrawal(
   const currentRecord = deposits[address] || { totalDeposited: 0, lastUpdated: 0 };
 
   // Check if this is a FULL withdrawal (withdrawing 99%+ of total value)
-  const isFullWithdrawal = totalValueBeforeWithdraw > 0 &&
-    withdrawnValue >= totalValueBeforeWithdraw * 0.99;
+  const isFullWithdrawal =
+    totalValueBeforeWithdraw > 0 && withdrawnValue >= totalValueBeforeWithdraw * 0.99;
 
   let newTotalDeposited: number;
 
@@ -918,7 +974,9 @@ export async function recordWithdrawal(
     const withdrawalRatio = withdrawnValue / totalValueBeforeWithdraw;
     const depositReduction = currentRecord.totalDeposited * withdrawalRatio;
     newTotalDeposited = Math.max(0, currentRecord.totalDeposited - depositReduction);
-    debugLog(`[DepositTracker] Partial withdrawal: ${(withdrawalRatio * 100).toFixed(1)}%, new total: $${newTotalDeposited.toFixed(2)}`);
+    debugLog(
+      `[DepositTracker] Partial withdrawal: ${(withdrawalRatio * 100).toFixed(1)}%, new total: $${newTotalDeposited.toFixed(2)}`,
+    );
   }
 
   deposits[address] = {
@@ -934,7 +992,11 @@ export async function recordWithdrawal(
 
   // IMPORTANT: Wait for backend sync to complete (not fire and forget)
   // This ensures the backend has the correct value before user makes another deposit
-  const backendSuccess = await recordWithdrawalToBackend(address, withdrawnValue, totalValueBeforeWithdraw);
+  const backendSuccess = await recordWithdrawalToBackend(
+    address,
+    withdrawnValue,
+    totalValueBeforeWithdraw,
+  );
   if (!backendSuccess) {
     console.warn('[DepositTracker] Backend withdrawal sync failed, queuing for retry');
     await addToPendingSyncQueue('withdrawal', address, {
@@ -951,10 +1013,7 @@ export async function recordWithdrawal(
  * @param totalDeposited - Total amount user has deposited
  * @returns Yield amount (can be negative if in loss)
  */
-export function calculateYield(
-  currentValue: number,
-  totalDeposited: number
-): number {
+export function calculateYield(currentValue: number, totalDeposited: number): number {
   return currentValue - totalDeposited;
 }
 
@@ -965,10 +1024,7 @@ export function calculateYield(
  * @param feePercent - Fee percentage (e.g., 15 for 15%)
  * @returns Fee amount (0 if yield is negative or zero)
  */
-export function calculatePerformanceFee(
-  yieldAmount: number,
-  feePercent: number
-): number {
+export function calculatePerformanceFee(yieldAmount: number, feePercent: number): number {
   if (yieldAmount <= 0) {
     return 0; // No fee if no profit
   }
@@ -991,7 +1047,7 @@ export interface YieldBreakdown {
 export async function getYieldBreakdown(
   walletAddress: string,
   currentValue: number,
-  feePercent: number
+  feePercent: number,
 ): Promise<YieldBreakdown> {
   const totalDeposited = await getTotalDeposited(walletAddress);
   const yieldAmount = calculateYield(currentValue, totalDeposited);
@@ -1024,7 +1080,7 @@ export async function getYieldBreakdown(
  */
 export async function recoverMissingDeposit(
   walletAddress: string,
-  currentValue: number
+  currentValue: number,
 ): Promise<boolean> {
   const existingDeposit = await getTotalDeposited(walletAddress);
 
@@ -1094,7 +1150,7 @@ export async function resetDeposits(walletAddress: string): Promise<void> {
 export async function repairDepositData(
   walletAddress: string,
   correctTotal: number,
-  reason: string = 'manual repair'
+  reason: string = 'manual repair',
 ): Promise<void> {
   const address = walletAddress.toLowerCase();
   const deposits = await getAllDeposits();
@@ -1137,10 +1193,7 @@ export async function repairDepositData(
  * Example: If current value is $2.00 and you set deposit to $1.50,
  * yield will be $0.50 and fee will be 15% of $0.50 = $0.075
  */
-export async function debugSetDeposit(
-  walletAddress: string,
-  amount: number
-): Promise<void> {
+export async function debugSetDeposit(walletAddress: string, amount: number): Promise<void> {
   const deposits = await getAllDeposits();
   const address = walletAddress.toLowerCase();
   deposits[address] = {
@@ -1199,7 +1252,7 @@ export async function retrySyncPendingOperations(): Promise<number> {
             success = await recordDepositToBackend(
               operation.walletAddress,
               operation.data.amount,
-              operation.data.txHash
+              operation.data.txHash,
             );
           }
           break;
@@ -1212,17 +1265,14 @@ export async function retrySyncPendingOperations(): Promise<number> {
             success = await recordWithdrawalToBackend(
               operation.walletAddress,
               operation.data.withdrawnValue,
-              operation.data.totalValueBeforeWithdraw
+              operation.data.totalValueBeforeWithdraw,
             );
           }
           break;
 
         case 'sync':
           if (operation.data.totalDeposited !== undefined) {
-            success = await syncToBackend(
-              operation.walletAddress,
-              operation.data.totalDeposited
-            );
+            success = await syncToBackend(operation.walletAddress, operation.data.totalDeposited);
           }
           break;
       }
@@ -1317,7 +1367,7 @@ export async function getDeposited(walletAddress: string): Promise<number> {
  */
 export async function getUnrealizedEarnings(
   walletAddress: string,
-  currentBalance: number
+  currentBalance: number,
 ): Promise<number> {
   const deposited = await getDeposited(walletAddress);
   // Earnings = what you have now - what you put in
@@ -1343,7 +1393,7 @@ export async function getUnrealizedEarnings(
  */
 export async function getDepositedAndEarnings(
   walletAddress: string,
-  currentBalance: number
+  currentBalance: number,
 ): Promise<{
   deposited: number;
   earnings: number;
@@ -1387,7 +1437,9 @@ export async function getDepositedAndEarnings(
   // This correctly accounts for all deposit/withdrawal cycles including realized profits
   const earnings = Math.max(0, currentBalance + totalWithdrawn - cumulativeDeposited);
 
-  debugLog(`[DepositTracker] Deposited: $${deposited.toFixed(2)}, CumulativeDeposited: $${cumulativeDeposited.toFixed(2)}, Withdrawn: $${totalWithdrawn.toFixed(2)}, Balance: $${currentBalance.toFixed(2)}, Earnings: $${earnings.toFixed(2)}`);
+  debugLog(
+    `[DepositTracker] Deposited: $${deposited.toFixed(2)}, CumulativeDeposited: $${cumulativeDeposited.toFixed(2)}, Withdrawn: $${totalWithdrawn.toFixed(2)}, Balance: $${currentBalance.toFixed(2)}, Earnings: $${earnings.toFixed(2)}`,
+  );
 
   return { deposited, earnings, source };
 }
@@ -1422,7 +1474,9 @@ export async function verifyCostBasisOnStartup(walletAddress: string): Promise<v
 
     // 2. Force a fresh blockchain calculation (skip cache)
     const chainResult = await calculateDepositedFromChain(address, true);
-    debugLog(`[DepositTracker] Cold-start chain result: deposited=$${chainResult.deposited.toFixed(2)}, cumulative=$${chainResult.cumulativeDeposited.toFixed(2)}`);
+    debugLog(
+      `[DepositTracker] Cold-start chain result: deposited=$${chainResult.deposited.toFixed(2)}, cumulative=$${chainResult.cumulativeDeposited.toFixed(2)}`,
+    );
 
     // 3. Retry any pending backend syncs
     await retrySyncPendingOperations();
@@ -1442,7 +1496,6 @@ export async function verifyCostBasisOnStartup(walletAddress: string): Promise<v
  * Call this from console to verify math is correct
  */
 export function runFeeCalculationTests(): void {
-
   const FEE_PERCENT = 15;
 
   // Test 1: $10,000 deposit, 5% yield
@@ -1493,9 +1546,9 @@ export function runFeeCalculationTests(): void {
   testScenario({
     name: 'Test 5: $10 deposit with 5% yield',
     deposited: 10,
-    currentValue: 10.50,
+    currentValue: 10.5,
     feePercent: FEE_PERCENT,
-    expectedYield: 0.50,
+    expectedYield: 0.5,
     expectedFee: 0.075, // May be below minimum
     expectedReceive: 10.425,
   });
@@ -1507,8 +1560,8 @@ export function runFeeCalculationTests(): void {
     currentValue: 630,
     feePercent: FEE_PERCENT,
     expectedYield: 30,
-    expectedFee: 4.50,
-    expectedReceive: 625.50,
+    expectedFee: 4.5,
+    expectedReceive: 625.5,
   });
 
   // Test 7: Edge case - very small yield (precision test)
@@ -1521,7 +1574,6 @@ export function runFeeCalculationTests(): void {
     expectedFee: 0.0015,
     expectedReceive: 1000.0085,
   });
-
 }
 
 interface TestScenarioParams {
@@ -1535,7 +1587,8 @@ interface TestScenarioParams {
 }
 
 function testScenario(params: TestScenarioParams): boolean {
-  const { deposited, currentValue, feePercent, expectedYield, expectedFee, expectedReceive } = params;
+  const { deposited, currentValue, feePercent, expectedYield, expectedFee, expectedReceive } =
+    params;
   const actualYield = calculateYield(currentValue, deposited);
   const actualFee = calculatePerformanceFee(actualYield, feePercent);
   const actualReceive = currentValue - actualFee;
