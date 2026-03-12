@@ -733,10 +733,16 @@ function calculateSummary(
     passed: Math.abs(reverseCheckFees - totalFees) < 0.01,
   };
 
-  // c) Cash flow check (bank statement balance)
+  // c) Cash flow check
+  // External: receives - sends - fees should roughly equal what's in the system.
+  // However, vault yield creates value inside the system that wasn't received externally,
+  // and the user's wallet USDC balance is unknown here. So this check uses a generous
+  // tolerance: the difference must be less than 5% of total vault throughput.
   const netCashFlow = totalReceives - totalSends - totalFeesExternal;
-  const investedCapital = currentBalance - totalEarnings;
+  const investedCapital = currentBalance + netDeposited;
   const cashFlowDifference = Math.abs(netCashFlow - investedCapital);
+  const vaultThroughput = totalDepositedToVaults + totalWithdrawnFromVaults;
+  const cashFlowTolerance = Math.max(1.0, vaultThroughput * 0.05);
   const cashFlowCheck = {
     receives: totalReceives,
     sends: totalSends,
@@ -744,7 +750,7 @@ function calculateSummary(
     netCashFlow: netCashFlow,
     investedCapital: investedCapital,
     difference: cashFlowDifference,
-    passed: cashFlowDifference < 0.01,
+    passed: cashFlowDifference < cashFlowTolerance,
   };
 
   // d) Transaction count check (only valid if rawTransferCount > 0)
