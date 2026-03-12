@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { usePrivy, useLoginWithEmail } from '@privy-io/expo';
+import { usePrivy, useLoginWithEmail, useLoginWithOAuth } from '@privy-io/expo';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import * as Analytics from '../services/analytics';
@@ -57,7 +57,14 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
     },
   });
 
-  const isLoading = state.status === 'sending-code' || state.status === 'submitting-code';
+  const { login: loginWithGoogle, state: googleState } = useLoginWithOAuth();
+  const { login: loginWithApple, state: appleState } = useLoginWithOAuth();
+
+  const isEmailLoading = state.status === 'sending-code' || state.status === 'submitting-code';
+  const isGoogleLoading = googleState.status === 'loading';
+  const isAppleLoading = appleState.status === 'loading';
+  const isAnyOAuthLoading = isGoogleLoading || isAppleLoading;
+  const isAnyLoading = isEmailLoading || isAnyOAuthLoading;
 
   const handleSendCode = async () => {
     Analytics.trackButtonTap('Continue', 'Login', { step: 'email_entry' });
@@ -81,9 +88,40 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
     await loginWithCode({ code: code.trim() });
   };
 
+  const handleGoogleLogin = async () => {
+    Analytics.trackButtonTap('Continue with Google', 'Login', { method: 'google' });
+    try {
+      await loginWithGoogle({ provider: 'google' });
+      Analytics.trackLoginSuccess('google');
+    } catch (error) {
+      // Privy throws on user cancellation — silently ignore
+      const message = error instanceof Error ? error.message : '';
+      if (message.toLowerCase().includes('cancel') || message.toLowerCase().includes('dismiss')) {
+        return;
+      }
+      Analytics.trackLoginFailed('google', message || 'Unknown error');
+      Alert.alert('Error', 'Something went wrong. Please try again.');
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    Analytics.trackButtonTap('Continue with Apple', 'Login', { method: 'apple' });
+    try {
+      await loginWithApple({ provider: 'apple' });
+      Analytics.trackLoginSuccess('apple');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.toLowerCase().includes('cancel') || message.toLowerCase().includes('dismiss')) {
+        return;
+      }
+      Analytics.trackLoginFailed('apple', message || 'Unknown error');
+      Alert.alert('Error', 'Something went wrong. Please try again.');
+    }
+  };
+
   const handleBack = () => {
     Analytics.trackButtonTap('Back', 'Login', {
-      step: showCodeInput ? 'code_verification' : 'email_entry'
+      step: showCodeInput ? 'code_verification' : 'email_entry',
     });
     if (showCodeInput) {
       setShowCodeInput(false);
@@ -95,12 +133,12 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
   const handleHelp = () => {
     Analytics.trackButtonTap('Help', 'Login', {
-      step: showCodeInput ? 'code_verification' : 'email_entry'
+      step: showCodeInput ? 'code_verification' : 'email_entry',
     });
     Alert.alert(
       'Need Help?',
       'Enter your email address to receive a one-time verification code. Use this code to securely sign in to your account.',
-      [{ text: 'Got it' }]
+      [{ text: 'Got it' }],
     );
   };
 
@@ -141,7 +179,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoComplete="email"
-                editable={!isLoading}
+                editable={!isAnyLoading}
                 onFocus={() => {
                   setIsInputFocused(true);
                   Analytics.trackInputFocus('Email', 'Login');
@@ -158,25 +196,68 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
             <TouchableOpacity
               testID="login-continue-button"
-              style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
+              style={[styles.continueButton, isAnyLoading && styles.continueButtonDisabled]}
               onPress={handleSendCode}
-              disabled={isLoading}
+              disabled={isAnyLoading}
               activeOpacity={0.8}
             >
-              {isLoading ? (
+              {isEmailLoading ? (
                 <ActivityIndicator color={COLORS.white} />
               ) : (
                 <Text style={styles.continueButtonText}>Continue</Text>
               )}
             </TouchableOpacity>
+
+            {/* Divider */}
+            <View style={styles.dividerContainer}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Google Sign In */}
+            <TouchableOpacity
+              testID="login-google-button"
+              style={[styles.googleButton, isAnyLoading && styles.continueButtonDisabled]}
+              onPress={handleGoogleLogin}
+              disabled={isAnyLoading}
+              activeOpacity={0.8}
+            >
+              {isGoogleLoading ? (
+                <ActivityIndicator color={COLORS.black} />
+              ) : (
+                <View style={styles.socialButtonContent}>
+                  <Text style={styles.googleIcon}>G</Text>
+                  <Text style={styles.googleButtonText}>Continue with Google</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {/* Apple Sign In (iOS only) */}
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity
+                testID="login-apple-button"
+                style={[styles.appleButton, isAnyLoading && styles.continueButtonDisabled]}
+                onPress={handleAppleLogin}
+                disabled={isAnyLoading}
+                activeOpacity={0.8}
+              >
+                {isAppleLoading ? (
+                  <ActivityIndicator color={COLORS.pureWhite} />
+                ) : (
+                  <View style={styles.socialButtonContent}>
+                    <Ionicons name="logo-apple" size={20} color={COLORS.pureWhite} />
+                    <Text style={styles.appleButtonText}>Continue with Apple</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
           </>
         ) : (
           <>
             {/* Code Verification Screen */}
             <Text style={styles.title}>Enter verification code</Text>
-            <Text style={styles.subtitle}>
-              We sent a code to {email}
-            </Text>
+            <Text style={styles.subtitle}>We sent a code to {email}</Text>
 
             <View style={styles.inputContainer}>
               <TextInput
@@ -188,7 +269,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 onChangeText={setCode}
                 keyboardType="number-pad"
                 maxLength={6}
-                editable={!isLoading}
+                editable={!isEmailLoading}
                 autoFocus
                 onFocus={() => {
                   setIsInputFocused(true);
@@ -200,12 +281,12 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
             <TouchableOpacity
               testID="login-verify-button"
-              style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
+              style={[styles.continueButton, isEmailLoading && styles.continueButtonDisabled]}
               onPress={handleVerifyCode}
-              disabled={isLoading}
+              disabled={isEmailLoading}
               activeOpacity={0.8}
             >
-              {isLoading ? (
+              {isEmailLoading ? (
                 <ActivityIndicator color={COLORS.white} />
               ) : (
                 <Text style={styles.continueButtonText}>Verify</Text>
@@ -218,7 +299,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 Analytics.trackButtonTap('Resend Code', 'Login', { step: 'code_verification' });
                 sendCode({ email: email.trim() });
               }}
-              disabled={isLoading}
+              disabled={isEmailLoading}
             >
               <Text style={styles.resendButtonText}>Resend code</Text>
             </TouchableOpacity>
@@ -326,6 +407,59 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     color: COLORS.white,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    fontSize: 14,
+    color: COLORS.lightGrey,
+    paddingHorizontal: 16,
+  },
+  socialButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  googleButton: {
+    height: 56,
+    backgroundColor: COLORS.pureWhite,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 12,
+  },
+  googleIcon: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  googleButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.black,
+  },
+  appleButton: {
+    height: 56,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  appleButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.pureWhite,
   },
   resendButton: {
     marginTop: 20,
