@@ -55,6 +55,11 @@ const BLOCKSCOUT_API_URL = 'https://base.blockscout.com/api';
 // fall back to direct RPC eth_getLogs for the missing range
 const BLOCKSCOUT_STALE_THRESHOLD_BLOCKS = 1000;
 
+// Maximum gap (in blocks) we'll attempt to fill via RPC eth_getLogs.
+// Beyond this, Blockscout data alone is sufficient — gap-fill would be too slow.
+// 50K blocks ÷ 1000 per chunk = 50 chunks × 2 queries = ~100 RPC calls (~10s at 10 concurrency)
+const MAX_RPC_GAP_BLOCKS = 50000;
+
 // ERC-20 Transfer event topic: Transfer(address,address,uint256)
 const TRANSFER_EVENT_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
@@ -412,8 +417,7 @@ async function fetchTransferLogsChunk(
 /**
  * Fetch ERC-20 Transfer logs via eth_getLogs for an arbitrary block range.
  * Automatically batches into RPC_MAX_BLOCK_RANGE chunks.
- * Runs at most 3 chunks concurrently with 500ms delay between batches
- * to avoid overwhelming free RPC endpoints.
+ * Runs at most 10 chunks concurrently (CDP supports 50 RPS).
  */
 async function fetchTransferLogsViaRpc(
   tokenAddress: string,
@@ -437,17 +441,13 @@ async function fetchTransferLogsViaRpc(
     cursor = chunkEnd + 1;
   }
 
-  debugLog(`[TransactionHistory] RPC fallback: ${totalRange} blocks in ${chunks.length} chunks (batches of 3)`);
+  debugLog(`[TransactionHistory] RPC fallback: ${totalRange} blocks in ${chunks.length} chunks (batches of 10)`);
 
-  // Run chunks in batches of 3 with 500ms delay between batches
-  const CONCURRENCY = 3;
+  // CDP supports 50 RPS — run 10 chunks concurrently (each chunk = 2 queries)
+  const CONCURRENCY = 10;
   const allLogs: RpcLogEntry[] = [];
 
   for (let i = 0; i < chunks.length; i += CONCURRENCY) {
-    if (i > 0) {
-      await delay(500);
-    }
-
     const batch = chunks.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(chunk =>
@@ -462,7 +462,6 @@ async function fetchTransferLogsViaRpc(
       } else {
         const chunk = batch[j];
         debugLog(`[TransactionHistory] RPC getLogs failed for blocks ${chunk.from}-${chunk.to}: ${result.reason}`);
-        // Skip this chunk gracefully, continue with the rest
       }
     }
   }
@@ -551,6 +550,13 @@ async function fetchTokenTransfers(
       debugLog(
         `[TransactionHistory] Blockscout is behind: latest indexed block ${blockscoutMaxBlock}, chain tip ${chainTip}, gap ${gap}`,
       );
+
+      // If gap is too large, skip RPC gap-fill entirely — it would be too slow
+      // and Blockscout has all historical data anyway
+      if (gap > MAX_RPC_GAP_BLOCKS) {
+        debugLog(`[TransactionHistory] Gap ${gap} exceeds max ${MAX_RPC_GAP_BLOCKS} blocks — skipping RPC gap-fill`);
+        return blockscoutTransfers;
+      }
 
       // FALLBACK: Fetch missing blocks via RPC eth_getLogs
       // Blockscout data is ALWAYS the base — RPC only adds new transfers it missed

@@ -540,22 +540,32 @@ async function refreshRedeemCalls(
   for (let i = 0; i < batch.positions.length; i++) {
     const pos = batch.positions[i];
     const freshShares = maxRedeemResults[i];
-    // Use fresh maxRedeem if available; fall back to cached shares only as last resort
-    const sharesToRedeem = freshShares > BigInt(0) ? freshShares : pos.shares;
 
-    if (sharesToRedeem > BigInt(0)) {
-      calls.push(
-        buildVaultRedeemCall(
-          pos.vaultAddress as Address,
-          sharesToRedeem,
-          walletAddress,
-          walletAddress,
-        )
-      );
-      debugLog(`[Withdraw] ${pos.vaultName}: redeeming ${sharesToRedeem} shares (maxRedeem=${freshShares}, cached=${pos.shares})`);
+    let sharesToRedeem: bigint;
+    if (freshShares > BigInt(0)) {
+      // Fresh maxRedeem succeeded — use the smaller of maxRedeem and cached shares
+      // (maxRedeem accounts for liquidity constraints)
+      sharesToRedeem = pos.shares > BigInt(0) ? (freshShares < pos.shares ? freshShares : pos.shares) : freshShares;
+      debugLog(`[Withdraw] ${pos.vaultName}: using maxRedeem=${freshShares} (cached=${pos.shares})`);
+    } else if (pos.shares > BigInt(0)) {
+      // maxRedeem returned 0 but we have valid cached shares from a recent position fetch.
+      // This is a known RPC staleness issue — the shares ARE valid on-chain.
+      sharesToRedeem = pos.shares;
+      debugLog(`[Withdraw] ${pos.vaultName}: maxRedeem=0 but using cached shares=${pos.shares} as fallback`);
     } else {
-      debugLog(`[Withdraw] ${pos.vaultName}: SKIPPED — both maxRedeem and cached shares are 0`);
+      // Both are 0 — user truly has no position in this vault
+      debugLog(`[Withdraw] ${pos.vaultName}: SKIPPED — no position (maxRedeem=0, cached=0)`);
+      continue;
     }
+
+    calls.push(
+      buildVaultRedeemCall(
+        pos.vaultAddress as Address,
+        sharesToRedeem,
+        walletAddress,
+        walletAddress,
+      )
+    );
   }
 
   // Append the fee transfer call if present (last call in original batch)
