@@ -197,4 +197,12 @@ export const MORPHO_VAULT_ABI = [
     inputs: [{ name: 'assets', type: 'uint256' }],
     outputs: [{ name: '', type: 'uint256' }],
   },
+  // ERC4626 maxRedeem - maximum shares redeemable by owner
+  {
+    name: 'maxRedeem',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
 ] as const;

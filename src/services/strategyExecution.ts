@@ -485,6 +485,71 @@ export function buildPartialWithdrawBatch(
 /**
  * Execute a withdraw batch (redeem from all vaults)
  */
+/**
+ * Fetch maxRedeem for a vault — the maximum shares the owner can redeem right now.
+ * This is more reliable than a stale balanceOf snapshot because it accounts for
+ * liquidity constraints and rounding at the moment of the query.
+ */
+async function fetchMaxRedeem(vaultAddress: string, ownerAddress: string): Promise<bigint> {
+  try {
+    const data = encodeFunctionData({
+      abi: MORPHO_VAULT_ABI,
+      functionName: 'maxRedeem',
+      args: [ownerAddress as Address],
+    });
+
+    const result = await rpcCall('eth_call', [
+      { to: vaultAddress, data },
+      'latest',
+    ]);
+
+    return hexToBigInt(result as string);
+  } catch (error) {
+    debugLog(`[Withdraw] maxRedeem failed for ${vaultAddress}, using position.shares:`, error);
+    return BigInt(0);
+  }
+}
+
+/**
+ * Rebuild redeem calls using fresh maxRedeem values fetched right before execution.
+ * This avoids stale share amounts that may have shifted since the batch was built.
+ */
+async function refreshRedeemCalls(
+  batch: WithdrawBatch,
+  walletAddress: Address,
+): Promise<TransactionCall[]> {
+  const calls: TransactionCall[] = [];
+
+  for (const pos of batch.positions) {
+    const freshShares = await fetchMaxRedeem(pos.vaultAddress, walletAddress);
+    const sharesToRedeem = freshShares > BigInt(0) ? freshShares : pos.shares;
+
+    if (sharesToRedeem > BigInt(0)) {
+      calls.push(
+        buildVaultRedeemCall(
+          pos.vaultAddress as Address,
+          sharesToRedeem,
+          walletAddress,
+          walletAddress,
+        )
+      );
+      debugLog(`[Withdraw] ${pos.vaultName}: redeeming ${sharesToRedeem} shares (maxRedeem=${freshShares})`);
+    }
+  }
+
+  // Append the fee transfer call if present (last call in original batch)
+  // Fee transfer uses the deposit(uint256,address) selector 0x6e553f65? No — it's transfer(address,uint256) 0xa9059cbb
+  const originalCalls = batch.calls;
+  if (originalCalls.length > batch.positions.length) {
+    // The extra calls are fee transfers — keep them as-is
+    for (let i = batch.positions.length; i < originalCalls.length; i++) {
+      calls.push(originalCalls[i]);
+    }
+  }
+
+  return calls;
+}
+
 export async function executeWithdrawBatch(
   client: SmartWalletClient,
   batch: WithdrawBatch
@@ -519,9 +584,21 @@ export async function executeWithdrawBatch(
   }
   debugLog(`[Withdraw] You receive: $${batch.userReceives}`);
 
-  debugLog(`[Withdraw] Sending ${batch.calls.length} calls (${batch.positions.length} redeems${parseFloat(batch.feeAmount) >= UNFLAT_MIN_FEE_USDC ? ' + 1 fee transfer' : ''})...`);
+  // Refresh redeem calls with fresh maxRedeem values right before execution
+  debugLog('[Withdraw] Fetching fresh maxRedeem values...');
+  const freshCalls = await refreshRedeemCalls(batch, walletAddress as Address);
 
-  const MAX_RETRIES = 2;
+  if (freshCalls.length === 0) {
+    throw new Error('No positions to withdraw (maxRedeem returned 0 for all vaults)');
+  }
+
+  // Skip simulation for withdraw batches — the calls are interdependent:
+  // redeems must complete before the fee transfer can succeed, so simulating
+  // each call independently would fail on the fee transfer.
+  debugLog(`[Withdraw] Skipping simulation for batched redeem+fee (interdependent calls)`);
+  debugLog(`[Withdraw] Sending ${freshCalls.length} calls (${batch.positions.length} redeems${parseFloat(batch.feeAmount) >= UNFLAT_MIN_FEE_USDC ? ' + 1 fee transfer' : ''})...`);
+
+  const MAX_RETRIES = 3;
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -533,8 +610,8 @@ export async function executeWithdrawBatch(
 
       let hash: string;
 
-      if (batch.calls.length === 1) {
-        const call = batch.calls[0];
+      if (freshCalls.length === 1) {
+        const call = freshCalls[0];
         hash = await client.sendTransaction({
           to: call.to,
           data: call.data,
@@ -542,7 +619,7 @@ export async function executeWithdrawBatch(
         });
       } else {
         hash = await client.sendTransaction({
-          calls: batch.calls.map(c => ({
+          calls: freshCalls.map(c => ({
             to: c.to,
             data: c.data,
             value: c.value || BigInt(0),
@@ -585,9 +662,8 @@ export async function executeWithdrawBatch(
 
     } catch (error) {
       lastError = error;
-      const msg = getErrorMessage(error).toLowerCase();
 
-      if (msg.includes('nonce') && attempt < MAX_RETRIES - 1) {
+      if (isNonceError(error) && attempt < MAX_RETRIES - 1) {
         debugLog('[Withdraw] Nonce error, retrying...');
         continue;
       }
