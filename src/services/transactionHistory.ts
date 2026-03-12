@@ -569,41 +569,27 @@ function parseTransfer(
     let type: TransactionType;
     let vaultName: string | undefined;
 
-    let reason: string;
-
     if (from === wallet && to === treasuryAddress) {
       type = 'fee';
-      reason = 'from=wallet, to=treasury';
     } else if (to === wallet && from === treasuryAddress) {
       type = 'receive';
-      reason = 'from=treasury, to=wallet (refund)';
     } else if (to === wallet && isFromVault) {
       type = 'withdraw';
       vaultName = Object.values(MORPHO_VAULTS).find(
         v => v.address.toLowerCase() === from
       )?.name;
-      reason = `from=vault(${vaultName}), to=wallet`;
     } else if (from === wallet && isToVault) {
       type = 'deposit';
       vaultName = Object.values(MORPHO_VAULTS).find(
         v => v.address.toLowerCase() === to
       )?.name;
-      reason = `from=wallet, to=vault(${vaultName})`;
     } else if (to === wallet && !isFromInternal) {
       type = 'receive';
-      reason = `from=${from.slice(0, 10)}(external), to=wallet`;
     } else if (from === wallet && !isToInternal) {
       type = 'send';
-      reason = `from=wallet, to=${to.slice(0, 10)}(external)`;
     } else {
-      // TEMPORARY DEBUG: log skipped transfers too
-      debugLog(`[Classification] ${transfer.hash.slice(0, 10)}... | from:${from.slice(0, 10)}... → to:${to.slice(0, 10)}... | $${amountForLog.toFixed(6)} | RESULT: SKIPPED | REASON: internal(fromInt=${isFromInternal},toInt=${isToInternal},fromVault=${isFromVault},toVault=${isToVault})`);
       return null;
     }
-
-    // TEMPORARY DEBUG: log classification for last 20 transfers
-    // (parseTransfer is called in order, so these accumulate — the console shows all)
-    debugLog(`[Classification] ${transfer.hash.slice(0, 10)}... | from:${from.slice(0, 10)}... → to:${to.slice(0, 10)}... | $${amountForLog.toFixed(6)} | RESULT: ${type} | REASON: ${reason}`);
 
     // Use amountForLog calculated earlier
     const amount = amountForLog;
@@ -738,6 +724,9 @@ function calculateSummary(
   // Unrealized earnings = current balance minus net deposited
   const totalEarnings = currentBalance - netDeposited;
 
+  // DEBUG: show exact breakdown so we can trace the INVESTED calculation
+  debugLog(`[Summary] BREAKDOWN: deposits=$${totalDepositedToVaults.toFixed(2)} withdrawals=$${totalWithdrawnFromVaults.toFixed(2)} receives=$${totalReceives.toFixed(2)} sends=$${totalSends.toFixed(2)} fees=$${totalFeesExternal.toFixed(2)} | netDeposited=$${netDeposited.toFixed(2)} currentBalance=$${currentBalance.toFixed(2)} earnings=$${totalEarnings.toFixed(2)}`);
+
   // ═══════════════════════════════════════════════════════════════════════════
   // REALIZED EARNINGS CALCULATION (Tax-Relevant)
   // Fee = 15% of gross yield → gross yield = fee / 0.15
@@ -771,14 +760,17 @@ function calculateSummary(
   };
 
   // c) Cash flow check
-  // External money in (receives) minus external money out (sends + fees) should
-  // roughly equal what's currently in the system (vault balance + net vault position).
-  // Keep 5% tolerance while debugging classification issues.
+  // Conservation of value: all external inflows minus all external outflows
+  // should equal what's currently held (vault balance + wallet USDC).
+  // We don't know wallet USDC here, so we check:
+  //   netExternal = receives - sends - fees
+  //   systemValue = currentBalance + netDeposited
+  //     (currentBalance = vault positions, netDeposited = deposits - withdrawals)
+  // Note: vault yield creates value not captured by external flows, so a small
+  // positive difference (yield earned) is expected. Tolerance: $1.00.
   const netCashFlow = totalReceives - totalSends - totalFeesExternal;
   const investedCapital = currentBalance + netDeposited;
   const cashFlowDifference = Math.abs(netCashFlow - investedCapital);
-  const vaultThroughput = totalDepositedToVaults + totalWithdrawnFromVaults;
-  const cashFlowTolerance = Math.max(1.0, vaultThroughput * 0.05);
   const cashFlowCheck = {
     receives: totalReceives,
     sends: totalSends,
@@ -786,7 +778,7 @@ function calculateSummary(
     netCashFlow: netCashFlow,
     investedCapital: investedCapital,
     difference: cashFlowDifference,
-    passed: cashFlowDifference < cashFlowTolerance,
+    passed: cashFlowDifference < 1.0,
   };
 
   // d) Transaction count check (only valid if rawTransferCount > 0)
