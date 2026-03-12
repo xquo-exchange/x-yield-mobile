@@ -403,8 +403,12 @@ async function fetchFromCdp(
       for (const tt of tx.ethereum?.tokenTransfers || []) {
         if (tt.tokenAddress?.toLowerCase() !== tokenLower) continue;
 
-        const from = (tt.fromAddress || tt.erc20?.fromAddress || '').toLowerCase();
-        const to = (tt.toAddress || tt.erc20?.toAddress || '').toLowerCase();
+        // Prefer erc20 decoded fields — they reflect the actual ERC-20 Transfer event
+        // (from/to of the token movement). Top-level fromAddress/toAddress may reflect
+        // the transaction sender (e.g. the smart wallet) rather than the token sender
+        // (e.g. the vault contract during a redeem).
+        const from = (tt.erc20?.fromAddress || tt.fromAddress || '').toLowerCase();
+        const to = (tt.erc20?.toAddress || tt.toAddress || '').toLowerCase();
 
         // Only include transfers where wallet is sender or receiver
         if (from !== walletLower && to !== walletLower) continue;
@@ -734,15 +738,12 @@ function calculateSummary(
   };
 
   // c) Cash flow check
-  // External: receives - sends - fees should roughly equal what's in the system.
-  // However, vault yield creates value inside the system that wasn't received externally,
-  // and the user's wallet USDC balance is unknown here. So this check uses a generous
-  // tolerance: the difference must be less than 5% of total vault throughput.
+  // External money in (receives) minus external money out (sends + fees) should
+  // roughly equal what's currently in the system (vault balance + net vault position).
+  // Vault yield creates a small surplus (withdrawn > deposited), so we allow $1 tolerance.
   const netCashFlow = totalReceives - totalSends - totalFeesExternal;
   const investedCapital = currentBalance + netDeposited;
   const cashFlowDifference = Math.abs(netCashFlow - investedCapital);
-  const vaultThroughput = totalDepositedToVaults + totalWithdrawnFromVaults;
-  const cashFlowTolerance = Math.max(1.0, vaultThroughput * 0.05);
   const cashFlowCheck = {
     receives: totalReceives,
     sends: totalSends,
@@ -750,7 +751,7 @@ function calculateSummary(
     netCashFlow: netCashFlow,
     investedCapital: investedCapital,
     difference: cashFlowDifference,
-    passed: cashFlowDifference < cashFlowTolerance,
+    passed: cashFlowDifference < 1.0,
   };
 
   // d) Transaction count check (only valid if rawTransferCount > 0)

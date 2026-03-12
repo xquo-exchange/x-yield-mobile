@@ -7,6 +7,7 @@ import { formatEther, formatUnits, type Address } from 'viem';
 import { TOKENS } from '../constants/contracts';
 import { MORPHO_VAULTS } from '../constants/strategies';
 import { rpcCall, hexToBigInt } from './rpc';
+import { getTotalDeposited } from './depositTracker';
 
 // Debug mode - controlled by __DEV__
 const DEBUG = __DEV__ ?? false;
@@ -253,8 +254,7 @@ export async function getVaultPositions(userAddress: Address): Promise<Positions
 async function _getVaultPositionsInner(userAddress: Address): Promise<PositionsResult> {
   debugLog(`[Positions] Fetching positions for ${userAddress}`);
 
-  try {
-    // Get USDC vaults from strategy (matches strategies.ts allocations)
+  const fetchAllPositions = async (): Promise<{ positions: VaultPosition[]; totalUsd: number }> => {
     const usdcVaults = [
       MORPHO_VAULTS.STEAKHOUSE_HIGH_YIELD,
       MORPHO_VAULTS.RE7_USDC,
@@ -264,14 +264,12 @@ async function _getVaultPositionsInner(userAddress: Address): Promise<PositionsR
     const positions: VaultPosition[] = [];
     let totalUsd = 0;
 
-    // Fetch positions for each vault (show all, even with 0 balance)
     for (const vault of usdcVaults) {
       const shares = await getVaultShares(vault.address, userAddress);
       const assets = shares > BigInt(0)
         ? await convertSharesToAssets(vault.address, shares)
         : BigInt(0);
 
-      // Shares are 18 decimals, assets (USDC) are 6 decimals
       const sharesFormatted = formatUnits(shares, 18);
       const assetsFormatted = formatUnits(assets, 6);
       const usdValue = parseFloat(assetsFormatted);
@@ -284,7 +282,7 @@ async function _getVaultPositionsInner(userAddress: Address): Promise<PositionsR
         sharesFormatted,
         assets,
         assetsFormatted,
-        usdValue: usdValue.toFixed(6), // Full USDC precision for yield calculations
+        usdValue: usdValue.toFixed(6),
       });
 
       totalUsd += usdValue;
@@ -296,11 +294,35 @@ async function _getVaultPositionsInner(userAddress: Address): Promise<PositionsR
       }
     }
 
+    return { positions, totalUsd };
+  };
+
+  try {
+    let { positions, totalUsd } = await fetchAllPositions();
+
+    // If ALL vaults returned 0 but the deposit tracker shows funds exist,
+    // this is likely a cold-start RPC issue — retry once after a delay.
+    if (totalUsd === 0) {
+      try {
+        const depositTrackerTotal = await getTotalDeposited(userAddress);
+        if (depositTrackerTotal > 0) {
+          debugLog('[Positions] All positions returned 0 but deposits exist, retrying...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const retry = await fetchAllPositions();
+          positions = retry.positions;
+          totalUsd = retry.totalUsd;
+          debugLog(`[Positions] Retry result: $${totalUsd.toFixed(2)}`);
+        }
+      } catch {
+        // Deposit tracker failure shouldn't block position display
+      }
+    }
+
     debugLog(`[Positions] Total: $${totalUsd.toFixed(2)} across ${positions.length} vaults`);
 
     return {
       positions,
-      totalUsdValue: totalUsd.toFixed(6), // Full precision for yield calculations
+      totalUsdValue: totalUsd.toFixed(6),
       isLoading: false,
       error: null,
     };
