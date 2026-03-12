@@ -16,10 +16,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.xyield.mobile",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "46"
+      "buildNumber": "49"
     },
     "android": {
       "adaptiveIcon": {
@@ -39,6 +40,7 @@
     "plugins": [
       "expo-secure-store",
       "expo-web-browser",
+      "expo-apple-authentication",
       [
         "expo-splash-screen",
         {
@@ -55,18 +57,6 @@
         }
       ]
     ],
-    "extra": {
-      "privyAppId": "cmk1awjuj002ri60dlbm7ot7y",
-      "privyClientId": "client-WY6Uw7oK8axAgoH93zaGv9pKb7kPD321yhEkMbfrb6BE1",
-      "supabaseUrl": "https://oitrgjteywgmlonfdmhe.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pdHJnanRleXdnbWxvbmZkbWhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg3NTU5NjAsImV4cCI6MjA4NDMzMTk2MH0.bNUUYAWd5K-_nfTjFiQb-ZJhZ_p98Fy8AjNOt5k8aYc",
-      "mixpanelToken": "b8d711cabf77f254b965383fa15f7302",
-      "uxcamAppKey": "ls3gxyg4a8lzkdj-eu",
-      "cdpRpcUrl": "https://api.developer.coinbase.com/rpc/v1/base/RDeoMD0w9x8RE3fEp0TQGOEHdkh6JqMO",
-      "eas": {
-        "projectId": "eadf7b92-bd0e-42ee-9b18-de38d5da45eb"
-      }
-    },
     "owner": "alevenox00"
   }
 }
