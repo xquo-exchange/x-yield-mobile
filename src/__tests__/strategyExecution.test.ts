@@ -9,7 +9,7 @@
 jest.mock('viem', () => ({
   encodeFunctionData: jest.fn(() => '0xmockdata'),
   parseUnits: jest.fn((value: string, decimals: number) =>
-    BigInt(Math.floor(parseFloat(value) * 10 ** decimals))
+    BigInt(Math.floor(parseFloat(value) * 10 ** decimals)),
   ),
 }));
 
@@ -29,6 +29,12 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
     setItem: jest.fn(),
     removeItem: jest.fn(),
   },
+}));
+
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
 }));
 
 import { buildWithdrawBatch, buildPartialWithdrawBatch } from '../services/strategyExecution';
@@ -122,9 +128,7 @@ describe('buildWithdrawBatch', () => {
   });
 
   test('handles zero balance positions (no shares)', () => {
-    const positions = [
-      makePosition({ shares: BigInt(0), assets: BigInt(0) }),
-    ];
+    const positions = [makePosition({ shares: BigInt(0), assets: BigInt(0) })];
 
     const result = buildWithdrawBatch(positions, WALLET, 0);
 
@@ -304,11 +308,11 @@ describe('buildPartialWithdrawBatch', () => {
     expect(result.positions).toHaveLength(2);
 
     // Check proportional shares
-    // withdrawRatio = 30/100 = 0.3, floor(0.3 * 10000) = 3000
-    // Vault A: 60e18 * 3000 / 10000 = 18e18
-    // Vault B: 40e18 * 3000 / 10000 = 12e18
-    expect(result.positions[0].shares).toBe(BigInt(60e18) * BigInt(3000) / BigInt(10000));
-    expect(result.positions[1].shares).toBe(BigInt(40e18) * BigInt(3000) / BigInt(10000));
+    // withdrawRatio = 30/100 = 0.3, round(0.3 * 1000000) = 300000
+    // Vault A: 60e18 * 300000 / 1000000 = 18e18
+    // Vault B: 40e18 * 300000 / 1000000 = 12e18
+    expect(result.positions[0].shares).toBe((BigInt(60e18) * BigInt(300000)) / BigInt(1000000));
+    expect(result.positions[1].shares).toBe((BigInt(40e18) * BigInt(300000)) / BigInt(1000000));
   });
 
   test('delegates to full withdraw when amount >= 99% of total', () => {

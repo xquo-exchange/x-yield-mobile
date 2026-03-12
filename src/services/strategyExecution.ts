@@ -77,7 +77,7 @@ interface TransactionReceipt {
  */
 async function simulateTransaction(
   call: TransactionCall,
-  fromAddress: string
+  fromAddress: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await rpcCall('eth_call', [
@@ -101,7 +101,10 @@ async function simulateTransaction(
       return { success: false, error: 'Insufficient token balance for this deposit.' };
     }
     if (msg.includes('execution reverted')) {
-      return { success: false, error: 'Transaction would revert. Check your balance and allowances.' };
+      return {
+        success: false,
+        error: 'Transaction would revert. Check your balance and allowances.',
+      };
     }
 
     // For other errors, return the raw message (truncated)
@@ -115,7 +118,7 @@ async function simulateTransaction(
  */
 async function simulateBatch(
   calls: TransactionCall[],
-  fromAddress: string
+  fromAddress: string,
 ): Promise<{ success: boolean; error?: string; failedIndex?: number }> {
   for (let i = 0; i < calls.length; i++) {
     const result = await simulateTransaction(calls[i], fromAddress);
@@ -123,7 +126,7 @@ async function simulateBatch(
       return {
         success: false,
         error: `Call ${i + 1}/${calls.length} would fail: ${result.error}`,
-        failedIndex: i
+        failedIndex: i,
       };
     }
   }
@@ -133,7 +136,7 @@ async function simulateBatch(
 async function waitForTransaction(
   txHash: string,
   maxWaitMs = 60000,
-  pollIntervalMs = 3000
+  pollIntervalMs = 3000,
 ): Promise<{ found: boolean; status: string; blockNumber: string | null }> {
   const startTime = Date.now();
 
@@ -145,7 +148,9 @@ async function waitForTransaction(
         continue;
       }
 
-      const receipt = await rpcCall('eth_getTransactionReceipt', [txHash]) as TransactionReceipt | null;
+      const receipt = (await rpcCall('eth_getTransactionReceipt', [
+        txHash,
+      ])) as TransactionReceipt | null;
       if (!receipt) {
         await delay(pollIntervalMs);
         continue;
@@ -163,7 +168,11 @@ async function waitForTransaction(
   return { found: false, status: 'timeout', blockNumber: null };
 }
 
-function buildApproveCall(tokenAddress: Address, spenderAddress: Address, amount: bigint): TransactionCall {
+function buildApproveCall(
+  tokenAddress: Address,
+  spenderAddress: Address,
+  amount: bigint,
+): TransactionCall {
   const data = encodeFunctionData({
     abi: ERC20_ABI,
     functionName: 'approve',
@@ -179,7 +188,7 @@ function buildApproveCall(tokenAddress: Address, spenderAddress: Address, amount
 function buildVaultDepositCall(
   vaultAddress: Address,
   amount: bigint,
-  receiver: Address
+  receiver: Address,
 ): TransactionCall {
   const data = encodeFunctionData({
     abi: MORPHO_VAULT_ABI,
@@ -201,7 +210,7 @@ function buildVaultRedeemCall(
   vaultAddress: Address,
   shares: bigint,
   receiver: Address,
-  owner: Address
+  owner: Address,
 ): TransactionCall {
   const data = encodeFunctionData({
     abi: MORPHO_VAULT_ABI,
@@ -221,7 +230,7 @@ function buildVaultRedeemCall(
 function buildTransferCall(
   tokenAddress: Address,
   recipient: Address,
-  amount: bigint
+  amount: bigint,
 ): TransactionCall {
   const data = encodeFunctionData({
     abi: ERC20_ABI,
@@ -248,7 +257,7 @@ function buildTransferCall(
 export function buildWithdrawBatch(
   positions: VaultPosition[],
   walletAddress: Address,
-  totalDeposited: number // Original deposit amount from deposit tracker
+  totalDeposited: number, // Original deposit amount from deposit tracker
 ): WithdrawBatch {
   const calls: TransactionCall[] = [];
   const positionsWithBalance: VaultPosition[] = [];
@@ -262,8 +271,8 @@ export function buildWithdrawBatch(
           position.vaultAddress as Address,
           position.shares,
           walletAddress,
-          walletAddress
-        )
+          walletAddress,
+        ),
       );
       positionsWithBalance.push(position);
       totalAssets += position.assets; // assets is in USDC (6 decimals)
@@ -313,7 +322,7 @@ export function buildWithdrawBatch(
 
   if (hasProfits) {
     feeAmount = yieldAmount * (UNFLAT_FEE_PERCENT / 100);
-    feeAmountRaw = BigInt(Math.floor(feeAmount * 1_000_000));
+    feeAmountRaw = BigInt(Math.round(feeAmount * 1_000_000));
   }
 
   const userReceives = currentValue - feeAmount;
@@ -321,15 +330,15 @@ export function buildWithdrawBatch(
   // Add fee transfer call if fee is above minimum threshold
   if (feeAmount >= UNFLAT_MIN_FEE_USDC) {
     calls.push(
-      buildTransferCall(
-        TOKENS.USDC as Address,
-        UNFLAT_TREASURY_ADDRESS as Address,
-        feeAmountRaw
-      )
+      buildTransferCall(TOKENS.USDC as Address, UNFLAT_TREASURY_ADDRESS as Address, feeAmountRaw),
     );
-    debugLog(`[Withdraw] Fee transfer added: $${feeAmount.toFixed(6)} (${feeAmountRaw} raw) to ${UNFLAT_TREASURY_ADDRESS}`);
+    debugLog(
+      `[Withdraw] Fee transfer added: $${feeAmount.toFixed(6)} (${feeAmountRaw} raw) to ${UNFLAT_TREASURY_ADDRESS}`,
+    );
   } else if (hasProfits) {
-    debugLog(`[Withdraw] Fee skipped: $${feeAmount.toFixed(6)} below minimum $${UNFLAT_MIN_FEE_USDC}`);
+    debugLog(
+      `[Withdraw] Fee skipped: $${feeAmount.toFixed(6)} below minimum $${UNFLAT_MIN_FEE_USDC}`,
+    );
   } else {
     debugLog(`[Withdraw] No fee: No profits`);
   }
@@ -342,7 +351,7 @@ export function buildWithdrawBatch(
   debugLog('[Withdraw] totalDeposited:', totalDeposited.toFixed(6));
   debugLog('[Withdraw] currentValue:', currentValue.toFixed(6));
   debugLog('[Withdraw] yield:', yieldAmount.toFixed(6));
-  debugLog('[Withdraw] yieldPercent:', (yieldPercent).toFixed(6) + '%');
+  debugLog('[Withdraw] yieldPercent:', yieldPercent.toFixed(6) + '%');
   debugLog('[Withdraw] fee (15% of yield):', feeAmount.toFixed(6));
   debugLog('[Withdraw] feeAmountRaw:', feeAmountRaw.toString(), 'raw USDC units');
   debugLog('[Withdraw] userReceives:', userReceives.toFixed(6));
@@ -381,24 +390,23 @@ export function buildPartialWithdrawBatch(
   positions: VaultPosition[],
   walletAddress: Address,
   withdrawAmountUsd: number,
-  totalDeposited: number
+  totalDeposited: number,
 ): WithdrawBatch {
   const calls: TransactionCall[] = [];
   const positionsToWithdraw: VaultPosition[] = [];
 
   // Calculate the total current value
-  const totalCurrentValue = positions.reduce(
-    (sum, p) => sum + parseFloat(p.usdValue),
-    0
-  );
+  const totalCurrentValue = positions.reduce((sum, p) => sum + parseFloat(p.usdValue), 0);
 
   // If withdrawing everything or more, use full withdraw
   if (withdrawAmountUsd >= totalCurrentValue * 0.99) {
     return buildWithdrawBatch(positions, walletAddress, totalDeposited);
   }
 
-  // Calculate the proportion to withdraw
+  // Calculate the proportion to withdraw using 6-decimal precision
+  // to match USDC's 6 decimal places and minimize rounding loss
   const withdrawRatio = withdrawAmountUsd / totalCurrentValue;
+  const ratioBps = BigInt(Math.round(withdrawRatio * 1_000_000));
 
   let totalAssetsToWithdraw = BigInt(0);
 
@@ -406,8 +414,8 @@ export function buildPartialWithdrawBatch(
   for (const position of positions) {
     if (position.shares <= BigInt(0)) continue;
 
-    // Calculate shares to redeem (proportional)
-    const sharesToRedeem = (position.shares * BigInt(Math.floor(withdrawRatio * 10000))) / BigInt(10000);
+    // Calculate shares to redeem (proportional, 6-decimal precision)
+    const sharesToRedeem = (position.shares * ratioBps) / BigInt(1_000_000);
 
     if (sharesToRedeem > BigInt(0)) {
       calls.push(
@@ -415,12 +423,12 @@ export function buildPartialWithdrawBatch(
           position.vaultAddress as Address,
           sharesToRedeem,
           walletAddress,
-          walletAddress
-        )
+          walletAddress,
+        ),
       );
 
       // Estimate assets to receive
-      const assetsFromPosition = (position.assets * BigInt(Math.floor(withdrawRatio * 10000))) / BigInt(10000);
+      const assetsFromPosition = (position.assets * ratioBps) / BigInt(1_000_000);
       totalAssetsToWithdraw += assetsFromPosition;
 
       positionsToWithdraw.push({
@@ -428,7 +436,7 @@ export function buildPartialWithdrawBatch(
         shares: sharesToRedeem,
         assets: assetsFromPosition,
         usdValue: (parseFloat(position.usdValue) * withdrawRatio).toFixed(6),
-        assetsFormatted: ((Number(assetsFromPosition) / 1_000_000)).toFixed(6),
+        assetsFormatted: (Number(assetsFromPosition) / 1_000_000).toFixed(6),
       });
     }
   }
@@ -442,16 +450,12 @@ export function buildPartialWithdrawBatch(
   // Fee on proportional profit
   const hasProfits = proportionalYield > 0;
   const feeAmount = hasProfits ? proportionalYield * (UNFLAT_FEE_PERCENT / 100) : 0;
-  const feeAmountRaw = BigInt(Math.floor(feeAmount * 1_000_000));
+  const feeAmountRaw = BigInt(Math.round(feeAmount * 1_000_000));
 
   // Add fee transfer if applicable
   if (feeAmount >= UNFLAT_MIN_FEE_USDC) {
     calls.push(
-      buildTransferCall(
-        TOKENS.USDC as Address,
-        UNFLAT_TREASURY_ADDRESS as Address,
-        feeAmountRaw
-      )
+      buildTransferCall(TOKENS.USDC as Address, UNFLAT_TREASURY_ADDRESS as Address, feeAmountRaw),
     );
     debugLog(`[PartialWithdraw] Fee transfer: $${feeAmount.toFixed(6)} to treasury`);
   }
@@ -473,7 +477,8 @@ export function buildPartialWithdrawBatch(
     totalDeposited: depositPortion.toFixed(6),
     currentValue: withdrawValue.toFixed(6),
     yieldAmount: proportionalYield.toFixed(6),
-    yieldPercent: depositPortion > 0 ? ((proportionalYield / depositPortion) * 100).toFixed(1) : '0.0',
+    yieldPercent:
+      depositPortion > 0 ? ((proportionalYield / depositPortion) * 100).toFixed(1) : '0.0',
     feeAmount: feeAmount.toFixed(6),
     feeAmountRaw: feeAmount >= UNFLAT_MIN_FEE_USDC ? feeAmountRaw : BigInt(0),
     userReceives: userReceives.toFixed(6),
@@ -500,10 +505,7 @@ async function fetchMaxRedeem(vaultAddress: string, ownerAddress: string): Promi
   // Try up to 2 times with a short delay — maxRedeem=0 is often a transient RPC issue
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = await rpcCall('eth_call', [
-        { to: vaultAddress, data },
-        'latest',
-      ]);
+      const result = await rpcCall('eth_call', [{ to: vaultAddress, data }, 'latest']);
 
       const shares = hexToBigInt(result as string);
       if (shares > BigInt(0)) return shares;
@@ -534,7 +536,7 @@ async function refreshRedeemCalls(
 
   // Fetch all maxRedeem values concurrently for speed
   const maxRedeemResults = await Promise.all(
-    batch.positions.map(pos => fetchMaxRedeem(pos.vaultAddress, walletAddress))
+    batch.positions.map((pos) => fetchMaxRedeem(pos.vaultAddress, walletAddress)),
   );
 
   for (let i = 0; i < batch.positions.length; i++) {
@@ -545,13 +547,22 @@ async function refreshRedeemCalls(
     if (freshShares > BigInt(0)) {
       // Fresh maxRedeem succeeded — use the smaller of maxRedeem and cached shares
       // (maxRedeem accounts for liquidity constraints)
-      sharesToRedeem = pos.shares > BigInt(0) ? (freshShares < pos.shares ? freshShares : pos.shares) : freshShares;
-      debugLog(`[Withdraw] ${pos.vaultName}: using maxRedeem=${freshShares} (cached=${pos.shares})`);
+      sharesToRedeem =
+        pos.shares > BigInt(0)
+          ? freshShares < pos.shares
+            ? freshShares
+            : pos.shares
+          : freshShares;
+      debugLog(
+        `[Withdraw] ${pos.vaultName}: using maxRedeem=${freshShares} (cached=${pos.shares})`,
+      );
     } else if (pos.shares > BigInt(0)) {
       // maxRedeem returned 0 but we have valid cached shares from a recent position fetch.
       // This is a known RPC staleness issue — the shares ARE valid on-chain.
       sharesToRedeem = pos.shares;
-      debugLog(`[Withdraw] ${pos.vaultName}: maxRedeem=0 but using cached shares=${pos.shares} as fallback`);
+      debugLog(
+        `[Withdraw] ${pos.vaultName}: maxRedeem=0 but using cached shares=${pos.shares} as fallback`,
+      );
     } else {
       // Both are 0 — user truly has no position in this vault
       debugLog(`[Withdraw] ${pos.vaultName}: SKIPPED — no position (maxRedeem=0, cached=0)`);
@@ -564,7 +575,7 @@ async function refreshRedeemCalls(
         sharesToRedeem,
         walletAddress,
         walletAddress,
-      )
+      ),
     );
   }
 
@@ -583,7 +594,7 @@ async function refreshRedeemCalls(
 
 export async function executeWithdrawBatch(
   client: SmartWalletClient,
-  batch: WithdrawBatch
+  batch: WithdrawBatch,
 ): Promise<string> {
   if (!client?.account?.address) {
     throw new Error('Smart wallet not available. Please log in first.');
@@ -627,7 +638,9 @@ export async function executeWithdrawBatch(
   // redeems must complete before the fee transfer can succeed, so simulating
   // each call independently would fail on the fee transfer.
   debugLog(`[Withdraw] Skipping simulation for batched redeem+fee (interdependent calls)`);
-  debugLog(`[Withdraw] Sending ${freshCalls.length} calls (${batch.positions.length} redeems${parseFloat(batch.feeAmount) >= UNFLAT_MIN_FEE_USDC ? ' + 1 fee transfer' : ''})...`);
+  debugLog(
+    `[Withdraw] Sending ${freshCalls.length} calls (${batch.positions.length} redeems${parseFloat(batch.feeAmount) >= UNFLAT_MIN_FEE_USDC ? ' + 1 fee transfer' : ''})...`,
+  );
 
   const MAX_RETRIES = 3;
   let lastError: unknown = null;
@@ -650,7 +663,7 @@ export async function executeWithdrawBatch(
         });
       } else {
         hash = await client.sendTransaction({
-          calls: freshCalls.map(c => ({
+          calls: freshCalls.map((c) => ({
             to: c.to,
             data: c.data,
             value: c.value || BigInt(0),
@@ -670,7 +683,9 @@ export async function executeWithdrawBatch(
       const confirmation = await waitForTransaction(hash);
 
       if (!confirmation.found) {
-        throw new Error('Transaction not confirmed. Check your Privy Dashboard for paymaster config.');
+        throw new Error(
+          'Transaction not confirmed. Check your Privy Dashboard for paymaster config.',
+        );
       }
 
       if (confirmation.status === 'failed') {
@@ -690,7 +705,6 @@ export async function executeWithdrawBatch(
       });
 
       return hash;
-
     } catch (error) {
       lastError = error;
 
@@ -707,14 +721,14 @@ export async function executeWithdrawBatch(
 
 export function calculateAllocations(
   strategy: Strategy,
-  totalAmount: string
+  totalAmount: string,
 ): AllocationBreakdown[] {
   const totalAmountRaw = parseUnits(totalAmount, strategy.assetDecimals);
 
   return strategy.allocations.map((allocation) => {
     const amountRaw = (totalAmountRaw * BigInt(allocation.percentage)) / BigInt(100);
-    const amount = (parseFloat(totalAmount) * allocation.percentage / 100).toFixed(
-      strategy.assetDecimals === 6 ? 2 : 6
+    const amount = ((parseFloat(totalAmount) * allocation.percentage) / 100).toFixed(
+      strategy.assetDecimals === 6 ? 2 : 6,
     );
 
     return {
@@ -734,7 +748,7 @@ export function calculateAllocations(
 export function buildStrategyBatch(
   strategy: Strategy,
   amount: string,
-  walletAddress: Address
+  walletAddress: Address,
 ): StrategyBatch {
   const calls: TransactionCall[] = [];
   const allocations = calculateAllocations(strategy, amount);
@@ -755,15 +769,17 @@ export function buildStrategyBatch(
     if (!approvedVaults.has(allocation.vault.address)) {
       approvedVaults.add(allocation.vault.address);
       const totalForVault = amountPerVault.get(allocation.vault.address)!;
-      calls.push(buildApproveCall(strategy.asset, allocation.vault.address as Address, totalForVault));
+      calls.push(
+        buildApproveCall(strategy.asset, allocation.vault.address as Address, totalForVault),
+      );
     }
 
     calls.push(
       buildVaultDepositCall(
         allocation.vault.address as Address,
         allocation.amountRaw,
-        walletAddress
-      )
+        walletAddress,
+      ),
     );
   }
 
@@ -793,12 +809,13 @@ function isNonceError(error: unknown): boolean {
   ];
 
   // Check for actual nonce error patterns
-  const hasNonceError = noncePatterns.some(pattern => msg.includes(pattern));
+  const hasNonceError = noncePatterns.some((pattern) => msg.includes(pattern));
 
   // Exclude HTTP/network errors that just happen to dump "nonce" in request body
-  const isNetworkError = msg.includes('http request failed') ||
-                         msg.includes('network error') ||
-                         msg.includes('fetch failed');
+  const isNetworkError =
+    msg.includes('http request failed') ||
+    msg.includes('network error') ||
+    msg.includes('fetch failed');
 
   return hasNonceError && !isNetworkError;
 }
@@ -836,7 +853,11 @@ function parseErrorMessage(error: unknown): string {
   }
 
   // User rejection
-  if (msgLower.includes('rejected') || msgLower.includes('denied') || msgLower.includes('cancelled')) {
+  if (
+    msgLower.includes('rejected') ||
+    msgLower.includes('denied') ||
+    msgLower.includes('cancelled')
+  ) {
     return 'Transaction was cancelled.';
   }
 
@@ -854,7 +875,7 @@ function parseErrorMessage(error: unknown): string {
  */
 async function executeSingleCall(
   client: SmartWalletClient,
-  call: TransactionCall
+  call: TransactionCall,
 ): Promise<string> {
   const hash = await client.sendTransaction({
     to: call.to,
@@ -874,10 +895,10 @@ async function executeSingleCall(
  */
 async function executeBatchCalls(
   client: SmartWalletClient,
-  calls: TransactionCall[]
+  calls: TransactionCall[],
 ): Promise<string> {
   const hash = await client.sendTransaction({
-    calls: calls.map(c => ({
+    calls: calls.map((c) => ({
       to: c.to,
       data: c.data,
       value: c.value || BigInt(0),
@@ -893,7 +914,7 @@ async function executeBatchCalls(
 
 export async function executeStrategyBatch(
   client: SmartWalletClient,
-  batch: StrategyBatch
+  batch: StrategyBatch,
 ): Promise<string> {
   if (!client?.account?.address) {
     throw new Error('Smart wallet not available. Please log in first.');
@@ -919,8 +940,8 @@ export async function executeStrategyBatch(
   // For batched transactions, we rely on the transaction itself to fail
   // and report errors (which it will do atomically).
 
-  const hasDeposits = callsToExecute.some(c => c.data.startsWith('0x6e553f65')); // deposit(uint256,address)
-  const hasApprovals = callsToExecute.some(c => c.data.startsWith('0x095ea7b3')); // approve(address,uint256)
+  const hasDeposits = callsToExecute.some((c) => c.data.startsWith('0x6e553f65')); // deposit(uint256,address)
+  const hasApprovals = callsToExecute.some((c) => c.data.startsWith('0x095ea7b3')); // approve(address,uint256)
 
   if (hasDeposits && hasApprovals) {
     // Skip simulation for batched approve+deposit - they have interdependencies
@@ -971,7 +992,7 @@ export async function executeStrategyBatch(
       if (!confirmation.found) {
         debugLog('[Deposit] Transaction not found on-chain after timeout');
         throw new Error(
-          'Transaction not confirmed on-chain. Please check Privy Dashboard for paymaster configuration.'
+          'Transaction not confirmed on-chain. Please check Privy Dashboard for paymaster configuration.',
         );
       }
 
@@ -993,7 +1014,6 @@ export async function executeStrategyBatch(
       });
 
       return hash;
-
     } catch (error) {
       const errorMsg = getErrorMessage(error);
       debugLog(`[Deposit] Error: ${errorMsg}`);
