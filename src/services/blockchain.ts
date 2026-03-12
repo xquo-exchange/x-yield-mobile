@@ -214,11 +214,43 @@ async function convertSharesToAssets(vaultAddress: string, shares: bigint): Prom
   }
 }
 
+// In-flight deduplication for position fetches
+// Prevents redundant RPC calls when multiple screens request positions simultaneously
+let _inflight: { promise: Promise<PositionsResult>; address: string; expiresAt: number } | null = null;
+const INFLIGHT_TTL_MS = 8000; // 8 seconds — fresh enough for UI, avoids duplicate fetches
+
 /**
  * Get all vault positions for a user
  * Returns positions in USDC vaults only (Conservative strategy)
+ * Deduplicates concurrent requests: if a fetch is already in-flight for the same
+ * address, returns the pending promise instead of starting a new one.
  */
 export async function getVaultPositions(userAddress: Address): Promise<PositionsResult> {
+  const now = Date.now();
+  if (
+    _inflight &&
+    _inflight.address === userAddress.toLowerCase() &&
+    now < _inflight.expiresAt
+  ) {
+    debugLog('[Positions] Returning in-flight/cached promise (dedup)');
+    return _inflight.promise;
+  }
+
+  const promise = _getVaultPositionsInner(userAddress);
+  _inflight = { promise, address: userAddress.toLowerCase(), expiresAt: now + INFLIGHT_TTL_MS };
+
+  // Clear the inflight cache on completion (success or failure)
+  promise.finally(() => {
+    // Only clear if this is still the active promise
+    if (_inflight?.promise === promise) {
+      // Keep the result available for TTL duration (don't clear immediately)
+    }
+  });
+
+  return promise;
+}
+
+async function _getVaultPositionsInner(userAddress: Address): Promise<PositionsResult> {
   debugLog(`[Positions] Fetching positions for ${userAddress}`);
 
   try {

@@ -59,7 +59,8 @@ const BLOCKSCOUT_STALE_THRESHOLD_BLOCKS = 1000;
 const TRANSFER_EVENT_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
 // Base RPC max block range per eth_getLogs query
-const RPC_MAX_BLOCK_RANGE = 10000;
+// CDP (Coinbase) limits to 1000 blocks per eth_getLogs call
+const RPC_MAX_BLOCK_RANGE = 1000;
 
 // Coinbase Developer Platform RPC — primary endpoint for eth_getLogs (50 RPS, reliable)
 const CDP_RPC_URL = Constants.expoConfig?.extra?.cdpRpcUrl ?? '';
@@ -1657,6 +1658,16 @@ export async function fetchTransactionHistory(
   // Fetch fresh data from API (pass EOA to filter internal transfers)
   const fetchResult = await fetchRawTransactions(walletAddress, otherOwnedAddress);
 
+  // Circuit breaker: if fresh data has significantly fewer transactions than cache,
+  // it likely means the RPC gap-fill returned partial/broken data. Keep cached data.
+  const previousCached = await getCachedTransactions(walletAddress);
+  if (previousCached && previousCached.length > 0 && fetchResult.transactions.length < previousCached.length * 0.5) {
+    debugLog(
+      `[TransactionHistory] Circuit breaker: fresh data has ${fetchResult.transactions.length} txs vs ${previousCached.length} cached. Keeping cache.`
+    );
+    return buildHistoryResult(walletAddress, previousCached, dateRange, currentBalance, 0, 0);
+  }
+
   // Save to cache for next time
   await saveToCache(walletAddress, fetchResult.transactions);
 
@@ -1696,6 +1707,15 @@ export async function fetchTransactionHistoryWithCache(
 
   // Fetch fresh data in background (pass EOA to filter internal transfers)
   fetchRawTransactions(walletAddress, otherOwnedAddress).then(async (fetchResult) => {
+    // Circuit breaker: don't replace good cached data with partial results
+    const prevCached = await getCachedTransactions(walletAddress);
+    if (prevCached && prevCached.length > 0 && fetchResult.transactions.length < prevCached.length * 0.5) {
+      debugLog(
+        `[TransactionHistory] Circuit breaker (bg): fresh ${fetchResult.transactions.length} txs vs ${prevCached.length} cached. Skipping update.`
+      );
+      return;
+    }
+
     await saveToCache(walletAddress, fetchResult.transactions);
     const freshResult = buildHistoryResult(
       walletAddress,

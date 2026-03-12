@@ -491,23 +491,35 @@ export function buildPartialWithdrawBatch(
  * liquidity constraints and rounding at the moment of the query.
  */
 async function fetchMaxRedeem(vaultAddress: string, ownerAddress: string): Promise<bigint> {
-  try {
-    const data = encodeFunctionData({
-      abi: MORPHO_VAULT_ABI,
-      functionName: 'maxRedeem',
-      args: [ownerAddress as Address],
-    });
+  const data = encodeFunctionData({
+    abi: MORPHO_VAULT_ABI,
+    functionName: 'maxRedeem',
+    args: [ownerAddress as Address],
+  });
 
-    const result = await rpcCall('eth_call', [
-      { to: vaultAddress, data },
-      'latest',
-    ]);
+  // Try up to 2 times with a short delay — maxRedeem=0 is often a transient RPC issue
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await rpcCall('eth_call', [
+        { to: vaultAddress, data },
+        'latest',
+      ]);
 
-    return hexToBigInt(result as string);
-  } catch (error) {
-    debugLog(`[Withdraw] maxRedeem failed for ${vaultAddress}, using position.shares:`, error);
-    return BigInt(0);
+      const shares = hexToBigInt(result as string);
+      if (shares > BigInt(0)) return shares;
+
+      // Got 0 — might be rate-limited RPC returning empty. Retry after delay.
+      if (attempt < 1) {
+        debugLog(`[Withdraw] maxRedeem returned 0 for ${vaultAddress}, retrying...`);
+        await delay(1500);
+      }
+    } catch (error) {
+      debugLog(`[Withdraw] maxRedeem attempt ${attempt + 1} failed for ${vaultAddress}:`, error);
+      if (attempt < 1) await delay(1500);
+    }
   }
+
+  return BigInt(0);
 }
 
 /**
@@ -520,8 +532,15 @@ async function refreshRedeemCalls(
 ): Promise<TransactionCall[]> {
   const calls: TransactionCall[] = [];
 
-  for (const pos of batch.positions) {
-    const freshShares = await fetchMaxRedeem(pos.vaultAddress, walletAddress);
+  // Fetch all maxRedeem values concurrently for speed
+  const maxRedeemResults = await Promise.all(
+    batch.positions.map(pos => fetchMaxRedeem(pos.vaultAddress, walletAddress))
+  );
+
+  for (let i = 0; i < batch.positions.length; i++) {
+    const pos = batch.positions[i];
+    const freshShares = maxRedeemResults[i];
+    // Use fresh maxRedeem if available; fall back to cached shares only as last resort
     const sharesToRedeem = freshShares > BigInt(0) ? freshShares : pos.shares;
 
     if (sharesToRedeem > BigInt(0)) {
@@ -533,7 +552,9 @@ async function refreshRedeemCalls(
           walletAddress,
         )
       );
-      debugLog(`[Withdraw] ${pos.vaultName}: redeeming ${sharesToRedeem} shares (maxRedeem=${freshShares})`);
+      debugLog(`[Withdraw] ${pos.vaultName}: redeeming ${sharesToRedeem} shares (maxRedeem=${freshShares}, cached=${pos.shares})`);
+    } else {
+      debugLog(`[Withdraw] ${pos.vaultName}: SKIPPED — both maxRedeem and cached shares are 0`);
     }
   }
 
