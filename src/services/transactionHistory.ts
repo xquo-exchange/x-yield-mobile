@@ -780,9 +780,9 @@ function calculateSummary(
     passed: grossYieldRealized >= 0,
   };
 
-  // c) Cash flow check — only when user has active vault positions
-  // When currentBalance ≈ 0 (user withdrew everything), external flows
-  // can't be meaningfully compared to system value. Tolerance: $5.
+  // c) Cash flow check — only meaningful when balance ≈ 0 (everything withdrawn).
+  // When user has active vault positions, deposited capital sits in vaults and
+  // hasn't flowed back out, so external cash flow can't balance. Skip in that case.
   const netCashFlow = totalReceives - totalSends - totalFeesExternal;
   const investedCapital = currentBalance + netDeposited;
   const cashFlowDifference = Math.abs(netCashFlow - investedCapital);
@@ -793,7 +793,7 @@ function calculateSummary(
     netCashFlow: netCashFlow,
     investedCapital: investedCapital,
     difference: cashFlowDifference,
-    passed: currentBalance <= 1.0 || cashFlowDifference < 5.0,
+    passed: currentBalance > 1.0 || cashFlowDifference < 5.0,
   };
 
   // d) Transaction count check (only valid if rawTransferCount > 0)
